@@ -6,8 +6,11 @@ from pydantic import BaseModel
 from memento.config import load_config
 from memento.crews.context import make_context_crew
 from memento.crews.narrative.narration import make_narration_crew
+from memento.crews.faction.reputation import make_reputation_crew
 from memento.flows.event_detection import EventDetectionFlow
 from memento.flows.combat import CombatFlow
+from memento.flows.episodic_memory import EpisodicMemoryFlow
+from memento.flows.quest import QuestFlow
 
 
 class TurnState(BaseModel):
@@ -78,7 +81,7 @@ class GameTurnFlow(Flow[TurnState]):
 
     @listen(detect_events)
     def resolve_events(self, events):
-        """Route to combat if combat events detected."""
+        """Route to combat, quest, and social flows based on detected event categories."""
         categories = events.get("categories", [])
         if "combat" in categories:
             combat_flow = CombatFlow()
@@ -90,6 +93,30 @@ class GameTurnFlow(Flow[TurnState]):
             combat_flow.kickoff()
             self.state.events["combat_result"] = combat_flow.state.resolution
             self.state.events["combat_consequences"] = combat_flow.state.consequences
+
+        if "quest" in categories:
+            try:
+                quest_flow = QuestFlow()
+                quest_flow.state.location = self.state.location_name
+                quest_flow.state.npc = "unknown"
+                quest_flow.state.player_level = 1
+                quest_flow.kickoff()
+                self.state.events["quest_result"] = quest_flow.state.quest_concept
+            except Exception as e:
+                print(f"[game-turn] Quest flow failed (non-fatal): {e}")
+
+        if "social" in categories:
+            try:
+                rep_crew = make_reputation_crew(
+                    player=self.state.player_name,
+                    faction="unknown",
+                    action=self.state.action,
+                )
+                rep_result = rep_crew.kickoff()
+                self.state.events["reputation"] = rep_result.raw
+            except Exception as e:
+                print(f"[game-turn] Reputation failed (non-fatal): {e}")
+
         return self.state.events
 
     @listen(resolve_events)
@@ -103,3 +130,17 @@ class GameTurnFlow(Flow[TurnState]):
         result = crew.kickoff()
         self.state.narrative = result.raw
         return self.state.narrative
+
+    @listen(narrate)
+    def post_turn(self, narrative):
+        """Store episodic memories after each turn."""
+        try:
+            memory_flow = EpisodicMemoryFlow()
+            memory_flow.state.narrative = narrative
+            memory_flow.state.events = str(self.state.events)
+            memory_flow.state.player = self.state.player_name
+            memory_flow.state.session_id = self.state.player_uuid
+            memory_flow.kickoff()
+        except Exception as e:
+            print(f"[game-turn] Memory flow failed (non-fatal): {e}")
+        return narrative

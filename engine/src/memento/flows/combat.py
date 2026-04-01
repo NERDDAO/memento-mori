@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from memento.crews.combat.assessment import make_combat_assessment_crew
 from memento.crews.combat.attack import make_attack_resolution_crew
+from memento.crews.combat.ability import make_ability_resolution_crew
 from memento.crews.combat.consequence import make_consequence_crew
 from memento.flows.permadeath import PermadeathFlow
 
@@ -47,12 +48,19 @@ class CombatFlow(Flow[CombatState]):
 
     @listen(assess)
     def resolve(self, assessment):
-        crew = make_attack_resolution_crew(
-            action=self.state.action,
-            attacker_stats=self.state.attacker_stats,
-            target_stats=self.state.target_stats,
-            environment=self.state.context,
-        )
+        if self.state.action_type == "ability":
+            crew = make_ability_resolution_crew(
+                ability=self.state.action,
+                user_stats=self.state.attacker_stats,
+                target_stats=self.state.target_stats,
+            )
+        else:
+            crew = make_attack_resolution_crew(
+                action=self.state.action,
+                attacker_stats=self.state.attacker_stats,
+                target_stats=self.state.target_stats,
+                environment=self.state.context,
+            )
         result = crew.kickoff()
         self.state.resolution = result.raw
         return result.raw
