@@ -211,9 +211,54 @@
       border-color: var(--accent);
       background: var(--bg-secondary);
     }
+
+    #char-create-overlay {
+      position: fixed; inset: 0; z-index: 100;
+      background: var(--bg-primary);
+      display: flex; align-items: center; justify-content: center;
+      transition: opacity 0.5s ease;
+    }
+    #char-create-overlay.hidden { opacity: 0; pointer-events: none; }
+    .create-content { text-align: center; max-width: 400px; }
+    .create-content h1 {
+      font-size: 36px; color: var(--text-primary);
+      margin-bottom: 8px; letter-spacing: 4px;
+    }
+    .tagline {
+      color: var(--text-dim); font-style: italic;
+      margin-bottom: 32px; font-size: 14px;
+    }
+    #char-name-input {
+      width: 100%; padding: 12px 16px; font-size: 18px;
+      background: var(--input-bg); border: 1px solid var(--border);
+      color: var(--text-primary); font-family: Georgia, serif;
+      border-radius: 4px; margin-bottom: 16px; outline: none;
+      text-align: center;
+    }
+    #char-name-input:focus { border-color: var(--accent); }
+    #enter-world-btn {
+      padding: 12px 32px; font-size: 14px;
+      background: transparent; border: 1px solid var(--accent);
+      color: var(--accent); cursor: pointer; border-radius: 4px;
+      font-family: system-ui, sans-serif; letter-spacing: 2px;
+      text-transform: uppercase; transition: all 0.2s;
+    }
+    #enter-world-btn:hover {
+      background: var(--accent); color: var(--bg-primary);
+    }
   </style>
 </head>
 <body>
+  <div id="char-create-overlay">
+    <div class="create-content">
+      <h1>Memento Mori</h1>
+      <p class="tagline">Remember that you will die.</p>
+      <div class="create-form">
+        <input type="text" id="char-name-input" placeholder="What is your name?" />
+        <button id="enter-world-btn">Enter the World</button>
+      </div>
+    </div>
+  </div>
   <div id="app">
     <div id="narrative-pane">
       <div class="narrative-block system">
@@ -256,14 +301,13 @@
       </div>
       <div class="panel" id="actions-panel">
         <h3>Actions</h3>
-        <button class="action-btn" onclick="submitAction('look around')">Look around</button>
-        <button class="action-btn" onclick="submitAction('check inventory')">Check inventory</button>
+        <div id="actions-list"></div>
       </div>
     </div>
     <div id="input-bar">
       <input type="text" id="action-input" placeholder="What do you do?" autofocus />
     </div>
   </div>
-  <script type="module" src="src/app.ts"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
