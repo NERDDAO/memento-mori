@@ -46,11 +46,20 @@ def _get_web3():
 
 
 def _uuid_to_bytes32(uuid_str: str) -> bytes:
-    """Convert a UUID string to bytes32 for Solidity."""
+    """Convert a UUID string to bytes32 for Solidity.
+
+    Handles standard UUIDs (hex after stripping dashes) and arbitrary strings
+    (encoded as UTF-8 and zero-padded). Always returns exactly 32 bytes.
+    """
     clean = uuid_str.replace("-", "").replace("kg:entity:", "")
-    if len(clean) < 32:
-        clean = clean.ljust(64, "0")
-    return bytes.fromhex(clean[:64])
+    try:
+        # Pad hex string to exactly 64 hex chars (32 bytes) before decoding
+        padded = clean.ljust(64, "0")[:64]
+        return bytes.fromhex(padded)
+    except ValueError:
+        # Non-hex string: encode as UTF-8 and zero-pad to 32 bytes
+        raw = uuid_str.encode("utf-8")[:32]
+        return raw.ljust(32, b"\x00")
 
 
 def _send_tx(fn_name: str, *args):
