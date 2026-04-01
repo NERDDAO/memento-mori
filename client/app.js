@@ -46,6 +46,28 @@ function applyStateUpdate(state, update) {
   }
   if (update.room_map) {
     state.roomMap = update.room_map;
+    const rm = update.room_map;
+    if (rm.name)
+      state.location.name = rm.name;
+    if (rm.exits) {
+      state.location.exits = rm.exits.map((e) => ({
+        direction: e.direction || "",
+        name: e.target || e.name || ""
+      }));
+    }
+    if (rm.npcs) {
+      state.location.npcs = rm.npcs.map((n) => ({
+        name: n.name || "",
+        id: n.id || "",
+        role: n.role || ""
+      }));
+    }
+    if (rm.items) {
+      state.location.items = rm.items.map((i) => ({
+        name: i.name || "",
+        id: i.id || ""
+      }));
+    }
   }
 }
 
@@ -3677,7 +3699,12 @@ function renderExitsPanel(body, state, onAction) {
     body.innerHTML = '<div class="empty-msg">None</div>';
     return;
   }
-  body.innerHTML = state.location.exits.map((dir) => `<div class="exit-row" data-dir="${dir}"><span class="exit-dir">→ ${dir.charAt(0).toUpperCase() + dir.slice(1)}</span></div>`).join("");
+  body.innerHTML = state.location.exits.map((e) => {
+    const dir = typeof e === "string" ? e : e.direction;
+    const dest = typeof e === "string" ? "" : e.name;
+    const label = dir.charAt(0).toUpperCase() + dir.slice(1);
+    return `<div class="exit-row" data-dir="${dir}"><span class="exit-dir">→ ${label}</span>${dest ? `<span class="exit-dest">${dest}</span>` : ""}</div>`;
+  }).join("");
   body.querySelectorAll(".exit-row").forEach((row) => {
     row.addEventListener("click", () => onAction(`go ${row.dataset.dir}`));
   });
@@ -3951,11 +3978,303 @@ function createDialog() {
   };
 }
 
+// src/ui/wiki.ts
+var GATEWAY = "";
+var SUMMARY_MAX = 150;
+var ITEMS_PER_PAGE = 8;
+function createWikiPanel() {
+  const el = document.createElement("div");
+  el.className = "wiki-panel";
+  el.innerHTML = '<div class="wiki-empty">Click an entity to browse</div>';
+  const cache = new Map;
+  const navStack = [];
+  let currentId = "";
+  let pages = [];
+  let pageIdx = 0;
+  async function fetchEntity(id) {
+    if (cache.has(id))
+      return cache.get(id);
+    try {
+      const resp = await fetch(`${GATEWAY}/api/entity/${id}/neighbors`);
+      const data = await resp.json();
+      if (data.entity.name !== "Unknown") {
+        cache.set(id, data);
+        return data;
+      }
+    } catch {}
+    return null;
+  }
+  async function fetchByName(name) {
+    try {
+      const resp = await fetch(`${GATEWAY}/api/entity/search/${encodeURIComponent(name)}`);
+      const data = await resp.json();
+      if (data && data.id && !data.error) {
+        return fetchEntity(data.id);
+      }
+    } catch {}
+    return null;
+  }
+  function cleanSummary(raw) {
+    if (raw.startsWith("{") || raw.startsWith("[") || raw.startsWith('"'))
+      return "";
+    if (raw.length > SUMMARY_MAX)
+      return raw.slice(0, SUMMARY_MAX) + "…";
+    return raw;
+  }
+  function buildPages(data) {
+    const { entity, neighbors, edges } = data;
+    const result = [];
+    let overviewHtml = "";
+    overviewHtml += `<div class="wiki-name">${esc(entity.name)}</div>`;
+    if (entity.labels.length) {
+      overviewHtml += `<div class="wiki-labels">${entity.labels.map((l) => esc(l)).join(" · ")}</div>`;
+    }
+    const summary = cleanSummary(entity.summary);
+    if (summary) {
+      overviewHtml += `<div class="wiki-summary">${esc(summary)}</div>`;
+    }
+    const grouped = new Map;
+    for (const edge of edges) {
+      const key = edge.relationship || "connected";
+      if (!grouped.has(key))
+        grouped.set(key, []);
+      grouped.get(key).push(edge);
+    }
+    const edgeNames = new Set(edges.flatMap((e) => [e.source, e.target]));
+    const extraNeighbors = neighbors.filter((n) => !edgeNames.has(n.name) && n.id !== entity.id);
+    if (grouped.size > 0 || extraNeighbors.length > 0) {
+      overviewHtml += '<div class="wiki-toc-label">Connections:</div>';
+      let tocIdx = 2;
+      for (const [rel, group] of grouped) {
+        overviewHtml += `<div class="wiki-toc-item" data-page="${tocIdx}">${formatRel(rel)} (${group.length})</div>`;
+        tocIdx += Math.ceil(group.length / ITEMS_PER_PAGE);
+      }
+      if (extraNeighbors.length) {
+        overviewHtml += `<div class="wiki-toc-item" data-page="${tocIdx}">Nearby (${extraNeighbors.length})</div>`;
+      }
+    }
+    result.push({ title: entity.name, html: overviewHtml, links: [] });
+    for (const [rel, group] of grouped) {
+      const chunks = chunk(group, ITEMS_PER_PAGE);
+      for (let ci = 0;ci < chunks.length; ci++) {
+        const label = formatRel(rel);
+        const suffix = chunks.length > 1 ? ` ${ci + 1}/${chunks.length}` : "";
+        let html = `<div class="wiki-page-heading">${esc(label)}${suffix}</div>`;
+        const links = [];
+        for (const edge of chunks[ci]) {
+          const other = edge.source === entity.name ? edge.target : edge.source;
+          html += `<div class="wiki-link" data-name="${esc(other)}">· ${esc(other)}</div>`;
+          if (edge.fact) {
+            const cleanFact = edge.fact.length > 80 ? edge.fact.slice(0, 80) + "…" : edge.fact;
+            html += `<div class="wiki-fact">${esc(cleanFact)}</div>`;
+          }
+          links.push({ name: other });
+        }
+        result.push({ title: label, html, links });
+      }
+    }
+    if (extraNeighbors.length) {
+      const chunks = chunk(extraNeighbors, ITEMS_PER_PAGE);
+      for (let ci = 0;ci < chunks.length; ci++) {
+        const suffix = chunks.length > 1 ? ` ${ci + 1}/${chunks.length}` : "";
+        let html = `<div class="wiki-page-heading">Nearby${suffix}</div>`;
+        const links = [];
+        for (const n of chunks[ci]) {
+          html += `<div class="wiki-link" data-name="${esc(n.name)}" data-id="${esc(n.id)}">· ${esc(n.name)}</div>`;
+          links.push({ name: n.name, id: n.id });
+        }
+        result.push({ title: "Nearby", html, links });
+      }
+    }
+    return result;
+  }
+  function renderPage() {
+    if (!pages.length)
+      return;
+    const page = pages[pageIdx];
+    const total = pages.length;
+    let html = "";
+    if (navStack.length > 1) {
+      const prev = navStack[navStack.length - 2];
+      html += `<div class="wiki-back" data-id="${esc(prev.id)}" data-name="${esc(prev.name)}">← ${esc(prev.name)}</div>`;
+    }
+    html += page.html;
+    if (total > 1) {
+      html += '<div class="wiki-pagination">';
+      html += `<span class="wiki-page-btn wiki-prev ${pageIdx === 0 ? "disabled" : ""}">◀</span>`;
+      html += `<span class="wiki-page-num">${pageIdx + 1}/${total}</span>`;
+      html += `<span class="wiki-page-btn wiki-next ${pageIdx >= total - 1 ? "disabled" : ""}">▶</span>`;
+      html += "</div>";
+    }
+    el.innerHTML = html;
+    const prevBtn = el.querySelector(".wiki-prev");
+    const nextBtn = el.querySelector(".wiki-next");
+    if (prevBtn && pageIdx > 0) {
+      prevBtn.addEventListener("click", () => {
+        pageIdx--;
+        renderPage();
+      });
+    }
+    if (nextBtn && pageIdx < total - 1) {
+      nextBtn.addEventListener("click", () => {
+        pageIdx++;
+        renderPage();
+      });
+    }
+    el.querySelectorAll(".wiki-toc-item").forEach((item) => {
+      item.addEventListener("click", () => {
+        const target = parseInt(item.dataset.page || "1", 10) - 1;
+        if (target >= 0 && target < total) {
+          pageIdx = target;
+          renderPage();
+        }
+      });
+    });
+    el.querySelectorAll(".wiki-link").forEach((link) => {
+      link.addEventListener("click", () => {
+        const id = link.dataset.id;
+        const name = link.dataset.name;
+        if (id)
+          show(id, name);
+        else
+          showByName(name);
+      });
+    });
+    el.querySelectorAll(".wiki-back").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        const name = btn.dataset.name;
+        navStack.pop();
+        show(id, name);
+      });
+    });
+    el.scrollTop = 0;
+  }
+  function renderFallback(name) {
+    el.innerHTML = `
+      <div class="wiki-name">${esc(name)}</div>
+      <div class="wiki-summary wiki-empty">No knowledge graph data available</div>
+    `;
+  }
+  async function show(entityId, entityName) {
+    if (entityId === currentId)
+      return;
+    currentId = entityId;
+    navStack.push({ id: entityId, name: entityName });
+    el.innerHTML = '<div class="wiki-loading">Loading…</div>';
+    const data = await fetchEntity(entityId);
+    if (data) {
+      pages = buildPages(data);
+      pageIdx = 0;
+      renderPage();
+    } else {
+      renderFallback(entityName);
+    }
+  }
+  async function showByName(name) {
+    el.innerHTML = '<div class="wiki-loading">Loading…</div>';
+    const data = await fetchByName(name);
+    if (data) {
+      currentId = data.entity.id;
+      navStack.push({ id: data.entity.id, name: data.entity.name });
+      pages = buildPages(data);
+      pageIdx = 0;
+      renderPage();
+    } else {
+      renderFallback(name);
+    }
+  }
+  return {
+    el,
+    show,
+    showByName,
+    clear() {
+      currentId = "";
+      navStack.length = 0;
+      pages = [];
+      pageIdx = 0;
+      el.innerHTML = '<div class="wiki-empty">Click an entity to browse</div>';
+    }
+  };
+}
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function formatRel(rel) {
+  return rel.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function chunk(arr, size) {
+  const result = [];
+  for (let i = 0;i < arr.length; i += size) {
+    result.push(arr.slice(i, i + size));
+  }
+  return result;
+}
+
+// src/ui/status.ts
+var CLEAR_DELAY = 4000;
+function createStatusBar() {
+  const el = document.createElement("div");
+  el.className = "status-bar";
+  el.innerHTML = `
+    <span class="status-phase">✓ Ready</span>
+    <span class="status-chain">◇ Redstone: offline</span>
+    <span class="status-tick">☽ Tick 0</span>
+  `;
+  const phaseEl = el.querySelector(".status-phase");
+  const chainEl = el.querySelector(".status-chain");
+  const tickEl = el.querySelector(".status-tick");
+  let clearTimer = null;
+  function scheduleClear() {
+    if (clearTimer)
+      clearTimeout(clearTimer);
+    clearTimer = setTimeout(() => {
+      phaseEl.textContent = "✓ Synced";
+      phaseEl.className = "status-phase synced";
+    }, CLEAR_DELAY);
+  }
+  return {
+    el,
+    setPhase(phase) {
+      const icons = {
+        processing: "⟳ Processing turn...",
+        extracting: "⟳ Extracting episode...",
+        fetching: "⟳ Fetching episode...",
+        pushing: "⟳ Pushing onchain...",
+        synced: "✓ Synced",
+        thinking: "⟳ The world responds...",
+        error: "✗ Sync error"
+      };
+      phaseEl.textContent = icons[phase] || phase;
+      phaseEl.className = `status-phase ${phase}`;
+      if (phase === "synced") {} else {
+        scheduleClear();
+      }
+    },
+    setChain(connected) {
+      chainEl.textContent = connected ? "◆ Redstone: synced" : "◇ Redstone: offline";
+      chainEl.className = `status-chain ${connected ? "connected" : ""}`;
+    },
+    setTick(tick) {
+      tickEl.textContent = `☽ Tick ${tick}`;
+    },
+    clear() {
+      phaseEl.textContent = "✓ Ready";
+      phaseEl.className = "status-phase";
+      chainEl.textContent = "◇ Redstone: offline";
+      chainEl.className = "status-chain";
+      tickEl.textContent = "☽ Tick 0";
+    }
+  };
+}
+
 // src/app.ts
 var gameState;
 var narrative;
 var header;
 var npcDialog;
+var wiki;
+var statusBar;
 var narrativeWin;
 var mapWin;
 var characterWin;
@@ -3982,9 +4301,13 @@ function renderAllPanels() {
   characterWin.setTitle(gameState.player.name || "Character");
   renderCharacterPanel(characterWin.body, gameState);
   renderInventoryPanel(inventoryWin.body, gameState);
+  exitsWin.setTitle(gameState.location.name || "Exits");
   renderExitsPanel(exitsWin.body, gameState, handleAction);
   renderPresentPanel(presentWin.body, gameState, handleAction);
   updateMap(gameState, handleAction);
+  if (wiki && gameState.roomMap) {
+    wiki.show(gameState.roomMap.id, gameState.roomMap.name);
+  }
 }
 function getThresholdMap() {
   const w = 35, h = 18;
@@ -4053,6 +4376,7 @@ function handleMessage(msg) {
   switch (msg.type) {
     case "narrative": {
       narrative.removeThinking();
+      statusBar.setPhase("synced");
       const segments = parseNarrative(msg.text || "");
       const html = renderSegments(segments);
       narrative.addHtml(html, "narrative");
@@ -4064,6 +4388,7 @@ function handleMessage(msg) {
           registerMapEntities(gameState.roomMap);
         if (msg.state_update.world_time) {
           header.updateTime(msg.state_update.world_time);
+          statusBar.setTick(msg.state_update.world_time.tick || 0);
         }
         renderAllPanels();
       }
@@ -4074,6 +4399,15 @@ function handleMessage(msg) {
     }
     case "thinking":
       narrative.showThinking();
+      statusBar.setPhase("thinking");
+      break;
+    case "status":
+      if (msg.phase)
+        statusBar.setPhase(msg.phase);
+      if (msg.tick != null)
+        statusBar.setTick(msg.tick);
+      if (msg.chain != null)
+        statusBar.setChain(msg.chain);
       break;
     default:
       console.log("Unknown message:", msg);
@@ -4086,7 +4420,7 @@ async function enterWorld(playerName) {
   gameState = createInitialState(playerName);
   gameState.location.name = session2.currentLocation;
   if (!gameState.roomMap) {
-    gameState.roomMap = getThresholdMap();
+    applyStateUpdate(gameState, { room_map: getThresholdMap() });
   }
   registerMapEntities(gameState.roomMap);
   renderAllPanels();
@@ -4120,7 +4454,8 @@ document.addEventListener("DOMContentLoaded", () => {
   mount("exits-mount", exitsWin.el);
   mount("present-mount", presentWin.el);
   mount("command-mount", commandWin.el);
-  mapWin.hide();
+  statusBar = createStatusBar();
+  mount("status-mount", statusBar.el);
   document.addEventListener("keydown", (e) => {
     if (e.key === "m" && document.activeElement?.tagName !== "INPUT") {
       mapWin.toggle();
@@ -4134,8 +4469,14 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!link)
       return;
     const name = link.dataset.entityName;
-    if (name)
-      handleAction(`look at ${name}`);
+    const id = link.dataset.entityId;
+    if (name) {
+      if (id) {
+        wiki.show(id, name);
+      } else {
+        wiki.showByName(name);
+      }
+    }
   });
   commandWin.body.innerHTML = `
     <span class="prompt-char">&gt;</span>
@@ -4143,7 +4484,12 @@ document.addEventListener("DOMContentLoaded", () => {
   `;
   const actionInput = commandWin.body.querySelector("#action-input");
   initInput(actionInput, handleAction);
-  initMapPanel(mapWin.body, handleAction);
+  const mapCanvasWrap = document.createElement("div");
+  mapCanvasWrap.className = "map-canvas-wrap";
+  wiki = createWikiPanel();
+  mapWin.body.appendChild(mapCanvasWrap);
+  mapWin.body.appendChild(wiki.el);
+  initMapPanel(mapCanvasWrap, handleAction);
   setMessageHandler(handleMessage);
   setConnectionHandler((connected) => {
     if (connected) {

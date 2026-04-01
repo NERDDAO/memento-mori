@@ -17,6 +17,8 @@ import { renderPresentPanel } from './panels/present';
 import { createWindow } from './ui/window';
 import { createHeader, type WorldTime } from './ui/header';
 import { createDialog } from './ui/dialog';
+import { createWikiPanel } from './ui/wiki';
+import { createStatusBar } from './ui/status';
 import type { RoomMap } from './map/types';
 
 let gameState: GameState;
@@ -24,6 +26,8 @@ let narrative: NarrativeController;
 
 let header: ReturnType<typeof createHeader>;
 let npcDialog: ReturnType<typeof createDialog>;
+let wiki: ReturnType<typeof createWikiPanel>;
+let statusBar: ReturnType<typeof createStatusBar>;
 let narrativeWin: ReturnType<typeof createWindow>;
 let mapWin: ReturnType<typeof createWindow>;
 let characterWin: ReturnType<typeof createWindow>;
@@ -49,9 +53,15 @@ function renderAllPanels(): void {
   characterWin.setTitle(gameState.player.name || 'Character');
   renderCharacterPanel(characterWin.body, gameState);
   renderInventoryPanel(inventoryWin.body, gameState);
+  exitsWin.setTitle(gameState.location.name || 'Exits');
   renderExitsPanel(exitsWin.body, gameState, handleAction);
   renderPresentPanel(presentWin.body, gameState, handleAction);
   updateMap(gameState, handleAction);
+
+  // Show current location in wiki by default
+  if (wiki && gameState.roomMap) {
+    wiki.show(gameState.roomMap.id, gameState.roomMap.name);
+  }
 }
 
 // Temporary test map — remove once engine sends real maps
@@ -125,6 +135,7 @@ function handleMessage(msg: any): void {
   switch (msg.type) {
     case 'narrative': {
       narrative.removeThinking();
+      statusBar.setPhase('synced');
       const segments = parseNarrative(msg.text || '');
       const html = renderSegments(segments);
       narrative.addHtml(html, 'narrative');
@@ -137,6 +148,7 @@ function handleMessage(msg: any): void {
 
         if (msg.state_update.world_time) {
           header.updateTime(msg.state_update.world_time as WorldTime);
+          statusBar.setTick(msg.state_update.world_time.tick || 0);
         }
 
         renderAllPanels();
@@ -150,6 +162,12 @@ function handleMessage(msg: any): void {
     }
     case 'thinking':
       narrative.showThinking();
+      statusBar.setPhase('thinking');
+      break;
+    case 'status':
+      if (msg.phase) statusBar.setPhase(msg.phase);
+      if (msg.tick != null) statusBar.setTick(msg.tick);
+      if (msg.chain != null) statusBar.setChain(msg.chain);
       break;
     default:
       console.log('Unknown message:', msg);
@@ -166,7 +184,7 @@ async function enterWorld(playerName: string): Promise<void> {
   gameState.location.name = session.currentLocation;
 
   if (!gameState.roomMap) {
-    gameState.roomMap = getThresholdMap();
+    applyStateUpdate(gameState, { room_map: getThresholdMap() });
   }
   registerMapEntities(gameState.roomMap);
   renderAllPanels();
@@ -212,8 +230,11 @@ document.addEventListener('DOMContentLoaded', () => {
   mount('present-mount', presentWin.el);
   mount('command-mount', commandWin.el);
 
-  // 4. Map starts hidden, toggle with 'm' key (not when input focused)
-  mapWin.hide();
+  // Status bar
+  statusBar = createStatusBar();
+  mount('status-mount', statusBar.el);
+
+  // 4. Map toggle with 'm' key (not when input focused)
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'm' && document.activeElement?.tagName !== 'INPUT') {
       mapWin.toggle();
@@ -232,7 +253,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const link = (e.target as HTMLElement).closest('.entity-link') as HTMLElement | null;
     if (!link) return;
     const name = link.dataset.entityName;
-    if (name) handleAction(`look at ${name}`);
+    const id = link.dataset.entityId;
+    if (name) {
+      // Show in wiki panel
+      if (id) {
+        wiki.show(id, name);
+      } else {
+        wiki.showByName(name);
+      }
+    }
   });
 
   // 7. Command input
@@ -243,8 +272,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const actionInput = commandWin.body.querySelector('#action-input') as HTMLInputElement;
   initInput(actionInput, handleAction);
 
-  // 8. Map
-  initMapPanel(mapWin.body, handleAction);
+  // 8. Map + Wiki — split map window body into canvas wrap + wiki panel
+  const mapCanvasWrap = document.createElement('div');
+  mapCanvasWrap.className = 'map-canvas-wrap';
+  wiki = createWikiPanel();
+  mapWin.body.appendChild(mapCanvasWrap);
+  mapWin.body.appendChild(wiki.el);
+  initMapPanel(mapCanvasWrap, handleAction);
 
   // 9. Wire handlers
   setMessageHandler(handleMessage);

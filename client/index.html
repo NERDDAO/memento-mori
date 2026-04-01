@@ -30,7 +30,7 @@
 
     /* TUI Shell */
     #app {
-      display: grid; grid-template-rows: auto 1fr auto;
+      display: grid; grid-template-rows: auto 1fr auto auto;
       height: 100vh; gap: 4px; padding: 4px;
     }
 
@@ -72,8 +72,87 @@
     }
 
     /* Map */
-    #map-win .win-body { padding: 0; }
+    #map-win .win-body {
+      padding: 0; display: flex; flex-direction: row;
+    }
+    #map-win .map-canvas-wrap {
+      flex: 1; min-width: 0; overflow: hidden;
+    }
     #map-win canvas { display: block; width: 100%; }
+
+    /* Wiki panel */
+    .wiki-panel {
+      width: 260px; flex-shrink: 0;
+      border-left: 1px solid var(--border);
+      padding: 8px 10px;
+      overflow: hidden;
+      font-size: 13px;
+      display: flex; flex-direction: column;
+    }
+    .wiki-name {
+      color: var(--text-npc); font-weight: bold; font-size: 14px;
+      margin-bottom: 2px;
+    }
+    .wiki-labels {
+      color: var(--text-dim); font-size: 11px;
+      margin-bottom: 8px;
+    }
+    .wiki-summary {
+      color: var(--text-primary); line-height: 1.5;
+      margin-bottom: 10px;
+    }
+    .wiki-section {
+      color: var(--text-dim); font-size: 11px;
+      margin: 8px 0 4px; letter-spacing: 1px;
+    }
+    .wiki-link {
+      color: var(--text-location); cursor: pointer;
+      padding: 1px 0; text-decoration: underline dotted;
+    }
+    .wiki-link:hover { color: #fff; }
+    .wiki-fact {
+      color: var(--text-dim); font-size: 12px;
+      margin-left: 8px; margin-bottom: 4px;
+      font-style: italic;
+    }
+    .wiki-empty, .wiki-loading {
+      color: var(--text-dim); font-style: italic;
+      padding-top: 8px;
+    }
+    .wiki-breadcrumb { margin-bottom: 6px; }
+    .wiki-back {
+      color: var(--text-dim); cursor: pointer; font-size: 12px;
+    }
+    .wiki-back:hover { color: var(--text-primary); }
+    .wiki-section-header {
+      color: var(--text-dim); font-size: 11px; letter-spacing: 1px;
+      margin: 6px 0 2px; cursor: pointer; user-select: none;
+    }
+    .wiki-toc-label {
+      color: var(--text-dim); font-size: 11px; margin-top: 8px;
+      letter-spacing: 1px;
+    }
+    .wiki-toc-item {
+      color: var(--text-location); cursor: pointer; padding: 1px 0;
+      font-size: 12px;
+    }
+    .wiki-toc-item:hover { color: #fff; }
+    .wiki-page-heading {
+      color: var(--text-dim); font-size: 11px; letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    .wiki-pagination {
+      display: flex; justify-content: center; align-items: center;
+      gap: 12px; margin-top: auto; padding-top: 8px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .wiki-page-btn {
+      cursor: pointer; color: var(--text-dim); padding: 2px 4px;
+    }
+    .wiki-page-btn:hover:not(.disabled) { color: var(--text-primary); }
+    .wiki-page-btn.disabled { color: var(--border); cursor: default; }
+    .wiki-page-num { color: var(--text-dim); }
 
     /* Sidebar */
     .sidebar-win .win-body { font-size: 13px; }
@@ -200,6 +279,24 @@
       background: none; border: 1px solid var(--border); color: var(--text-primary);
       padding: 8px 24px; font-family: inherit; cursor: pointer; margin-top: 16px;
     }
+    /* Status footer */
+    .status-bar {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 2px 12px; font-size: 11px; color: var(--text-dim);
+      border: 1px solid var(--border); border-radius: 2px;
+      background: var(--bg-primary);
+    }
+    .status-phase { min-width: 180px; }
+    .status-phase.synced { color: var(--text-heal); }
+    .status-phase.error { color: var(--text-damage); }
+    .status-phase.processing,
+    .status-phase.extracting,
+    .status-phase.fetching,
+    .status-phase.pushing,
+    .status-phase.thinking { color: var(--text-npc); }
+    .status-chain { text-align: center; }
+    .status-chain.connected { color: var(--text-heal); }
+    .status-tick { text-align: right; min-width: 80px; }
   </style>
 </head>
 <body>
@@ -218,6 +315,7 @@
       </div>
     </div>
     <div id="command-mount"></div>
+    <div id="status-mount"></div>
     <div id="dialog-mount"></div>
   </div>
   <div id="char-create-overlay">

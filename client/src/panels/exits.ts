@@ -9,9 +9,12 @@ export function renderExitsPanel(
     return;
   }
   body.innerHTML = state.location.exits
-    .map((dir) =>
-      `<div class="exit-row" data-dir="${dir}"><span class="exit-dir">\u2192 ${dir.charAt(0).toUpperCase() + dir.slice(1)}</span></div>`,
-    )
+    .map((e) => {
+      const dir = typeof e === 'string' ? e : e.direction;
+      const dest = typeof e === 'string' ? '' : e.name;
+      const label = dir.charAt(0).toUpperCase() + dir.slice(1);
+      return `<div class="exit-row" data-dir="${dir}"><span class="exit-dir">\u2192 ${label}</span>${dest ? `<span class="exit-dest">${dest}</span>` : ''}</div>`;
+    })
     .join('');
   body.querySelectorAll('.exit-row').forEach((row) => {
     row.addEventListener('click', () => onAction(`go ${(row as HTMLElement).dataset.dir}`));

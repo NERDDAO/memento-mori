@@ -3,6 +3,17 @@
 
 import type { RoomMap } from '../map/types';
 
+export interface LocationExit {
+  direction: string;
+  name: string;
+}
+
+export interface LocationEntity {
+  name: string;
+  id: string;
+  role?: string;
+}
+
 export interface GameState {
   player: {
     name: string;
@@ -15,9 +26,9 @@ export interface GameState {
   location: {
     name: string;
     description: string;
-    exits: string[];
-    npcs: string[];
-    items: string[];
+    exits: LocationExit[];
+    npcs: LocationEntity[];
+    items: LocationEntity[];
   };
   inventory: Array<{
     name: string;
@@ -67,6 +78,28 @@ export function applyStateUpdate(state: GameState, update: Record<string, any>):
   }
   if (update.room_map) {
     state.roomMap = update.room_map;
+    // Sync roomMap entities into location for sidebar panels
+    const rm = update.room_map;
+    if (rm.name) state.location.name = rm.name;
+    if (rm.exits) {
+      state.location.exits = rm.exits.map((e: any) => ({
+        direction: e.direction || '',
+        name: e.target || e.name || '',
+      }));
+    }
+    if (rm.npcs) {
+      state.location.npcs = rm.npcs.map((n: any) => ({
+        name: n.name || '',
+        id: n.id || '',
+        role: n.role || '',
+      }));
+    }
+    if (rm.items) {
+      state.location.items = rm.items.map((i: any) => ({
+        name: i.name || '',
+        id: i.id || '',
+      }));
+    }
   }
 }
 
