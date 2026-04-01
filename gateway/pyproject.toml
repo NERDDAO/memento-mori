@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memento-gateway"
+version = "0.1.0"
+description = "FastAPI gateway for Memento Mori"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "matrix-nio>=0.24",
+    "redis>=5.0",
+    "websockets>=12.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
