@@ -1,0 +1,78 @@
+"""Round manager — batches player actions for multiplayer turns."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass
+class PlayerAction:
+    player_id: str
+    player_name: str
+    action: str
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass
+class Round:
+    location: str
+    actions: list[PlayerAction] = field(default_factory=list)
+    deadline: float = 0.0
+    closed: bool = False
+
+
+class RoundManager:
+    """Batches actions from multiple players at the same location."""
+
+    def __init__(self, window_seconds: int = 20) -> None:
+        self.window = window_seconds
+        self.active_rounds: dict[str, Round] = {}  # location -> Round
+        self._callbacks: list[Any] = []
+
+    def on_round_close(self, callback: Any) -> None:
+        """Register a callback for when a round closes.
+
+        Callback signature: async def callback(location: str, actions: list[PlayerAction])
+        """
+        self._callbacks.append(callback)
+
+    async def submit_action(
+        self, player_id: str, player_name: str, location: str, action: str
+    ) -> None:
+        """Submit a player action. Starts a round timer if first action at location."""
+        if location not in self.active_rounds:
+            self.active_rounds[location] = Round(
+                location=location,
+                deadline=time.time() + self.window,
+            )
+            # Start timer for this location
+            asyncio.create_task(self._close_after_window(location))
+
+        round_ = self.active_rounds[location]
+        if not round_.closed:
+            round_.actions.append(
+                PlayerAction(
+                    player_id=player_id,
+                    player_name=player_name,
+                    action=action,
+                )
+            )
+
+    async def _close_after_window(self, location: str) -> None:
+        """Wait for the window, then close the round and dispatch."""
+        await asyncio.sleep(self.window)
+        round_ = self.active_rounds.pop(location, None)
+        if round_ and not round_.closed:
+            round_.closed = True
+            for callback in self._callbacks:
+                try:
+                    await callback(location, round_.actions)
+                except Exception as e:
+                    print(f"[round-manager] Callback error: {e}")
+
+    @property
+    def active_count(self) -> int:
+        return len(self.active_rounds)
