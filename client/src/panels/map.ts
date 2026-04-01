@@ -46,6 +46,7 @@ export function updateMap(
           cardManager.show(
             entity.id || entity.name,
             entity.name,
+            type,
             screen.x,
             screen.y,
           );

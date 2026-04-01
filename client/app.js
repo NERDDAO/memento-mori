@@ -2904,6 +2904,7 @@ var CARD_FONT = "13px system-ui, sans-serif";
 var CARD_NAME_FONT = "15px Georgia, 'Times New Roman', serif";
 var CARD_LINE_HEIGHT = 18;
 var CARD_NAME_LINE_HEIGHT = 22;
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 class EntityCardManager {
   container;
@@ -2917,25 +2918,47 @@ class EntityCardManager {
     this.cardEl.style.display = "none";
     this.container.appendChild(this.cardEl);
   }
-  async show(entityId, entityName, screenX, screenY) {
+  async show(entityId, entityName, entityType, screenX, screenY) {
     if (this.currentId === entityId && this.cardEl.style.display !== "none")
       return;
     this.currentId = entityId;
     let card = this.cache.get(entityId);
     if (!card) {
-      try {
-        const endpoint = entityId.includes("-") ? `/api/entity/${entityId}` : `/api/entity/search/${encodeURIComponent(entityName)}`;
-        const resp = await fetch(endpoint);
-        card = await resp.json();
-        if (card && card.name) {
-          this.cache.set(entityId, card);
-        }
-      } catch {
-        card = { id: entityId, name: entityName, labels: [], summary: "Unknown entity." };
+      if (UUID_RE.test(entityId)) {
+        try {
+          const resp = await fetch(`/api/entity/${entityId}`);
+          const data = await resp.json();
+          if (data && data.name && !data.error) {
+            card = data;
+            this.cache.set(entityId, card);
+          }
+        } catch {}
+      }
+      if (!card && entityName) {
+        try {
+          const resp = await fetch(`/api/entity/search/${encodeURIComponent(entityName)}`);
+          const data = await resp.json();
+          if (data && data.name && !data.error) {
+            card = data;
+            this.cache.set(entityId, card);
+          }
+        } catch {}
+      }
+      if (!card) {
+        const typeLabels = {
+          npc: ["NPC"],
+          item: ["Item"],
+          exit: ["Exit"]
+        };
+        card = {
+          id: entityId,
+          name: entityName,
+          labels: typeLabels[entityType] || [],
+          summary: ""
+        };
+        this.cache.set(entityId, card);
       }
     }
-    if (!card)
-      return;
     const namePrepared = prepare(card.name, CARD_NAME_FONT);
     const nameResult = layout(namePrepared, CARD_MAX_WIDTH, CARD_NAME_LINE_HEIGHT);
     let descHeight = 0;
@@ -2944,17 +2967,18 @@ class EntityCardManager {
       const descResult = layout(descPrepared, CARD_MAX_WIDTH, CARD_LINE_HEIGHT);
       descHeight = descResult.height;
     }
-    const totalHeight = 12 + nameResult.height + (card.labels.length ? 20 : 0) + (descHeight ? descHeight + 8 : 0) + 24 + 12;
+    const totalHeight = 12 + nameResult.height + 20 + (descHeight ? descHeight + 8 : 0) + 24 + 12;
     this.cardEl.style.left = `${screenX - 130}px`;
     this.cardEl.style.top = `${screenY - totalHeight - 8}px`;
     this.cardEl.style.width = `${CARD_MAX_WIDTH + 24}px`;
-    const labelsHtml = card.labels.length ? `<div class="card-labels">${card.labels.join(" · ")}</div>` : "";
+    const labelsHtml = `<div class="card-labels">${card.labels.join(" · ")}</div>`;
     const descHtml = card.summary ? `<div class="card-desc">${card.summary}</div>` : "";
+    const hintText = entityType === "exit" ? "Enter to travel" : entityType === "npc" ? "Enter to talk" : "Enter to examine";
     this.cardEl.innerHTML = `
       <div class="card-name">${card.name}</div>
       ${labelsHtml}
       ${descHtml}
-      <div class="card-hint">Enter to interact</div>
+      <div class="card-hint">${hintText}</div>
     `;
     this.cardEl.style.display = "block";
   }
@@ -2995,7 +3019,7 @@ function updateMap(state, onAction) {
         return;
       if (type && entity) {
         const screen = renderer.gridToScreen(entity.x, entity.y);
-        cardManager.show(entity.id || entity.name, entity.name, screen.x, screen.y);
+        cardManager.show(entity.id || entity.name, entity.name, type, screen.x, screen.y);
       } else {
         cardManager.hide();
       }
