@@ -4,6 +4,9 @@
  * Entry point: manages WebSocket connection, input handling, and narrative display.
  */
 
+import { createInitialState, renderState, type GameState } from './state/game-state';
+import { parseNarrative, renderSegments } from './renderer/text-renderer';
+
 const GATEWAY_URL = 'http://localhost:8080';
 const WS_URL = 'ws://localhost:8080/ws';
 
@@ -12,6 +15,7 @@ let playerId = '';
 let sessionId = '';
 let currentLocation = '';
 let ws: WebSocket | null = null;
+let gameState: GameState;
 const commandHistory: string[] = [];
 let historyIndex = -1;
 
@@ -34,8 +38,16 @@ async function createSession(playerName: string): Promise<void> {
   document.getElementById('char-name')!.textContent = playerName;
   document.getElementById('location-name')!.textContent = currentLocation;
 
+  gameState = createInitialState(playerName);
+  gameState.location.name = currentLocation;
+  renderState(gameState);
+
   connectWebSocket();
   addNarrative(`Welcome, ${playerName}. You find yourself at ${currentLocation}.`, 'system');
+
+  if (data.opening_narrative) {
+    addNarrative(data.opening_narrative, 'narrative');
+  }
 }
 
 // --- WebSocket ---
@@ -62,7 +74,21 @@ function handleMessage(msg: { type: string; text?: string; location?: string }):
       // Remove thinking indicator
       const thinking = narrativePane.querySelector('.thinking');
       if (thinking) thinking.remove();
-      addNarrative(msg.text || '', 'narrative');
+
+      // Use text-renderer module
+      const segments = parseNarrative(msg.text || '');
+      const html = renderSegments(segments);
+      addNarrativeHtml(html, 'narrative');
+
+      // Apply state update if present
+      const stateUpdate = (msg as any).state_update;
+      if (stateUpdate && gameState) {
+        if (stateUpdate.location) {
+          gameState.location.name = stateUpdate.location;
+          currentLocation = stateUpdate.location;
+        }
+        renderState(gameState);
+      }
       break;
     }
     case 'thinking':
@@ -74,6 +100,14 @@ function handleMessage(msg: { type: string; text?: string; location?: string }):
 }
 
 // --- Narrative Display ---
+function addNarrativeHtml(html: string, type: string): void {
+  const block = document.createElement('div');
+  block.className = `narrative-block ${type}`;
+  block.innerHTML = html;
+  narrativePane.appendChild(block);
+  narrativePane.scrollTop = narrativePane.scrollHeight;
+}
+
 function addNarrative(text: string, type: string): void {
   const block = document.createElement('div');
   block.className = `narrative-block ${type}`;

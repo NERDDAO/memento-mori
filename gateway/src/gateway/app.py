@@ -3,6 +3,8 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from gateway.matrix_bridge import MatrixBridge
 from gateway.ws import WebSocketHub
 
@@ -62,3 +64,9 @@ async def websocket_endpoint(websocket: WebSocket, player_id: str):
             await websocket.receive_text()
     except WebSocketDisconnect:
         ws_hub.disconnect(player_id)
+
+
+# Static file serving — must be last (mounts at "/")
+client_dir = Path(__file__).parent.parent.parent.parent / "client"
+if client_dir.exists():
+    app.mount("/", StaticFiles(directory=str(client_dir), html=True), name="client")
