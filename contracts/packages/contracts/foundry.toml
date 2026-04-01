@@ -26,4 +26,5 @@ fs_permissions = [{ access = "read", path = "./"}]
 eth_rpc_url = "https://rpc.garnetchain.com"
 
 [profile.redstone]
-eth_rpc_url = "https://rpc.redstonechain.com"
+eth_rpc_url = "https://rpc.redstone.xyz"
+chain_id = 690
