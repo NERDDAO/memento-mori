@@ -3,6 +3,11 @@
 from crewai.flow.flow import Flow, listen, start
 from pydantic import BaseModel
 from memento.crews.event_detection.classification import make_classification_crew
+from memento.crews.event_detection.combat import make_combat_detector_crew
+from memento.crews.event_detection.inventory import make_inventory_detector_crew
+from memento.crews.event_detection.quest import make_quest_detector_crew
+from memento.crews.event_detection.world_change import make_world_change_detector_crew
+from memento.crews.event_detection.merge import make_event_merge_crew
 
 
 class EventState(BaseModel):
@@ -22,8 +27,27 @@ class EventDetectionFlow(Flow[EventState]):
         return self.state.categories
 
     @listen(classify)
-    def summarize(self, categories):
-        # Phase 2 minimal — just pass categories through as events
-        # Full detector crews added in Phase 5
-        self.state.events = {"categories": categories}
+    def dispatch_detectors(self, categories):
+        detected = []
+        if "combat" in categories:
+            crew = make_combat_detector_crew(self.state.action, self.state.context)
+            detected.append(crew.kickoff().raw)
+        if "inventory" in categories:
+            crew = make_inventory_detector_crew(self.state.action, self.state.context)
+            detected.append(crew.kickoff().raw)
+        if "quest" in categories:
+            crew = make_quest_detector_crew(self.state.action, self.state.context)
+            detected.append(crew.kickoff().raw)
+        if "world_change" in categories:
+            crew = make_world_change_detector_crew(
+                self.state.action, self.state.context
+            )
+            detected.append(crew.kickoff().raw)
+
+        if detected:
+            merge_crew = make_event_merge_crew("\n---\n".join(detected))
+            merged = merge_crew.kickoff().raw
+            self.state.events = {"categories": categories, "details": merged}
+        else:
+            self.state.events = {"categories": categories, "details": ""}
         return self.state.events
