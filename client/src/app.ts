@@ -11,8 +11,9 @@ import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
 import { renderCharacterPanel } from './panels/character';
 import { renderInventoryPanel } from './panels/inventory';
-import { renderLocationPanel } from './panels/map';
+import { renderLocationPanel, initMapPanel, updateMap } from './panels/map';
 import { renderActionsPanel } from './panels/actions';
+import type { RoomMap } from './map/types';
 
 let gameState: GameState;
 let narrative: NarrativeController;
@@ -32,6 +33,42 @@ function renderAllPanels(): void {
     gameState,
     handleAction,
   );
+  updateMap(gameState, handleAction);
+}
+
+// Temporary test map — remove once engine sends real maps
+function getTestMap(): RoomMap {
+  const w = 30, h = 15;
+  const tiles: string[] = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (y === 0 || y === h-1 || x === 0 || x === w-1) tiles.push('#');
+      else if (x === 5 && y >= 3 && y <= 5) tiles.push('B');  // bar
+      else if ((x === 10 || x === 20) && (y === 4 || y === 8)) tiles.push('T');  // tables
+      else tiles.push('.');
+    }
+  }
+  // Fix exit (overwrite the wall)
+  tiles[7 * w + (w-1)] = '+';
+
+  return {
+    id: 'test-tavern',
+    name: 'The Threshold',
+    width: w,
+    height: h,
+    tiles,
+    npcs: [
+      { x: 6, y: 4, ch: 'K', name: 'Barkeeper', id: 'npc-barkeeper' },
+      { x: 15, y: 6, ch: 'M', name: 'Merchant', id: 'npc-merchant' },
+    ],
+    items: [
+      { x: 12, y: 9, ch: '!', name: 'Health Potion', id: 'item-potion' },
+    ],
+    exits: [
+      { x: 29, y: 7, ch: '+', direction: 'east', target: 'unknown' },
+    ],
+    spawn: { x: 15, y: 12 },
+  };
 }
 
 // --- Action handling ---
@@ -96,6 +133,9 @@ async function enterWorld(playerName: string): Promise<void> {
   gameState = createInitialState(playerName);
   gameState.location.name = session.currentLocation;
 
+  if (!gameState.roomMap) {
+    gameState.roomMap = getTestMap();
+  }
   renderAllPanels();
   narrative.addBlock(`Welcome, ${playerName}. You find yourself at ${session.currentLocation}.`, 'system');
 
@@ -110,6 +150,7 @@ async function enterWorld(playerName: string): Promise<void> {
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
   narrative = initNarrative(document.getElementById('narrative-pane')!);
+  initMapPanel(document.getElementById('map-container')!, handleAction);
 
   const actionInput = document.getElementById('action-input') as HTMLInputElement;
   initInput(actionInput, handleAction);

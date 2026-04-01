@@ -1,6 +1,8 @@
 // src/state/game-state.ts
 /** Client-side game state — mirrors a subset of the KG. */
 
+import type { RoomMap } from '../map/types';
+
 export interface GameState {
   player: {
     name: string;
@@ -22,6 +24,7 @@ export interface GameState {
     rarity: string;
     equipped: boolean;
   }>;
+  roomMap: RoomMap | null;
 }
 
 export function createInitialState(playerName: string): GameState {
@@ -42,6 +45,7 @@ export function createInitialState(playerName: string): GameState {
       items: [],
     },
     inventory: [],
+    roomMap: null,
   };
 }
 
@@ -60,6 +64,9 @@ export function applyStateUpdate(state: GameState, update: Record<string, any>):
       rarity: i.rarity || 'common',
       equipped: i.equipped || false,
     }));
+  }
+  if (update.room_map) {
+    state.roomMap = update.room_map;
   }
 }
 

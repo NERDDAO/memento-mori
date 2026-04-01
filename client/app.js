@@ -16,7 +16,8 @@ function createInitialState(playerName) {
       npcs: [],
       items: []
     },
-    inventory: []
+    inventory: [],
+    roomMap: null
   };
 }
 function applyStateUpdate(state, update) {
@@ -42,6 +43,9 @@ function applyStateUpdate(state, update) {
       rarity: i.rarity || "common",
       equipped: i.equipped || false
     }));
+  }
+  if (update.room_map) {
+    state.roomMap = update.room_map;
   }
 }
 
@@ -2670,28 +2674,352 @@ function renderInventoryPanel(container, state) {
   }).join("");
 }
 
+// src/map/colors.ts
+var TILE_COLORS = {
+  "#": ["#3a3a48", "#1a1a22"],
+  ".": ["#2a2a35", "#0a0a0f"],
+  "+": ["#50c8c8", "#0a0a0f"],
+  T: ["#8b6914", "#0a0a0f"],
+  B: ["#8b6914", "#0a0a0f"],
+  "~": ["#3060c0", "#0a0a0f"],
+  ",": ["#2a5a2a", "#0a0a0f"],
+  ":": ["#555550", "#0a0a0f"],
+  "=": ["#666660", "#0a0a0f"],
+  "^": ["#888880", "#0a0a0f"],
+  " ": ["#0a0a0f", "#0a0a0f"]
+};
+var DEFAULT_COLORS = ["#555555", "#0a0a0f"];
+function tileColors(ch) {
+  return TILE_COLORS[ch] || DEFAULT_COLORS;
+}
+var ENTITY_COLORS = {
+  player: "#ffd700",
+  npc: "#d4a574",
+  item: "#a335ee",
+  exit: "#50c8c8"
+};
+
+// src/map/renderer.ts
+var TILE_W = 14;
+var TILE_H = 18;
+var FONT = "15px monospace";
+
+class MapRenderer {
+  canvas;
+  ctx;
+  dpr;
+  constructor(container) {
+    this.dpr = Math.min(devicePixelRatio, 2);
+    this.canvas = document.createElement("canvas");
+    this.canvas.style.display = "block";
+    this.canvas.style.background = "#0a0a0f";
+    this.ctx = this.canvas.getContext("2d");
+    container.appendChild(this.canvas);
+  }
+  get element() {
+    return this.canvas;
+  }
+  render(map, playerX, playerY) {
+    const w = map.width * TILE_W;
+    const h = map.height * TILE_H;
+    this.canvas.width = w * this.dpr;
+    this.canvas.height = h * this.dpr;
+    this.canvas.style.width = `${w}px`;
+    this.canvas.style.height = `${h}px`;
+    const ctx = this.ctx;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.font = FONT;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (let y = 0;y < map.height; y++) {
+      for (let x = 0;x < map.width; x++) {
+        const ch = map.tiles[y * map.width + x] || " ";
+        const [fg, bg] = tileColors(ch);
+        ctx.fillStyle = bg;
+        ctx.fillRect(x * TILE_W, y * TILE_H, TILE_W, TILE_H);
+        if (ch !== " ") {
+          ctx.fillStyle = fg;
+          ctx.fillText(ch, x * TILE_W + TILE_W / 2, y * TILE_H + TILE_H / 2);
+        }
+      }
+    }
+    for (const exit of map.exits) {
+      this.drawEntity(exit.x, exit.y, exit.ch || "+", ENTITY_COLORS.exit);
+    }
+    for (const item of map.items) {
+      this.drawEntity(item.x, item.y, item.ch, ENTITY_COLORS.item);
+    }
+    for (const npc of map.npcs) {
+      this.drawEntity(npc.x, npc.y, npc.ch, ENTITY_COLORS.npc);
+    }
+    this.drawEntity(playerX, playerY, "@", ENTITY_COLORS.player);
+  }
+  drawEntity(x, y, ch, color) {
+    const ctx = this.ctx;
+    ctx.fillStyle = "#0a0a0f";
+    ctx.fillRect(x * TILE_W, y * TILE_H, TILE_W, TILE_H);
+    ctx.fillStyle = color;
+    ctx.font = FONT;
+    ctx.fillText(ch, x * TILE_W + TILE_W / 2, y * TILE_H + TILE_H / 2);
+  }
+  gridToScreen(gridX, gridY) {
+    const rect = this.canvas.getBoundingClientRect();
+    return {
+      x: rect.left + gridX * TILE_W + TILE_W / 2,
+      y: rect.top + gridY * TILE_H
+    };
+  }
+}
+
+// src/map/movement.ts
+class PlayerController {
+  x;
+  y;
+  map;
+  onInteract;
+  onProximity;
+  lastProximity = "";
+  constructor(map, onInteract, onProximity) {
+    this.x = map.spawn?.x ?? Math.floor(map.width / 2);
+    this.y = map.spawn?.y ?? Math.floor(map.height / 2);
+    this.map = map;
+    this.onInteract = onInteract;
+    this.onProximity = onProximity;
+  }
+  move(dx, dy) {
+    const nx = this.x + dx;
+    const ny = this.y + dy;
+    if (!this.isWalkable(nx, ny))
+      return false;
+    this.x = nx;
+    this.y = ny;
+    this.checkProximity();
+    return true;
+  }
+  interact() {
+    const dirs = [[0, 0], [0, -1], [0, 1], [-1, 0], [1, 0]];
+    for (const [dx, dy] of dirs) {
+      const tx = this.x + dx;
+      const ty = this.y + dy;
+      const exit = this.map.exits.find((e) => e.x === tx && e.y === ty);
+      if (exit) {
+        this.onInteract("exit", exit);
+        return;
+      }
+      const npc = this.map.npcs.find((n) => n.x === tx && n.y === ty);
+      if (npc) {
+        this.onInteract("npc", npc);
+        return;
+      }
+      const item = this.map.items.find((i) => i.x === tx && i.y === ty);
+      if (item) {
+        this.onInteract("item", item);
+        return;
+      }
+    }
+  }
+  checkProximity() {
+    const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+    for (const [dx, dy] of dirs) {
+      const tx = this.x + dx;
+      const ty = this.y + dy;
+      const npc = this.map.npcs.find((n) => n.x === tx && n.y === ty);
+      if (npc && this.lastProximity !== npc.id) {
+        this.lastProximity = npc.id;
+        this.onProximity("npc", npc);
+        return;
+      }
+      const item = this.map.items.find((i) => i.x === tx && i.y === ty);
+      if (item && this.lastProximity !== item.id) {
+        this.lastProximity = item.id;
+        this.onProximity("item", item);
+        return;
+      }
+      const exit = this.map.exits.find((e) => e.x === tx && e.y === ty);
+      if (exit) {
+        const exitId = `exit-${exit.direction}`;
+        if (this.lastProximity !== exitId) {
+          this.lastProximity = exitId;
+          this.onProximity("exit", exit);
+          return;
+        }
+      }
+    }
+    if (this.lastProximity !== "") {
+      this.lastProximity = "";
+      this.onProximity(null, null);
+    }
+  }
+  isWalkable(x, y) {
+    if (x < 0 || x >= this.map.width || y < 0 || y >= this.map.height)
+      return false;
+    const ch = this.map.tiles[y * this.map.width + x];
+    return ch !== "#" && ch !== undefined && ch !== " ";
+  }
+  loadMap(map) {
+    this.map = map;
+    this.x = map.spawn?.x ?? Math.floor(map.width / 2);
+    this.y = map.spawn?.y ?? Math.floor(map.height / 2);
+    this.lastProximity = "";
+  }
+}
+var MOVE_KEYS = {
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  w: [0, -1],
+  s: [0, 1],
+  a: [-1, 0],
+  d: [1, 0],
+  k: [0, -1],
+  j: [0, 1],
+  h: [-1, 0],
+  l: [1, 0]
+};
+function setupMapInput(controller, renderer, map) {
+  const handler = (e) => {
+    if (e.target?.tagName === "INPUT")
+      return;
+    const delta = MOVE_KEYS[e.key];
+    if (delta) {
+      e.preventDefault();
+      if (controller.move(delta[0], delta[1]) && map.current) {
+        renderer.render(map.current, controller.x, controller.y);
+      }
+    } else if (e.key === "Enter" || e.key === " ") {
+      if (e.target?.tagName === "INPUT")
+        return;
+      e.preventDefault();
+      controller.interact();
+    }
+  };
+  document.addEventListener("keydown", handler);
+  return () => document.removeEventListener("keydown", handler);
+}
+
+// src/map/entity-card.ts
+var CARD_MAX_WIDTH = 260;
+var CARD_FONT = "13px system-ui, sans-serif";
+var CARD_NAME_FONT = "15px Georgia, 'Times New Roman', serif";
+var CARD_LINE_HEIGHT = 18;
+var CARD_NAME_LINE_HEIGHT = 22;
+
+class EntityCardManager {
+  container;
+  cardEl;
+  cache = new Map;
+  currentId = "";
+  constructor(container) {
+    this.container = container;
+    this.cardEl = document.createElement("div");
+    this.cardEl.className = "entity-card";
+    this.cardEl.style.display = "none";
+    this.container.appendChild(this.cardEl);
+  }
+  async show(entityId, entityName, screenX, screenY) {
+    if (this.currentId === entityId && this.cardEl.style.display !== "none")
+      return;
+    this.currentId = entityId;
+    let card = this.cache.get(entityId);
+    if (!card) {
+      try {
+        const endpoint = entityId.includes("-") ? `/api/entity/${entityId}` : `/api/entity/search/${encodeURIComponent(entityName)}`;
+        const resp = await fetch(endpoint);
+        card = await resp.json();
+        if (card && card.name) {
+          this.cache.set(entityId, card);
+        }
+      } catch {
+        card = { id: entityId, name: entityName, labels: [], summary: "Unknown entity." };
+      }
+    }
+    if (!card)
+      return;
+    const namePrepared = prepare(card.name, CARD_NAME_FONT);
+    const nameResult = layout(namePrepared, CARD_MAX_WIDTH, CARD_NAME_LINE_HEIGHT);
+    let descHeight = 0;
+    if (card.summary) {
+      const descPrepared = prepare(card.summary, CARD_FONT);
+      const descResult = layout(descPrepared, CARD_MAX_WIDTH, CARD_LINE_HEIGHT);
+      descHeight = descResult.height;
+    }
+    const totalHeight = 12 + nameResult.height + (card.labels.length ? 20 : 0) + (descHeight ? descHeight + 8 : 0) + 24 + 12;
+    this.cardEl.style.left = `${screenX - 130}px`;
+    this.cardEl.style.top = `${screenY - totalHeight - 8}px`;
+    this.cardEl.style.width = `${CARD_MAX_WIDTH + 24}px`;
+    const labelsHtml = card.labels.length ? `<div class="card-labels">${card.labels.join(" · ")}</div>` : "";
+    const descHtml = card.summary ? `<div class="card-desc">${card.summary}</div>` : "";
+    this.cardEl.innerHTML = `
+      <div class="card-name">${card.name}</div>
+      ${labelsHtml}
+      ${descHtml}
+      <div class="card-hint">Enter to interact</div>
+    `;
+    this.cardEl.style.display = "block";
+  }
+  hide() {
+    this.cardEl.style.display = "none";
+    this.currentId = "";
+  }
+  clearCache() {
+    this.cache.clear();
+  }
+}
+
 // src/panels/map.ts
+var renderer = null;
+var controller = null;
+var cardManager = null;
+var cleanupInput = null;
+var mapRef = { current: null };
+function initMapPanel(mapContainer, _onAction) {
+  renderer = new MapRenderer(mapContainer);
+  cardManager = new EntityCardManager(document.body);
+}
+function updateMap(state, onAction) {
+  if (!state.roomMap || !renderer)
+    return;
+  const map = state.roomMap;
+  mapRef.current = map;
+  if (!controller) {
+    controller = new PlayerController(map, (type, entity) => {
+      if (type === "npc")
+        onAction(`talk to ${entity.name}`);
+      else if (type === "item")
+        onAction(`examine ${entity.name}`);
+      else if (type === "exit")
+        onAction(`go ${entity.direction}`);
+    }, (type, entity) => {
+      if (!cardManager || !renderer)
+        return;
+      if (type && entity) {
+        const screen = renderer.gridToScreen(entity.x, entity.y);
+        cardManager.show(entity.id || entity.name, entity.name, screen.x, screen.y);
+      } else {
+        cardManager.hide();
+      }
+    });
+    cleanupInput?.();
+    cleanupInput = setupMapInput(controller, renderer, mapRef);
+  } else {
+    controller.loadMap(map);
+  }
+  renderer.render(map, controller.x, controller.y);
+}
 function renderLocationPanel(container, state, onAction) {
-  let html = `<div id="location-name" style="color: var(--text-location); margin-bottom: 8px; font-size: 15px;">${state.location.name}</div>`;
+  let html = `<div style="color: var(--text-location); margin-bottom: 8px; font-size: 15px;">${state.location.name}</div>`;
   if (state.location.exits.length) {
-    html += '<div id="location-exits" style="margin-bottom: 8px;">';
+    html += '<div style="margin-bottom: 8px;">';
     state.location.exits.forEach((exit) => {
       html += `<button class="action-btn" data-action="go ${exit}">Go ${exit}</button>`;
     });
     html += "</div>";
-  } else {
-    html += '<div id="location-exits" style="font-size: 13px; color: var(--text-dim); font-family: system-ui, sans-serif;"></div>';
   }
   if (state.location.npcs.length) {
     html += '<div style="margin-top: 8px;"><span class="stat-label">Present:</span></div>';
     state.location.npcs.forEach((npc) => {
       html += `<div style="font-size: 13px; color: var(--text-npc); padding: 2px 0;">${npc}</div>`;
-    });
-  }
-  if (state.location.items.length) {
-    html += '<div style="margin-top: 8px;"><span class="stat-label">Visible:</span></div>';
-    state.location.items.forEach((item) => {
-      html += `<div style="font-size: 13px; color: var(--text-primary); padding: 2px 0;">${item}</div>`;
     });
   }
   container.innerHTML = html;
@@ -2736,6 +3064,42 @@ function renderAllPanels() {
   renderInventoryPanel(document.getElementById("inventory-list"), gameState);
   renderLocationPanel(document.getElementById("location-panel"), gameState, handleAction);
   renderActionsPanel(document.getElementById("actions-list"), gameState, handleAction);
+  updateMap(gameState, handleAction);
+}
+function getTestMap() {
+  const w = 30, h = 15;
+  const tiles = [];
+  for (let y = 0;y < h; y++) {
+    for (let x = 0;x < w; x++) {
+      if (y === 0 || y === h - 1 || x === 0 || x === w - 1)
+        tiles.push("#");
+      else if (x === 5 && y >= 3 && y <= 5)
+        tiles.push("B");
+      else if ((x === 10 || x === 20) && (y === 4 || y === 8))
+        tiles.push("T");
+      else
+        tiles.push(".");
+    }
+  }
+  tiles[7 * w + (w - 1)] = "+";
+  return {
+    id: "test-tavern",
+    name: "The Threshold",
+    width: w,
+    height: h,
+    tiles,
+    npcs: [
+      { x: 6, y: 4, ch: "K", name: "Barkeeper", id: "npc-barkeeper" },
+      { x: 15, y: 6, ch: "M", name: "Merchant", id: "npc-merchant" }
+    ],
+    items: [
+      { x: 12, y: 9, ch: "!", name: "Health Potion", id: "item-potion" }
+    ],
+    exits: [
+      { x: 29, y: 7, ch: "+", direction: "east", target: "unknown" }
+    ],
+    spawn: { x: 15, y: 12 }
+  };
 }
 async function handleAction(action) {
   if (!action.trim())
@@ -2786,6 +3150,9 @@ async function enterWorld(playerName) {
   const session2 = await initSession(playerName);
   gameState = createInitialState(playerName);
   gameState.location.name = session2.currentLocation;
+  if (!gameState.roomMap) {
+    gameState.roomMap = getTestMap();
+  }
   renderAllPanels();
   narrative.addBlock(`Welcome, ${playerName}. You find yourself at ${session2.currentLocation}.`, "system");
   if (session2.openingNarrative) {
@@ -2796,6 +3163,7 @@ async function enterWorld(playerName) {
 }
 document.addEventListener("DOMContentLoaded", () => {
   narrative = initNarrative(document.getElementById("narrative-pane"));
+  initMapPanel(document.getElementById("map-container"), handleAction);
   const actionInput = document.getElementById("action-input");
   initInput(actionInput, handleAction);
   setMessageHandler(handleMessage);
