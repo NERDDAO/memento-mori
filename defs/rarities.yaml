@@ -1,0 +1,16 @@
+rarities:
+  common:
+    weight: 60
+    color: "#808080"
+  uncommon:
+    weight: 25
+    color: "#1eff00"
+  rare:
+    weight: 10
+    color: "#0070dd"
+  epic:
+    weight: 4
+    color: "#a335ee"
+  legendary:
+    weight: 1
+    color: "#ff8000"

@@ -1,0 +1,15 @@
+game:
+  name: "Memento Mori"
+  tone: "dark fantasy, low magic, gritty consequences"
+  permadeath: true
+  round_window_seconds: 20
+  max_npcs_per_location: 8
+
+llm:
+  default_model: "openrouter/anthropic/claude-sonnet-4"
+  overrides:
+    narration: "openrouter/anthropic/claude-sonnet-4"
+    event_detection: "openrouter/anthropic/claude-haiku-4"
+    combat_narration: "openrouter/anthropic/claude-sonnet-4"
+    npc_concept: "openrouter/anthropic/claude-sonnet-4"
+    stat_assignment: "openrouter/anthropic/claude-haiku-4"

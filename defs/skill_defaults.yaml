@@ -1,0 +1,26 @@
+skills:
+  combat:
+    - swordsmanship
+    - archery
+    - unarmed
+    - blocking
+  stealth:
+    - lockpicking
+    - pickpocket
+    - sneaking
+    - disguise
+  social:
+    - persuasion
+    - intimidation
+    - deception
+    - insight
+  survival:
+    - tracking
+    - foraging
+    - medicine
+    - navigation
+  arcane:
+    - spellcraft
+    - alchemy
+    - enchanting
+    - lore
