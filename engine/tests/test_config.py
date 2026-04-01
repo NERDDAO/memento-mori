@@ -16,14 +16,14 @@ def test_config_has_round_window():
 
 def test_get_model_for_crew_default():
     model = get_model_for_crew("context")
-    assert model == "openrouter/anthropic/claude-sonnet-4"
+    assert model == "openrouter/google/gemini-2.5-flash"
 
 
 def test_get_model_for_crew_override():
     model = get_model_for_crew("classification")
-    assert model == "openrouter/anthropic/claude-haiku-4"
+    assert model == "openrouter/google/gemini-2.5-flash"
 
 
 def test_get_model_for_crew_narration():
     model = get_model_for_crew("narration")
-    assert model == "openrouter/anthropic/claude-sonnet-4"
+    assert model == "openrouter/google/gemini-2.5-flash"

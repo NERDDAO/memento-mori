@@ -1,0 +1,9 @@
+{
+  "pythonPath": "/home/at0x/miniconda3/bin/python",
+  "venvPath": "/home/at0x/miniconda3",
+  "extraPaths": [
+    "engine/src",
+    "/home/at0x/miniconda3/lib/python3.12/site-packages"
+  ],
+  "reportMissingImports": "warning"
+}
