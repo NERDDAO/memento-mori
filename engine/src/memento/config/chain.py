@@ -1,0 +1,10 @@
+# engine/src/memento/config/chain.py
+"""Redstone chain configuration. Reads from env vars."""
+
+import os
+
+
+REDSTONE_RPC = os.getenv("REDSTONE_RPC", "http://localhost:8545")
+MUD_WORLD_ADDRESS = os.getenv("MUD_WORLD_ADDRESS", "")
+ENGINE_PRIVATE_KEY = os.getenv("ENGINE_PRIVATE_KEY", "")
+CHAIN_ENABLED = bool(MUD_WORLD_ADDRESS and ENGINE_PRIVATE_KEY)
