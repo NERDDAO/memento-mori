@@ -1848,6 +1848,41 @@ function fitSoftHyphenBreak(graphemeWidths, initialWidth, maxWidth, lineFitEpsil
   }
   return { fitCount, fittedWidth };
 }
+function findChunkIndexForStart(prepared, segmentIndex) {
+  for (let i = 0;i < prepared.chunks.length; i++) {
+    const chunk = prepared.chunks[i];
+    if (segmentIndex < chunk.consumedEndSegmentIndex)
+      return i;
+  }
+  return -1;
+}
+function normalizeLineStart(prepared, start) {
+  let segmentIndex = start.segmentIndex;
+  const graphemeIndex = start.graphemeIndex;
+  if (segmentIndex >= prepared.widths.length)
+    return null;
+  if (graphemeIndex > 0)
+    return start;
+  const chunkIndex = findChunkIndexForStart(prepared, segmentIndex);
+  if (chunkIndex < 0)
+    return null;
+  const chunk = prepared.chunks[chunkIndex];
+  if (chunk.startSegmentIndex === chunk.endSegmentIndex && segmentIndex === chunk.startSegmentIndex) {
+    return { segmentIndex, graphemeIndex: 0 };
+  }
+  if (segmentIndex < chunk.startSegmentIndex)
+    segmentIndex = chunk.startSegmentIndex;
+  while (segmentIndex < chunk.endSegmentIndex) {
+    const kind = prepared.kinds[segmentIndex];
+    if (kind !== "space" && kind !== "zero-width-break" && kind !== "soft-hyphen") {
+      return { segmentIndex, graphemeIndex: 0 };
+    }
+    segmentIndex++;
+  }
+  if (chunk.consumedEndSegmentIndex >= prepared.widths.length)
+    return null;
+  return { segmentIndex: chunk.consumedEndSegmentIndex, graphemeIndex: 0 };
+}
 function countPreparedLines(prepared, maxWidth) {
   if (prepared.simpleLineWalkFastPath) {
     return countPreparedLinesSimple(prepared, maxWidth);
@@ -2256,6 +2291,313 @@ function walkPreparedLines(prepared, maxWidth, onLine) {
   }
   return lineCount;
 }
+function layoutNextLineRange(prepared, start, maxWidth) {
+  const normalizedStart = normalizeLineStart(prepared, start);
+  if (normalizedStart === null)
+    return null;
+  if (prepared.simpleLineWalkFastPath) {
+    return layoutNextLineRangeSimple(prepared, normalizedStart, maxWidth);
+  }
+  const chunkIndex = findChunkIndexForStart(prepared, normalizedStart.segmentIndex);
+  if (chunkIndex < 0)
+    return null;
+  const chunk = prepared.chunks[chunkIndex];
+  if (chunk.startSegmentIndex === chunk.endSegmentIndex) {
+    return {
+      startSegmentIndex: chunk.startSegmentIndex,
+      startGraphemeIndex: 0,
+      endSegmentIndex: chunk.consumedEndSegmentIndex,
+      endGraphemeIndex: 0,
+      width: 0
+    };
+  }
+  const { widths, lineEndFitAdvances, lineEndPaintAdvances, kinds, breakableWidths, breakablePrefixWidths, discretionaryHyphenWidth, tabStopAdvance } = prepared;
+  const engineProfile = getEngineProfile();
+  const lineFitEpsilon = engineProfile.lineFitEpsilon;
+  let lineW = 0;
+  let hasContent = false;
+  const lineStartSegmentIndex = normalizedStart.segmentIndex;
+  const lineStartGraphemeIndex = normalizedStart.graphemeIndex;
+  let lineEndSegmentIndex = lineStartSegmentIndex;
+  let lineEndGraphemeIndex = lineStartGraphemeIndex;
+  let pendingBreakSegmentIndex = -1;
+  let pendingBreakFitWidth = 0;
+  let pendingBreakPaintWidth = 0;
+  let pendingBreakKind = null;
+  function clearPendingBreak() {
+    pendingBreakSegmentIndex = -1;
+    pendingBreakFitWidth = 0;
+    pendingBreakPaintWidth = 0;
+    pendingBreakKind = null;
+  }
+  function finishLine(endSegmentIndex = lineEndSegmentIndex, endGraphemeIndex = lineEndGraphemeIndex, width = lineW) {
+    if (!hasContent)
+      return null;
+    return {
+      startSegmentIndex: lineStartSegmentIndex,
+      startGraphemeIndex: lineStartGraphemeIndex,
+      endSegmentIndex,
+      endGraphemeIndex,
+      width
+    };
+  }
+  function startLineAtSegment(segmentIndex, width) {
+    hasContent = true;
+    lineEndSegmentIndex = segmentIndex + 1;
+    lineEndGraphemeIndex = 0;
+    lineW = width;
+  }
+  function startLineAtGrapheme(segmentIndex, graphemeIndex, width) {
+    hasContent = true;
+    lineEndSegmentIndex = segmentIndex;
+    lineEndGraphemeIndex = graphemeIndex + 1;
+    lineW = width;
+  }
+  function appendWholeSegment(segmentIndex, width) {
+    if (!hasContent) {
+      startLineAtSegment(segmentIndex, width);
+      return;
+    }
+    lineW += width;
+    lineEndSegmentIndex = segmentIndex + 1;
+    lineEndGraphemeIndex = 0;
+  }
+  function updatePendingBreakForWholeSegment(segmentIndex, segmentWidth) {
+    if (!canBreakAfter(kinds[segmentIndex]))
+      return;
+    const fitAdvance = kinds[segmentIndex] === "tab" ? 0 : lineEndFitAdvances[segmentIndex];
+    const paintAdvance = kinds[segmentIndex] === "tab" ? segmentWidth : lineEndPaintAdvances[segmentIndex];
+    pendingBreakSegmentIndex = segmentIndex + 1;
+    pendingBreakFitWidth = lineW - segmentWidth + fitAdvance;
+    pendingBreakPaintWidth = lineW - segmentWidth + paintAdvance;
+    pendingBreakKind = kinds[segmentIndex];
+  }
+  function appendBreakableSegmentFrom(segmentIndex, startGraphemeIndex) {
+    const gWidths = breakableWidths[segmentIndex];
+    const gPrefixWidths = breakablePrefixWidths[segmentIndex] ?? null;
+    for (let g = startGraphemeIndex;g < gWidths.length; g++) {
+      const gw = getBreakableAdvance(gWidths, gPrefixWidths, g, engineProfile.preferPrefixWidthsForBreakableRuns);
+      if (!hasContent) {
+        startLineAtGrapheme(segmentIndex, g, gw);
+        continue;
+      }
+      if (lineW + gw > maxWidth + lineFitEpsilon) {
+        return finishLine();
+      }
+      lineW += gw;
+      lineEndSegmentIndex = segmentIndex;
+      lineEndGraphemeIndex = g + 1;
+    }
+    if (hasContent && lineEndSegmentIndex === segmentIndex && lineEndGraphemeIndex === gWidths.length) {
+      lineEndSegmentIndex = segmentIndex + 1;
+      lineEndGraphemeIndex = 0;
+    }
+    return null;
+  }
+  function maybeFinishAtSoftHyphen(segmentIndex) {
+    if (pendingBreakKind !== "soft-hyphen" || pendingBreakSegmentIndex < 0)
+      return null;
+    const gWidths = breakableWidths[segmentIndex] ?? null;
+    if (gWidths !== null) {
+      const fitWidths = engineProfile.preferPrefixWidthsForBreakableRuns ? breakablePrefixWidths[segmentIndex] ?? gWidths : gWidths;
+      const usesPrefixWidths = fitWidths !== gWidths;
+      const { fitCount, fittedWidth } = fitSoftHyphenBreak(fitWidths, lineW, maxWidth, lineFitEpsilon, discretionaryHyphenWidth, usesPrefixWidths);
+      if (fitCount === gWidths.length) {
+        lineW = fittedWidth;
+        lineEndSegmentIndex = segmentIndex + 1;
+        lineEndGraphemeIndex = 0;
+        clearPendingBreak();
+        return null;
+      }
+      if (fitCount > 0) {
+        return finishLine(segmentIndex, fitCount, fittedWidth + discretionaryHyphenWidth);
+      }
+    }
+    if (pendingBreakFitWidth <= maxWidth + lineFitEpsilon) {
+      return finishLine(pendingBreakSegmentIndex, 0, pendingBreakPaintWidth);
+    }
+    return null;
+  }
+  for (let i = normalizedStart.segmentIndex;i < chunk.endSegmentIndex; i++) {
+    const kind = kinds[i];
+    const startGraphemeIndex = i === normalizedStart.segmentIndex ? normalizedStart.graphemeIndex : 0;
+    const w = kind === "tab" ? getTabAdvance(lineW, tabStopAdvance) : widths[i];
+    if (kind === "soft-hyphen" && startGraphemeIndex === 0) {
+      if (hasContent) {
+        lineEndSegmentIndex = i + 1;
+        lineEndGraphemeIndex = 0;
+        pendingBreakSegmentIndex = i + 1;
+        pendingBreakFitWidth = lineW + discretionaryHyphenWidth;
+        pendingBreakPaintWidth = lineW + discretionaryHyphenWidth;
+        pendingBreakKind = kind;
+      }
+      continue;
+    }
+    if (!hasContent) {
+      if (startGraphemeIndex > 0) {
+        const line = appendBreakableSegmentFrom(i, startGraphemeIndex);
+        if (line !== null)
+          return line;
+      } else if (w > maxWidth && breakableWidths[i] !== null) {
+        const line = appendBreakableSegmentFrom(i, 0);
+        if (line !== null)
+          return line;
+      } else {
+        startLineAtSegment(i, w);
+      }
+      updatePendingBreakForWholeSegment(i, w);
+      continue;
+    }
+    const newW = lineW + w;
+    if (newW > maxWidth + lineFitEpsilon) {
+      const currentBreakFitWidth = lineW + (kind === "tab" ? 0 : lineEndFitAdvances[i]);
+      const currentBreakPaintWidth = lineW + (kind === "tab" ? w : lineEndPaintAdvances[i]);
+      if (pendingBreakKind === "soft-hyphen" && engineProfile.preferEarlySoftHyphenBreak && pendingBreakFitWidth <= maxWidth + lineFitEpsilon) {
+        return finishLine(pendingBreakSegmentIndex, 0, pendingBreakPaintWidth);
+      }
+      const softBreakLine = maybeFinishAtSoftHyphen(i);
+      if (softBreakLine !== null)
+        return softBreakLine;
+      if (canBreakAfter(kind) && currentBreakFitWidth <= maxWidth + lineFitEpsilon) {
+        appendWholeSegment(i, w);
+        return finishLine(i + 1, 0, currentBreakPaintWidth);
+      }
+      if (pendingBreakSegmentIndex >= 0 && pendingBreakFitWidth <= maxWidth + lineFitEpsilon) {
+        return finishLine(pendingBreakSegmentIndex, 0, pendingBreakPaintWidth);
+      }
+      if (w > maxWidth && breakableWidths[i] !== null) {
+        const currentLine = finishLine();
+        if (currentLine !== null)
+          return currentLine;
+        const line = appendBreakableSegmentFrom(i, 0);
+        if (line !== null)
+          return line;
+      }
+      return finishLine();
+    }
+    appendWholeSegment(i, w);
+    updatePendingBreakForWholeSegment(i, w);
+  }
+  if (pendingBreakSegmentIndex === chunk.consumedEndSegmentIndex && lineEndGraphemeIndex === 0) {
+    return finishLine(chunk.consumedEndSegmentIndex, 0, pendingBreakPaintWidth);
+  }
+  return finishLine(chunk.consumedEndSegmentIndex, 0, lineW);
+}
+function layoutNextLineRangeSimple(prepared, normalizedStart, maxWidth) {
+  const { widths, kinds, breakableWidths, breakablePrefixWidths } = prepared;
+  const engineProfile = getEngineProfile();
+  const lineFitEpsilon = engineProfile.lineFitEpsilon;
+  let lineW = 0;
+  let hasContent = false;
+  const lineStartSegmentIndex = normalizedStart.segmentIndex;
+  const lineStartGraphemeIndex = normalizedStart.graphemeIndex;
+  let lineEndSegmentIndex = lineStartSegmentIndex;
+  let lineEndGraphemeIndex = lineStartGraphemeIndex;
+  let pendingBreakSegmentIndex = -1;
+  let pendingBreakPaintWidth = 0;
+  function finishLine(endSegmentIndex = lineEndSegmentIndex, endGraphemeIndex = lineEndGraphemeIndex, width = lineW) {
+    if (!hasContent)
+      return null;
+    return {
+      startSegmentIndex: lineStartSegmentIndex,
+      startGraphemeIndex: lineStartGraphemeIndex,
+      endSegmentIndex,
+      endGraphemeIndex,
+      width
+    };
+  }
+  function startLineAtSegment(segmentIndex, width) {
+    hasContent = true;
+    lineEndSegmentIndex = segmentIndex + 1;
+    lineEndGraphemeIndex = 0;
+    lineW = width;
+  }
+  function startLineAtGrapheme(segmentIndex, graphemeIndex, width) {
+    hasContent = true;
+    lineEndSegmentIndex = segmentIndex;
+    lineEndGraphemeIndex = graphemeIndex + 1;
+    lineW = width;
+  }
+  function appendWholeSegment(segmentIndex, width) {
+    if (!hasContent) {
+      startLineAtSegment(segmentIndex, width);
+      return;
+    }
+    lineW += width;
+    lineEndSegmentIndex = segmentIndex + 1;
+    lineEndGraphemeIndex = 0;
+  }
+  function updatePendingBreak(segmentIndex, segmentWidth) {
+    if (!canBreakAfter(kinds[segmentIndex]))
+      return;
+    pendingBreakSegmentIndex = segmentIndex + 1;
+    pendingBreakPaintWidth = lineW - segmentWidth;
+  }
+  function appendBreakableSegmentFrom(segmentIndex, startGraphemeIndex) {
+    const gWidths = breakableWidths[segmentIndex];
+    const gPrefixWidths = breakablePrefixWidths[segmentIndex] ?? null;
+    for (let g = startGraphemeIndex;g < gWidths.length; g++) {
+      const gw = getBreakableAdvance(gWidths, gPrefixWidths, g, engineProfile.preferPrefixWidthsForBreakableRuns);
+      if (!hasContent) {
+        startLineAtGrapheme(segmentIndex, g, gw);
+        continue;
+      }
+      if (lineW + gw > maxWidth + lineFitEpsilon) {
+        return finishLine();
+      }
+      lineW += gw;
+      lineEndSegmentIndex = segmentIndex;
+      lineEndGraphemeIndex = g + 1;
+    }
+    if (hasContent && lineEndSegmentIndex === segmentIndex && lineEndGraphemeIndex === gWidths.length) {
+      lineEndSegmentIndex = segmentIndex + 1;
+      lineEndGraphemeIndex = 0;
+    }
+    return null;
+  }
+  for (let i = normalizedStart.segmentIndex;i < widths.length; i++) {
+    const w = widths[i];
+    const kind = kinds[i];
+    const startGraphemeIndex = i === normalizedStart.segmentIndex ? normalizedStart.graphemeIndex : 0;
+    if (!hasContent) {
+      if (startGraphemeIndex > 0) {
+        const line = appendBreakableSegmentFrom(i, startGraphemeIndex);
+        if (line !== null)
+          return line;
+      } else if (w > maxWidth && breakableWidths[i] !== null) {
+        const line = appendBreakableSegmentFrom(i, 0);
+        if (line !== null)
+          return line;
+      } else {
+        startLineAtSegment(i, w);
+      }
+      updatePendingBreak(i, w);
+      continue;
+    }
+    const newW = lineW + w;
+    if (newW > maxWidth + lineFitEpsilon) {
+      if (canBreakAfter(kind)) {
+        appendWholeSegment(i, w);
+        return finishLine(i + 1, 0, lineW - w);
+      }
+      if (pendingBreakSegmentIndex >= 0) {
+        return finishLine(pendingBreakSegmentIndex, 0, pendingBreakPaintWidth);
+      }
+      if (w > maxWidth && breakableWidths[i] !== null) {
+        const currentLine = finishLine();
+        if (currentLine !== null)
+          return currentLine;
+        const line = appendBreakableSegmentFrom(i, 0);
+        if (line !== null)
+          return line;
+      }
+      return finishLine();
+    }
+    appendWholeSegment(i, w);
+    updatePendingBreak(i, w);
+  }
+  return finishLine();
+}
 
 // node_modules/@chenglou/pretext/dist/layout.js
 var sharedGraphemeSegmenter2 = null;
@@ -2447,12 +2789,101 @@ function prepareInternal(text, font, includeSegments, options) {
 function prepare(text, font, options) {
   return prepareInternal(text, font, false, options);
 }
+function prepareWithSegments(text, font, options) {
+  return prepareInternal(text, font, true, options);
+}
 function getInternalPrepared(prepared) {
   return prepared;
 }
 function layout(prepared, maxWidth, lineHeight) {
   const lineCount = countPreparedLines(getInternalPrepared(prepared), maxWidth);
   return { lineCount, height: lineCount * lineHeight };
+}
+function getSegmentGraphemes(segmentIndex, segments, cache) {
+  let graphemes = cache.get(segmentIndex);
+  if (graphemes !== undefined)
+    return graphemes;
+  graphemes = [];
+  const graphemeSegmenter = getSharedGraphemeSegmenter2();
+  for (const gs of graphemeSegmenter.segment(segments[segmentIndex])) {
+    graphemes.push(gs.segment);
+  }
+  cache.set(segmentIndex, graphemes);
+  return graphemes;
+}
+function getLineTextCache(prepared) {
+  let cache = sharedLineTextCaches.get(prepared);
+  if (cache !== undefined)
+    return cache;
+  cache = new Map;
+  sharedLineTextCaches.set(prepared, cache);
+  return cache;
+}
+function lineHasDiscretionaryHyphen(kinds, startSegmentIndex, startGraphemeIndex, endSegmentIndex) {
+  return endSegmentIndex > 0 && kinds[endSegmentIndex - 1] === "soft-hyphen" && !(startSegmentIndex === endSegmentIndex && startGraphemeIndex > 0);
+}
+function buildLineTextFromRange(segments, kinds, cache, startSegmentIndex, startGraphemeIndex, endSegmentIndex, endGraphemeIndex) {
+  let text = "";
+  const endsWithDiscretionaryHyphen = lineHasDiscretionaryHyphen(kinds, startSegmentIndex, startGraphemeIndex, endSegmentIndex);
+  for (let i = startSegmentIndex;i < endSegmentIndex; i++) {
+    if (kinds[i] === "soft-hyphen" || kinds[i] === "hard-break")
+      continue;
+    if (i === startSegmentIndex && startGraphemeIndex > 0) {
+      text += getSegmentGraphemes(i, segments, cache).slice(startGraphemeIndex).join("");
+    } else {
+      text += segments[i];
+    }
+  }
+  if (endGraphemeIndex > 0) {
+    if (endsWithDiscretionaryHyphen)
+      text += "-";
+    text += getSegmentGraphemes(endSegmentIndex, segments, cache).slice(startSegmentIndex === endSegmentIndex ? startGraphemeIndex : 0, endGraphemeIndex).join("");
+  } else if (endsWithDiscretionaryHyphen) {
+    text += "-";
+  }
+  return text;
+}
+function createLayoutLine(prepared, cache, width, startSegmentIndex, startGraphemeIndex, endSegmentIndex, endGraphemeIndex) {
+  return {
+    text: buildLineTextFromRange(prepared.segments, prepared.kinds, cache, startSegmentIndex, startGraphemeIndex, endSegmentIndex, endGraphemeIndex),
+    width,
+    start: {
+      segmentIndex: startSegmentIndex,
+      graphemeIndex: startGraphemeIndex
+    },
+    end: {
+      segmentIndex: endSegmentIndex,
+      graphemeIndex: endGraphemeIndex
+    }
+  };
+}
+function toLayoutLineRange(line) {
+  return {
+    width: line.width,
+    start: {
+      segmentIndex: line.startSegmentIndex,
+      graphemeIndex: line.startGraphemeIndex
+    },
+    end: {
+      segmentIndex: line.endSegmentIndex,
+      graphemeIndex: line.endGraphemeIndex
+    }
+  };
+}
+function stepLineRange(prepared, start, maxWidth) {
+  const line = layoutNextLineRange(prepared, start, maxWidth);
+  if (line === null)
+    return null;
+  return toLayoutLineRange(line);
+}
+function materializeLine(prepared, line) {
+  return createLayoutLine(prepared, getLineTextCache(prepared), line.width, line.start.segmentIndex, line.start.graphemeIndex, line.end.segmentIndex, line.end.graphemeIndex);
+}
+function layoutNextLine(prepared, start, maxWidth) {
+  const line = stepLineRange(prepared, start, maxWidth);
+  if (line === null)
+    return null;
+  return materializeLine(prepared, line);
 }
 
 // src/renderer/theme.ts
@@ -2693,46 +3124,6 @@ function initInput(inputEl, onSubmit) {
       }
     }
   });
-}
-
-// src/panels/character.ts
-function renderCharacterPanel(_container, state) {
-  const set = (id, text) => {
-    const el = document.getElementById(id);
-    if (el)
-      el.textContent = text;
-  };
-  set("char-name", state.player.name);
-  set("char-level", String(state.player.level));
-  set("char-health", `${state.player.health}/${state.player.maxHealth}`);
-  set("char-xp", `${state.player.xp}/${state.player.xpThreshold}`);
-  const fill = document.getElementById("health-fill");
-  if (fill) {
-    const pct = Math.max(0, Math.min(100, state.player.health / state.player.maxHealth * 100));
-    fill.style.width = `${pct}%`;
-  }
-}
-
-// src/panels/inventory.ts
-var RARITY_COLORS = {
-  common: "#808080",
-  uncommon: "#1eff00",
-  rare: "#0070dd",
-  epic: "#a335ee",
-  legendary: "#ff8000"
-};
-function renderInventoryPanel(container, state) {
-  if (state.inventory.length === 0) {
-    container.innerHTML = '<div class="inventory-item" style="color: var(--text-dim);">Empty</div>';
-    return;
-  }
-  container.innerHTML = state.inventory.map((item) => {
-    const color = RARITY_COLORS[item.rarity] || "var(--text-dim)";
-    return `<div class="inventory-item">
-      ${item.name} <span style="color: ${color};">[${item.rarity}]</span>
-      ${item.equipped ? ' <span style="color: var(--accent);">equipped</span>' : ""}
-    </div>`;
-  }).join("");
 }
 
 // src/map/colors.ts
@@ -3228,56 +3619,333 @@ function showPlayerCard(state) {
   };
   renderer.setCard(card);
 }
-function renderLocationPanel(container, state, onAction) {
-  let html = `<div style="color: var(--text-location); margin-bottom: 8px; font-size: 15px;">${state.location.name}</div>`;
-  if (state.location.exits.length) {
-    html += '<div style="margin-bottom: 8px;">';
-    state.location.exits.forEach((exit) => {
-      html += `<button class="action-btn" data-action="go ${exit}">Go ${exit}</button>`;
-    });
-    html += "</div>";
+
+// src/panels/character.ts
+function renderCharacterPanel(body, state) {
+  const p = state.player;
+  const hpPct = p.maxHealth > 0 ? Math.round(p.health / p.maxHealth * 100) : 0;
+  const xpPct = p.xpThreshold > 0 ? Math.round(p.xp / p.xpThreshold * 100) : 0;
+  const hpFill = Math.round(hpPct / 10);
+  const xpFill = Math.round(xpPct / 10);
+  body.innerHTML = `
+    <div><span class="stat-label">HP</span> <span class="bar-fill-hp">${"█".repeat(hpFill)}</span><span class="bar-empty">${"░".repeat(10 - hpFill)}</span> <span style="color:var(--text-dim)">${p.health}/${p.maxHealth}</span></div>
+    <div><span class="stat-label">XP</span> <span class="bar-fill-xp">${"█".repeat(xpFill)}</span><span class="bar-empty">${"░".repeat(10 - xpFill)}</span> <span style="color:var(--text-dim)">${p.xp}/${p.xpThreshold}</span></div>
+    <div><span class="stat-label">Lv</span> ${p.level}</div>
+  `;
+}
+
+// src/panels/inventory.ts
+var RARITY_COLORS = {
+  common: "#808080",
+  uncommon: "#1eff00",
+  rare: "#0070dd",
+  epic: "#a335ee",
+  legendary: "#ff8000"
+};
+function renderInventoryPanel(body, state) {
+  if (state.inventory.length === 0) {
+    body.innerHTML = '<div class="empty-msg">Empty</div>';
+    return;
   }
-  if (state.location.npcs.length) {
-    html += '<div style="margin-top: 8px;"><span class="stat-label">Present:</span></div>';
-    state.location.npcs.forEach((npc) => {
-      html += `<div style="font-size: 13px; color: var(--text-npc); padding: 2px 0;">${npc}</div>`;
-    });
+  body.innerHTML = state.inventory.map((item) => {
+    const color = RARITY_COLORS[item.rarity] || RARITY_COLORS.common;
+    const equip = item.equipped ? '<span class="item-equip">E</span>' : "";
+    return `<div class="item-row"><span class="item-bullet">·</span> <span style="color:${color}">${item.name}</span>${equip}</div>`;
+  }).join("");
+}
+
+// src/panels/exits.ts
+function renderExitsPanel(body, state, onAction) {
+  if (state.location.exits.length === 0) {
+    body.innerHTML = '<div class="empty-msg">None</div>';
+    return;
   }
-  container.innerHTML = html;
-  container.querySelectorAll("[data-action]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const action = btn.getAttribute("data-action");
-      if (action)
-        onAction(action);
-    });
+  body.innerHTML = state.location.exits.map((dir) => `<div class="exit-row" data-dir="${dir}"><span class="exit-dir">→ ${dir.charAt(0).toUpperCase() + dir.slice(1)}</span></div>`).join("");
+  body.querySelectorAll(".exit-row").forEach((row) => {
+    row.addEventListener("click", () => onAction(`go ${row.dataset.dir}`));
   });
 }
 
-// src/panels/actions.ts
-function renderActionsPanel(container, state, onAction) {
-  const actions = [
-    { label: "Look around", action: "look around" }
-  ];
-  state.location.npcs.forEach((npc) => {
-    actions.push({ label: `Talk to ${npc}`, action: `talk to ${npc}` });
+// src/panels/present.ts
+function renderPresentPanel(body, state, onAction) {
+  const npcs = state.location.npcs || [];
+  const items = state.location.items || [];
+  if (npcs.length === 0 && items.length === 0) {
+    body.innerHTML = '<div class="empty-msg">Nothing here</div>';
+    return;
+  }
+  let html = "";
+  for (const npc of npcs) {
+    const name = typeof npc === "string" ? npc : npc.name;
+    const role = typeof npc === "string" ? "" : npc.role || "";
+    html += `<div class="npc-row" data-action="talk to ${name}" style="cursor:pointer"><span class="npc-diamond">◆</span><span class="npc">${name}</span>${role ? `<span class="npc-role">— ${role}</span>` : ""}</div>`;
+  }
+  for (const item of items) {
+    const name = typeof item === "string" ? item : item.name;
+    html += `<div class="item-row" data-action="examine ${name}" style="cursor:pointer"><span class="item-bullet">·</span> ${name}</div>`;
+  }
+  body.innerHTML = html;
+  body.querySelectorAll("[data-action]").forEach((el) => {
+    el.addEventListener("click", () => onAction(el.dataset.action));
   });
-  state.location.items.forEach((item) => {
-    actions.push({ label: `Examine ${item}`, action: `examine ${item}` });
-    actions.push({ label: `Pick up ${item}`, action: `pick up ${item}` });
+}
+
+// src/ui/window.ts
+function createWindow(opts) {
+  const el = document.createElement("div");
+  el.className = `win${opts.className ? ` ${opts.className}` : ""}`;
+  if (opts.id)
+    el.id = opts.id;
+  const titleBar = document.createElement("div");
+  titleBar.className = "win-title";
+  titleBar.textContent = `─ ${opts.title} ─`;
+  const body = document.createElement("div");
+  body.className = "win-body";
+  if (opts.scrollable)
+    body.style.overflowY = "auto";
+  el.appendChild(titleBar);
+  el.appendChild(body);
+  return {
+    el,
+    body,
+    setTitle(title) {
+      titleBar.textContent = `─ ${title} ─`;
+    },
+    show() {
+      el.style.display = "";
+    },
+    hide() {
+      el.style.display = "none";
+    },
+    toggle() {
+      el.style.display = el.style.display === "none" ? "" : "none";
+    },
+    get visible() {
+      return el.style.display !== "none";
+    }
+  };
+}
+
+// src/ui/header.ts
+function createHeader() {
+  const el = document.createElement("div");
+  el.className = "tui-header";
+  el.innerHTML = `
+    <span class="header-time">
+      <span class="header-moon">☽</span>
+      <span class="header-date">—</span>
+    </span>
+    <span class="header-title">MEMENTO MORI</span>
+  `;
+  const moonEl = el.querySelector(".header-moon");
+  const dateEl = el.querySelector(".header-date");
+  return {
+    el,
+    updateTime(time) {
+      moonEl.textContent = time.moon_icon;
+      dateEl.textContent = `${time.moon_phase}  ·  ${ordinal(time.day_number)} of ${time.month}  ·  ${time.time_of_day}`;
+    }
+  };
+}
+function ordinal(n) {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+
+// src/ui/typewriter.ts
+function createTypewriter(opts) {
+  const {
+    text,
+    font,
+    maxWidth,
+    container,
+    charDelay = 25,
+    lineClass = "tw-line",
+    cursorClass = "tw-cursor"
+  } = opts;
+  let completeCb = null;
+  let timer = null;
+  let cancelled = false;
+  let started = false;
+  const prepared = prepareWithSegments(text, font);
+  const lines = [];
+  let cursor = { segmentIndex: 0, graphemeIndex: 0 };
+  while (true) {
+    const line = layoutNextLine(prepared, cursor, maxWidth);
+    if (!line)
+      break;
+    lines.push(line.text);
+    cursor = line.end;
+  }
+  let lineIdx = 0;
+  let charIdx = 0;
+  let currentLineEl = null;
+  let cursorEl = null;
+  function ensureCursor() {
+    if (!cursorEl) {
+      cursorEl = document.createElement("span");
+      cursorEl.className = cursorClass;
+      cursorEl.textContent = "█";
+    }
+    return cursorEl;
+  }
+  function tick() {
+    if (cancelled || lineIdx >= lines.length) {
+      finish();
+      return;
+    }
+    if (!currentLineEl) {
+      currentLineEl = document.createElement("div");
+      currentLineEl.className = lineClass;
+      container.appendChild(currentLineEl);
+    }
+    const line = lines[lineIdx];
+    if (charIdx < line.length) {
+      ensureCursor().remove();
+      currentLineEl.textContent = line.slice(0, charIdx + 1);
+      currentLineEl.appendChild(ensureCursor());
+      charIdx++;
+      timer = setTimeout(tick, charDelay);
+    } else {
+      ensureCursor().remove();
+      lineIdx++;
+      charIdx = 0;
+      currentLineEl = null;
+      timer = setTimeout(tick, charDelay);
+    }
+  }
+  function finish() {
+    if (cursorEl)
+      cursorEl.remove();
+    cursorEl = null;
+    if (completeCb)
+      completeCb();
+  }
+  function showAll() {
+    if (timer)
+      clearTimeout(timer);
+    container.innerHTML = "";
+    for (const line of lines) {
+      const div = document.createElement("div");
+      div.className = lineClass;
+      div.textContent = line;
+      container.appendChild(div);
+    }
+    finish();
+  }
+  return {
+    start() {
+      if (started)
+        return;
+      started = true;
+      container.innerHTML = "";
+      tick();
+    },
+    skip() {
+      if (cancelled)
+        return;
+      showAll();
+    },
+    cancel() {
+      cancelled = true;
+      if (timer)
+        clearTimeout(timer);
+      if (cursorEl)
+        cursorEl.remove();
+    },
+    onComplete(cb) {
+      completeCb = cb;
+    }
+  };
+}
+
+// src/ui/dialog.ts
+var DIALOG_FONT = '15px Georgia, "Times New Roman", serif';
+var DIALOG_MAX_WIDTH = 440;
+function createDialog() {
+  const backdrop = document.createElement("div");
+  backdrop.className = "dialog-backdrop";
+  backdrop.style.display = "none";
+  const win = document.createElement("div");
+  win.className = "dialog-win";
+  const titleBar = document.createElement("div");
+  titleBar.className = "win-title dialog-title";
+  const body = document.createElement("div");
+  body.className = "win-body dialog-body";
+  win.appendChild(titleBar);
+  win.appendChild(body);
+  backdrop.appendChild(win);
+  let currentTw = null;
+  function dismiss() {
+    if (currentTw) {
+      currentTw.cancel();
+      currentTw = null;
+    }
+    backdrop.style.display = "none";
+    body.innerHTML = "";
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || backdrop.style.display === "none")
+      return;
+    if (currentTw) {
+      currentTw.skip();
+      currentTw = null;
+    } else {
+      dismiss();
+    }
   });
-  container.innerHTML = actions.map((a) => `<button class="action-btn" data-action="${a.action}">${a.label}</button>`).join("");
-  container.querySelectorAll("[data-action]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const action = btn.getAttribute("data-action");
-      if (action)
-        onAction(action);
-    });
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop)
+      dismiss();
   });
+  body.addEventListener("click", () => {
+    if (currentTw) {
+      currentTw.skip();
+      currentTw = null;
+    }
+  });
+  return {
+    el: backdrop,
+    show(npcName, npcRole, text) {
+      if (currentTw)
+        currentTw.cancel();
+      titleBar.textContent = `─ ${npcName}${npcRole ? ` — ${npcRole}` : ""} ─`;
+      body.innerHTML = "";
+      backdrop.style.display = "";
+      currentTw = createTypewriter({
+        text,
+        font: DIALOG_FONT,
+        maxWidth: DIALOG_MAX_WIDTH,
+        container: body,
+        charDelay: 25,
+        lineClass: "tw-line",
+        cursorClass: "tw-cursor"
+      });
+      currentTw.onComplete(() => {
+        currentTw = null;
+      });
+      currentTw.start();
+    },
+    dismiss,
+    get active() {
+      return backdrop.style.display !== "none";
+    }
+  };
 }
 
 // src/app.ts
 var gameState;
 var narrative;
+var header;
+var npcDialog;
+var narrativeWin;
+var mapWin;
+var characterWin;
+var inventoryWin;
+var exitsWin;
+var presentWin;
+var commandWin;
 function registerMapEntities(map) {
   if (!map)
     return;
@@ -3294,10 +3962,11 @@ function registerMapEntities(map) {
 function renderAllPanels() {
   if (!gameState)
     return;
-  renderCharacterPanel(document.getElementById("character-panel"), gameState);
-  renderInventoryPanel(document.getElementById("inventory-list"), gameState);
-  renderLocationPanel(document.getElementById("location-panel"), gameState, handleAction);
-  renderActionsPanel(document.getElementById("actions-list"), gameState, handleAction);
+  characterWin.setTitle(gameState.player.name || "Character");
+  renderCharacterPanel(characterWin.body, gameState);
+  renderInventoryPanel(inventoryWin.body, gameState);
+  renderExitsPanel(exitsWin.body, gameState, handleAction);
+  renderPresentPanel(presentWin.body, gameState, handleAction);
   updateMap(gameState, handleAction);
 }
 function getThresholdMap() {
@@ -3376,6 +4045,9 @@ function handleMessage(msg) {
         session2.currentLocation = gameState.location.name;
         if (gameState.roomMap)
           registerMapEntities(gameState.roomMap);
+        if (msg.state_update.world_time) {
+          header.updateTime(msg.state_update.world_time);
+        }
         renderAllPanels();
       }
       if (msg.state_update?.status === "dead" || msg.text && msg.text.toLowerCase().includes("you have died")) {
@@ -3408,11 +4080,45 @@ async function enterWorld(playerName) {
   }
   document.getElementById("action-input").focus();
 }
+function mount(mountId, el) {
+  const mountEl = document.getElementById(mountId);
+  if (mountEl && mountEl.parentElement) {
+    mountEl.parentElement.replaceChild(el, mountEl);
+  }
+}
 document.addEventListener("DOMContentLoaded", () => {
-  narrative = initNarrative(document.getElementById("narrative-pane"));
-  initMapPanel(document.getElementById("map-container"), handleAction);
-  const actionInput = document.getElementById("action-input");
+  header = createHeader();
+  mount("tui-header", header.el);
+  narrativeWin = createWindow({ title: "Narrative", id: "narrative-win", className: "resizable", scrollable: true });
+  mapWin = createWindow({ title: "Map", id: "map-win" });
+  characterWin = createWindow({ title: "Character", id: "character-win", className: "sidebar-win resizable" });
+  inventoryWin = createWindow({ title: "Inventory", id: "inventory-win", className: "sidebar-win resizable" });
+  exitsWin = createWindow({ title: "Exits", id: "exits-win", className: "sidebar-win resizable" });
+  presentWin = createWindow({ title: "Present", id: "present-win", className: "sidebar-win resizable" });
+  commandWin = createWindow({ title: "Command", id: "command-win" });
+  mount("narrative-mount", narrativeWin.el);
+  mount("map-mount", mapWin.el);
+  mount("character-mount", characterWin.el);
+  mount("inventory-mount", inventoryWin.el);
+  mount("exits-mount", exitsWin.el);
+  mount("present-mount", presentWin.el);
+  mount("command-mount", commandWin.el);
+  mapWin.hide();
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "m" && document.activeElement?.tagName !== "INPUT") {
+      mapWin.toggle();
+    }
+  });
+  npcDialog = createDialog();
+  mount("dialog-mount", npcDialog.el);
+  narrative = initNarrative(narrativeWin.body);
+  commandWin.body.innerHTML = `
+    <span class="prompt-char">&gt;</span>
+    <input type="text" id="action-input" placeholder="What do you do?" autocomplete="off" spellcheck="false" />
+  `;
+  const actionInput = commandWin.body.querySelector("#action-input");
   initInput(actionInput, handleAction);
+  initMapPanel(mapWin.body, handleAction);
   setMessageHandler(handleMessage);
   setConnectionHandler((connected) => {
     if (connected) {
@@ -3421,14 +4127,14 @@ document.addEventListener("DOMContentLoaded", () => {
       narrative.addBlock("Connection lost. Reconnecting...", "system");
     }
   });
-  document.getElementById("new-char-btn").addEventListener("click", () => {
+  document.getElementById("death-restart-btn").addEventListener("click", () => {
     document.getElementById("death-overlay").classList.add("hidden");
     document.getElementById("char-create-overlay").classList.remove("hidden");
-    document.getElementById("narrative-pane").innerHTML = "";
+    narrativeWin.body.innerHTML = "";
     document.getElementById("char-name-input").focus();
   });
   const nameInput = document.getElementById("char-name-input");
-  const enterBtn = document.getElementById("enter-world-btn");
+  const enterBtn = document.getElementById("char-create-btn");
   enterBtn.addEventListener("click", () => {
     const name = nameInput.value.trim() || "Wanderer";
     enterWorld(name);

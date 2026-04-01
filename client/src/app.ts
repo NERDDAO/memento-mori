@@ -10,10 +10,27 @@ import { parseNarrative, renderSegments, setKnownEntities } from './renderer/tex
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
 import { initMapPanel, updateMap } from './panels/map';
+import { renderCharacterPanel } from './panels/character';
+import { renderInventoryPanel } from './panels/inventory';
+import { renderExitsPanel } from './panels/exits';
+import { renderPresentPanel } from './panels/present';
+import { createWindow, type Window as TuiWindow } from './ui/window';
+import { createHeader, type WorldTime } from './ui/header';
+import { createDialog } from './ui/dialog';
 import type { RoomMap } from './map/types';
 
 let gameState: GameState;
 let narrative: NarrativeController;
+
+let header: ReturnType<typeof createHeader>;
+let npcDialog: ReturnType<typeof createDialog>;
+let narrativeWin: ReturnType<typeof createWindow>;
+let mapWin: ReturnType<typeof createWindow>;
+let characterWin: ReturnType<typeof createWindow>;
+let inventoryWin: ReturnType<typeof createWindow>;
+let exitsWin: ReturnType<typeof createWindow>;
+let presentWin: ReturnType<typeof createWindow>;
+let commandWin: ReturnType<typeof createWindow>;
 
 // --- Entity registration for narrative highlighting ---
 function registerMapEntities(map: import('./map/types').RoomMap | null): void {
@@ -27,9 +44,13 @@ function registerMapEntities(map: import('./map/types').RoomMap | null): void {
 }
 
 // --- Panel rendering ---
-// TODO(Task 9): Wire new window-based panels here.
 function renderAllPanels(): void {
   if (!gameState) return;
+  characterWin.setTitle(gameState.player.name || 'Character');
+  renderCharacterPanel(characterWin.body, gameState);
+  renderInventoryPanel(inventoryWin.body, gameState);
+  renderExitsPanel(exitsWin.body, gameState, handleAction);
+  renderPresentPanel(presentWin.body, gameState, handleAction);
   updateMap(gameState, handleAction);
 }
 
@@ -113,6 +134,11 @@ function handleMessage(msg: any): void {
         const session = getSession();
         session.currentLocation = gameState.location.name;
         if (gameState.roomMap) registerMapEntities(gameState.roomMap);
+
+        if (msg.state_update.world_time) {
+          header.updateTime(msg.state_update.world_time as WorldTime);
+        }
+
         renderAllPanels();
       }
 
@@ -154,14 +180,65 @@ async function enterWorld(playerName: string): Promise<void> {
   (document.getElementById('action-input') as HTMLInputElement).focus();
 }
 
+// --- Helper: replace a mount div with a component element ---
+function mount(mountId: string, el: HTMLElement): void {
+  const mountEl = document.getElementById(mountId);
+  if (mountEl && mountEl.parentElement) {
+    mountEl.parentElement.replaceChild(el, mountEl);
+  }
+}
+
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
-  narrative = initNarrative(document.getElementById('narrative-pane')!);
-  initMapPanel(document.getElementById('map-container')!, handleAction);
+  // 1. Header
+  header = createHeader();
+  mount('tui-header', header.el);
 
-  const actionInput = document.getElementById('action-input') as HTMLInputElement;
+  // 2. Create windows
+  narrativeWin = createWindow({ title: 'Narrative', id: 'narrative-win', className: 'resizable', scrollable: true });
+  mapWin = createWindow({ title: 'Map', id: 'map-win' });
+  characterWin = createWindow({ title: 'Character', id: 'character-win', className: 'sidebar-win resizable' });
+  inventoryWin = createWindow({ title: 'Inventory', id: 'inventory-win', className: 'sidebar-win resizable' });
+  exitsWin = createWindow({ title: 'Exits', id: 'exits-win', className: 'sidebar-win resizable' });
+  presentWin = createWindow({ title: 'Present', id: 'present-win', className: 'sidebar-win resizable' });
+  commandWin = createWindow({ title: 'Command', id: 'command-win' });
+
+  // 3. Mount windows by replacing mount divs
+  mount('narrative-mount', narrativeWin.el);
+  mount('map-mount', mapWin.el);
+  mount('character-mount', characterWin.el);
+  mount('inventory-mount', inventoryWin.el);
+  mount('exits-mount', exitsWin.el);
+  mount('present-mount', presentWin.el);
+  mount('command-mount', commandWin.el);
+
+  // 4. Map starts hidden, toggle with 'm' key (not when input focused)
+  mapWin.hide();
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'm' && document.activeElement?.tagName !== 'INPUT') {
+      mapWin.toggle();
+    }
+  });
+
+  // 5. Dialog
+  npcDialog = createDialog();
+  mount('dialog-mount', npcDialog.el);
+
+  // 6. Narrative
+  narrative = initNarrative(narrativeWin.body);
+
+  // 7. Command input
+  commandWin.body.innerHTML = `
+    <span class="prompt-char">&gt;</span>
+    <input type="text" id="action-input" placeholder="What do you do?" autocomplete="off" spellcheck="false" />
+  `;
+  const actionInput = commandWin.body.querySelector('#action-input') as HTMLInputElement;
   initInput(actionInput, handleAction);
 
+  // 8. Map
+  initMapPanel(mapWin.body, handleAction);
+
+  // 9. Wire handlers
   setMessageHandler(handleMessage);
 
   setConnectionHandler((connected) => {
@@ -172,17 +249,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Death screen — new character button
-  document.getElementById('new-char-btn')!.addEventListener('click', () => {
+  // 10. Death screen — new character button
+  document.getElementById('death-restart-btn')!.addEventListener('click', () => {
     document.getElementById('death-overlay')!.classList.add('hidden');
     document.getElementById('char-create-overlay')!.classList.remove('hidden');
-    document.getElementById('narrative-pane')!.innerHTML = '';
+    narrativeWin.body.innerHTML = '';
     (document.getElementById('char-name-input') as HTMLInputElement).focus();
   });
 
   // Character creation
   const nameInput = document.getElementById('char-name-input') as HTMLInputElement;
-  const enterBtn = document.getElementById('enter-world-btn')!;
+  const enterBtn = document.getElementById('char-create-btn')!;
 
   enterBtn.addEventListener('click', () => {
     const name = nameInput.value.trim() || 'Wanderer';
