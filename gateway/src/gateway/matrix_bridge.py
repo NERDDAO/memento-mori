@@ -48,22 +48,36 @@ class MatrixBridge:
             self.connected = False
 
     async def _discover_rooms(self) -> None:
-        """Discover existing rooms and populate the location cache."""
-        if not self.client:
-            return
+        """Discover existing rooms via REST API and populate the location cache."""
         try:
-            joined = await self.client.joined_rooms()
-            if not hasattr(joined, "rooms"):
-                return
-            for room_id in joined.rooms:
-                state = await self.client.room_get_state(room_id)
-                for event in state.events if hasattr(state, "events") else []:
-                    if event.get("type") == "m.room.name":
-                        name = event["content"].get("name", "")
-                        if name:
-                            self.location_to_room[name] = room_id
-                            self.room_to_location[room_id] = name
-                            print(f"[matrix] Cached room: {name} -> {room_id}")
+            async with aiohttp.ClientSession() as session:
+                # Get joined rooms
+                resp = await session.get(
+                    f"{self.homeserver}/_matrix/client/v3/joined_rooms",
+                    headers={"Authorization": f"Bearer {self.token}"},
+                )
+                if resp.status != 200:
+                    print(f"[matrix] Room discovery failed: {resp.status}")
+                    return
+                data = await resp.json()
+                rooms = data.get("joined_rooms", [])
+
+                for room_id in rooms:
+                    # Get room state to find name
+                    state_resp = await session.get(
+                        f"{self.homeserver}/_matrix/client/v3/rooms/{room_id}/state",
+                        headers={"Authorization": f"Bearer {self.token}"},
+                    )
+                    if state_resp.status != 200:
+                        continue
+                    events = await state_resp.json()
+                    for event in events:
+                        if event.get("type") == "m.room.name":
+                            name = event.get("content", {}).get("name", "")
+                            if name:
+                                self.location_to_room[name] = room_id
+                                self.room_to_location[room_id] = name
+                                print(f"[matrix] Cached room: {name} -> {room_id}")
         except Exception as e:
             print(f"[matrix] Room discovery failed: {e}")
 
