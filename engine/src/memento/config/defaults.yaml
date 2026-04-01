@@ -6,10 +6,10 @@ game:
   max_npcs_per_location: 8
 
 llm:
-  default_model: "openrouter/anthropic/claude-sonnet-4"
+  default_model: "openrouter/google/gemini-2.5-flash"
   overrides:
-    narration: "openrouter/anthropic/claude-sonnet-4"
-    event_detection: "openrouter/anthropic/claude-haiku-4"
-    combat_narration: "openrouter/anthropic/claude-sonnet-4"
-    npc_concept: "openrouter/anthropic/claude-sonnet-4"
-    stat_assignment: "openrouter/anthropic/claude-haiku-4"
+    narration: "openrouter/google/gemini-2.5-flash"
+    event_detection: "openrouter/google/gemini-2.5-flash"
+    combat_narration: "openrouter/google/gemini-2.5-flash"
+    npc_concept: "openrouter/google/gemini-2.5-flash"
+    stat_assignment: "openrouter/google/gemini-2.5-flash"
