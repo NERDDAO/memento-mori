@@ -19,6 +19,31 @@ function createInitialState(playerName) {
     inventory: []
   };
 }
+function applyStateUpdate(state, update) {
+  if (update.location)
+    state.location.name = update.location;
+  if (update.health != null)
+    state.player.health = update.health;
+  if (update.max_health != null)
+    state.player.maxHealth = update.max_health;
+  if (update.level != null)
+    state.player.level = update.level;
+  if (update.xp != null)
+    state.player.xp = update.xp;
+  if (update.exits)
+    state.location.exits = update.exits;
+  if (update.npcs)
+    state.location.npcs = update.npcs;
+  if (update.items)
+    state.location.items = update.items;
+  if (update.inventory) {
+    state.inventory = update.inventory.map((i) => ({
+      name: i.name || "?",
+      rarity: i.rarity || "common",
+      equipped: i.equipped || false
+    }));
+  }
+}
 
 // src/state/session.ts
 var GATEWAY_URL = "http://localhost:8080";
@@ -33,6 +58,10 @@ var session = {
 };
 var ws = null;
 var onMessage = null;
+var onConnectionChange = null;
+function setConnectionHandler(handler) {
+  onConnectionChange = handler;
+}
 function getSession() {
   return session;
 }
@@ -60,6 +89,7 @@ function connectWebSocket() {
   ws = new WebSocket(`${WS_URL}/${session.playerId}`);
   ws.onopen = () => {
     session.connected = true;
+    onConnectionChange?.(true);
   };
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
@@ -68,6 +98,7 @@ function connectWebSocket() {
   };
   ws.onclose = () => {
     session.connected = false;
+    onConnectionChange?.(false);
     setTimeout(() => {
       if (!session.connected)
         connectWebSocket();
@@ -188,7 +219,7 @@ function initInput(inputEl, onSubmit) {
 }
 
 // src/panels/character.ts
-function renderCharacterPanel(container, state) {
+function renderCharacterPanel(_container, state) {
   const set = (id, text) => {
     const el = document.getElementById(id);
     if (el)
@@ -300,6 +331,18 @@ async function handleAction(action) {
   narrative.addBlock(`> ${action}`, "player-action");
   await sendAction(action);
 }
+function showDeathScreen(cause) {
+  const overlay = document.getElementById("death-overlay");
+  const causeEl = document.getElementById("death-cause");
+  const statsEl = document.getElementById("death-stats");
+  causeEl.textContent = cause || "The world continues without you.";
+  statsEl.innerHTML = gameState ? `
+    <div>Name: ${gameState.player.name}</div>
+    <div>Level: ${gameState.player.level}</div>
+    <div>Last Location: ${gameState.location.name}</div>
+  ` : "";
+  overlay.classList.remove("hidden");
+}
 function handleMessage(msg) {
   switch (msg.type) {
     case "narrative": {
@@ -308,13 +351,13 @@ function handleMessage(msg) {
       const html = renderSegments(segments);
       narrative.addHtml(html, "narrative");
       if (msg.state_update && gameState) {
-        const u = msg.state_update;
-        if (u.location) {
-          gameState.location.name = u.location;
-          const session2 = getSession();
-          session2.currentLocation = u.location;
-        }
+        applyStateUpdate(gameState, msg.state_update);
+        const session2 = getSession();
+        session2.currentLocation = gameState.location.name;
         renderAllPanels();
+      }
+      if (msg.state_update?.status === "dead" || msg.text && msg.text.toLowerCase().includes("you have died")) {
+        showDeathScreen(msg.state_update?.cause || "");
       }
       break;
     }
@@ -344,6 +387,19 @@ document.addEventListener("DOMContentLoaded", () => {
   const actionInput = document.getElementById("action-input");
   initInput(actionInput, handleAction);
   setMessageHandler(handleMessage);
+  setConnectionHandler((connected) => {
+    if (connected) {
+      narrative.addBlock("Reconnected.", "system");
+    } else {
+      narrative.addBlock("Connection lost. Reconnecting...", "system");
+    }
+  });
+  document.getElementById("new-char-btn").addEventListener("click", () => {
+    document.getElementById("death-overlay").classList.add("hidden");
+    document.getElementById("char-create-overlay").classList.remove("hidden");
+    document.getElementById("narrative-pane").innerHTML = "";
+    document.getElementById("char-name-input").focus();
+  });
   const nameInput = document.getElementById("char-name-input");
   const enterBtn = document.getElementById("enter-world-btn");
   enterBtn.addEventListener("click", () => {

@@ -236,16 +236,24 @@
       text-align: center;
     }
     #char-name-input:focus { border-color: var(--accent); }
-    #enter-world-btn {
+    .enter-btn {
       padding: 12px 32px; font-size: 14px;
       background: transparent; border: 1px solid var(--accent);
       color: var(--accent); cursor: pointer; border-radius: 4px;
       font-family: system-ui, sans-serif; letter-spacing: 2px;
       text-transform: uppercase; transition: all 0.2s;
     }
-    #enter-world-btn:hover {
+    .enter-btn:hover {
       background: var(--accent); color: var(--bg-primary);
     }
+    #death-overlay {
+      position: fixed; inset: 0; z-index: 100;
+      background: rgba(10, 10, 15, 0.95);
+      display: flex; align-items: center; justify-content: center;
+      transition: opacity 0.5s ease;
+    }
+    #death-overlay.hidden { opacity: 0; pointer-events: none; }
+    #death-overlay h1 { color: var(--text-damage); }
   </style>
 </head>
 <body>
@@ -255,8 +263,16 @@
       <p class="tagline">Remember that you will die.</p>
       <div class="create-form">
         <input type="text" id="char-name-input" placeholder="What is your name?" />
-        <button id="enter-world-btn">Enter the World</button>
+        <button id="enter-world-btn" class="enter-btn">Enter the World</button>
       </div>
+    </div>
+  </div>
+  <div id="death-overlay" class="hidden">
+    <div class="create-content">
+      <h1>You Have Died</h1>
+      <p class="tagline" id="death-cause">The world continues without you.</p>
+      <div id="death-stats" style="margin: 24px 0; font-family: system-ui, sans-serif; font-size: 13px; color: var(--text-dim);"></div>
+      <button id="new-char-btn" class="enter-btn">Create New Character</button>
     </div>
   </div>
   <div id="app">

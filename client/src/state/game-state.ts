@@ -45,6 +45,24 @@ export function createInitialState(playerName: string): GameState {
   };
 }
 
+export function applyStateUpdate(state: GameState, update: Record<string, any>): void {
+  if (update.location) state.location.name = update.location;
+  if (update.health != null) state.player.health = update.health;
+  if (update.max_health != null) state.player.maxHealth = update.max_health;
+  if (update.level != null) state.player.level = update.level;
+  if (update.xp != null) state.player.xp = update.xp;
+  if (update.exits) state.location.exits = update.exits;
+  if (update.npcs) state.location.npcs = update.npcs;
+  if (update.items) state.location.items = update.items;
+  if (update.inventory) {
+    state.inventory = update.inventory.map((i: any) => ({
+      name: i.name || '?',
+      rarity: i.rarity || 'common',
+      equipped: i.equipped || false,
+    }));
+  }
+}
+
 /** Update DOM elements to reflect current state. */
 export function renderState(state: GameState): void {
   const set = (id: string, text: string) => {

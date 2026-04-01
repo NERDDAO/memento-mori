@@ -24,6 +24,11 @@ const session: Session = {
 
 let ws: WebSocket | null = null;
 let onMessage: ((msg: any) => void) | null = null;
+let onConnectionChange: ((connected: boolean) => void) | null = null;
+
+export function setConnectionHandler(handler: (connected: boolean) => void): void {
+  onConnectionChange = handler;
+}
 
 export function getSession(): Session {
   return session;
@@ -57,6 +62,7 @@ function connectWebSocket(): void {
   ws = new WebSocket(`${WS_URL}/${session.playerId}`);
   ws.onopen = () => {
     session.connected = true;
+    onConnectionChange?.(true);
   };
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
@@ -64,6 +70,7 @@ function connectWebSocket(): void {
   };
   ws.onclose = () => {
     session.connected = false;
+    onConnectionChange?.(false);
     setTimeout(() => {
       if (!session.connected) connectWebSocket();
     }, 3000);

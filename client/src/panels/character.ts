@@ -3,7 +3,7 @@
 
 import type { GameState } from '../state/game-state';
 
-export function renderCharacterPanel(container: HTMLElement, state: GameState): void {
+export function renderCharacterPanel(_container: HTMLElement, state: GameState): void {
   const set = (id: string, text: string) => {
     const el = document.getElementById(id);
     if (el) el.textContent = text;

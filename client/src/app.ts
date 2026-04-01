@@ -4,8 +4,8 @@
  * Thin orchestrator: wires session, panels, and message handling together.
  */
 
-import { createInitialState, type GameState } from './state/game-state';
-import { getSession, initSession, sendAction, setMessageHandler } from './state/session';
+import { createInitialState, applyStateUpdate, type GameState } from './state/game-state';
+import { getSession, initSession, sendAction, setMessageHandler, setConnectionHandler } from './state/session';
 import { parseNarrative, renderSegments } from './renderer/text-renderer';
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
@@ -41,6 +41,22 @@ async function handleAction(action: string): Promise<void> {
   await sendAction(action);
 }
 
+// --- Death screen ---
+function showDeathScreen(cause: string): void {
+  const overlay = document.getElementById('death-overlay')!;
+  const causeEl = document.getElementById('death-cause')!;
+  const statsEl = document.getElementById('death-stats')!;
+
+  causeEl.textContent = cause || 'The world continues without you.';
+  statsEl.innerHTML = gameState ? `
+    <div>Name: ${gameState.player.name}</div>
+    <div>Level: ${gameState.player.level}</div>
+    <div>Last Location: ${gameState.location.name}</div>
+  ` : '';
+
+  overlay.classList.remove('hidden');
+}
+
 // --- WebSocket message handling ---
 function handleMessage(msg: any): void {
   switch (msg.type) {
@@ -51,13 +67,15 @@ function handleMessage(msg: any): void {
       narrative.addHtml(html, 'narrative');
 
       if (msg.state_update && gameState) {
-        const u = msg.state_update;
-        if (u.location) {
-          gameState.location.name = u.location;
-          const session = getSession();
-          session.currentLocation = u.location;
-        }
+        applyStateUpdate(gameState, msg.state_update);
+        const session = getSession();
+        session.currentLocation = gameState.location.name;
         renderAllPanels();
+      }
+
+      if (msg.state_update?.status === 'dead' ||
+          (msg.text && msg.text.toLowerCase().includes('you have died'))) {
+        showDeathScreen(msg.state_update?.cause || '');
       }
       break;
     }
@@ -97,6 +115,22 @@ document.addEventListener('DOMContentLoaded', () => {
   initInput(actionInput, handleAction);
 
   setMessageHandler(handleMessage);
+
+  setConnectionHandler((connected) => {
+    if (connected) {
+      narrative.addBlock('Reconnected.', 'system');
+    } else {
+      narrative.addBlock('Connection lost. Reconnecting...', 'system');
+    }
+  });
+
+  // Death screen — new character button
+  document.getElementById('new-char-btn')!.addEventListener('click', () => {
+    document.getElementById('death-overlay')!.classList.add('hidden');
+    document.getElementById('char-create-overlay')!.classList.remove('hidden');
+    document.getElementById('narrative-pane')!.innerHTML = '';
+    (document.getElementById('char-name-input') as HTMLInputElement).focus();
+  });
 
   // Character creation
   const nameInput = document.getElementById('char-name-input') as HTMLInputElement;
