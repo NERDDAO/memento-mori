@@ -130,35 +130,3 @@ function showPlayerCard(state: GameState): void {
   };
   renderer.setCard(card);
 }
-
-// Keep the text-based location panel for the side (simplified)
-export function renderLocationPanel(
-  container: HTMLElement,
-  state: GameState,
-  onAction: (action: string) => void,
-): void {
-  let html = `<div style="color: var(--text-location); margin-bottom: 8px; font-size: 15px;">${state.location.name}</div>`;
-
-  if (state.location.exits.length) {
-    html += '<div style="margin-bottom: 8px;">';
-    state.location.exits.forEach(exit => {
-      html += `<button class="action-btn" data-action="go ${exit}">Go ${exit}</button>`;
-    });
-    html += '</div>';
-  }
-
-  if (state.location.npcs.length) {
-    html += '<div style="margin-top: 8px;"><span class="stat-label">Present:</span></div>';
-    state.location.npcs.forEach(npc => {
-      html += `<div style="font-size: 13px; color: var(--text-npc); padding: 2px 0;">${npc}</div>`;
-    });
-  }
-
-  container.innerHTML = html;
-  container.querySelectorAll('[data-action]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const action = btn.getAttribute('data-action');
-      if (action) onAction(action);
-    });
-  });
-}

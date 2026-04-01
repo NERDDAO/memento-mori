@@ -9,10 +9,7 @@ import { getSession, initSession, sendAction, setMessageHandler, setConnectionHa
 import { parseNarrative, renderSegments, setKnownEntities } from './renderer/text-renderer';
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
-import { renderCharacterPanel } from './panels/character';
-import { renderInventoryPanel } from './panels/inventory';
-import { renderLocationPanel, initMapPanel, updateMap } from './panels/map';
-import { renderActionsPanel } from './panels/actions';
+import { initMapPanel, updateMap } from './panels/map';
 import type { RoomMap } from './map/types';
 
 let gameState: GameState;
@@ -30,20 +27,9 @@ function registerMapEntities(map: import('./map/types').RoomMap | null): void {
 }
 
 // --- Panel rendering ---
+// TODO(Task 9): Wire new window-based panels here.
 function renderAllPanels(): void {
   if (!gameState) return;
-  renderCharacterPanel(document.getElementById('character-panel')!, gameState);
-  renderInventoryPanel(document.getElementById('inventory-list')!, gameState);
-  renderLocationPanel(
-    document.getElementById('location-panel')!,
-    gameState,
-    handleAction,
-  );
-  renderActionsPanel(
-    document.getElementById('actions-list')!,
-    gameState,
-    handleAction,
-  );
   updateMap(gameState, handleAction);
 }
 
