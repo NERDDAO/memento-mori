@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Memento Mori</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #12121a;
+      --bg-panel: #16161f;
+      --text-primary: #c8c8d0;
+      --text-dim: #6a6a78;
+      --text-npc: #d4a574;
+      --text-damage: #e05050;
+      --text-heal: #50c878;
+      --text-system: #5a5a70;
+      --text-location: #7aa2d4;
+      --border: #2a2a38;
+      --accent: #8b5cf6;
+      --input-bg: #1a1a25;
+    }
+
+    body {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    #app {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      grid-template-rows: 1fr auto;
+      height: 100vh;
+      gap: 1px;
+      background: var(--border);
+    }
+
+    #narrative-pane {
+      background: var(--bg-primary);
+      overflow-y: auto;
+      padding: 24px 32px;
+      line-height: 1.7;
+      font-size: 16px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    #side-panels {
+      background: var(--bg-secondary);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      grid-row: 1 / 3;
+      grid-column: 2;
+    }
+
+    .panel {
+      background: var(--bg-panel);
+      padding: 16px;
+    }
+
+    .panel h3 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+      font-family: system-ui, sans-serif;
+    }
+
+    #input-bar {
+      background: var(--bg-secondary);
+      padding: 12px 24px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      grid-column: 1;
+    }
+
+    #action-input {
+      flex: 1;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      font-family: 'Georgia', serif;
+      font-size: 15px;
+      padding: 10px 16px;
+      border-radius: 4px;
+      outline: none;
+    }
+
+    #action-input:focus {
+      border-color: var(--accent);
+    }
+
+    #action-input::placeholder {
+      color: var(--text-dim);
+    }
+
+    /* Narrative text styling */
+    .narrative-block {
+      margin-bottom: 20px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .narrative-block.player-action {
+      color: var(--text-dim);
+      font-style: italic;
+      border-left: 2px solid var(--border);
+      padding-left: 16px;
+    }
+
+    .narrative-block.system {
+      color: var(--text-system);
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+    }
+
+    .narrative-block .npc-name {
+      color: var(--text-npc);
+      font-weight: bold;
+    }
+
+    .narrative-block .damage {
+      color: var(--text-damage);
+      font-weight: bold;
+    }
+
+    .narrative-block .location-name {
+      color: var(--text-location);
+    }
+
+    /* Thinking indicator */
+    .thinking {
+      color: var(--text-dim);
+      font-style: italic;
+    }
+
+    .thinking::after {
+      content: '...';
+      animation: dots 1.5s infinite;
+    }
+
+    @keyframes dots {
+      0%, 20% { content: '.'; }
+      40% { content: '..'; }
+      60%, 100% { content: '...'; }
+    }
+
+    /* Side panel details */
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+    }
+
+    .stat-label { color: var(--text-dim); }
+    .stat-value { color: var(--text-primary); }
+
+    .health-bar {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      margin: 8px 0;
+      overflow: hidden;
+    }
+
+    .health-bar-fill {
+      height: 100%;
+      background: var(--text-heal);
+      border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+
+    .inventory-item {
+      padding: 6px 0;
+      font-size: 13px;
+      font-family: system-ui, sans-serif;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .action-btn {
+      display: block;
+      width: 100%;
+      padding: 8px 12px;
+      margin: 4px 0;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      text-align: left;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+
+    .action-btn:hover {
+      border-color: var(--accent);
+      background: var(--bg-secondary);
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="narrative-pane">
+      <div class="narrative-block system">
+        Connecting to Memento Mori...
+      </div>
+    </div>
+    <div id="side-panels">
+      <div class="panel" id="character-panel">
+        <h3>Character</h3>
+        <div class="stat-row">
+          <span class="stat-label">Name</span>
+          <span class="stat-value" id="char-name">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Level</span>
+          <span class="stat-value" id="char-level">1</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Health</span>
+          <span class="stat-value" id="char-health">100/100</span>
+        </div>
+        <div class="health-bar">
+          <div class="health-bar-fill" id="health-fill" style="width: 100%"></div>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">XP</span>
+          <span class="stat-value" id="char-xp">0/100</span>
+        </div>
+      </div>
+      <div class="panel" id="location-panel">
+        <h3>Location</h3>
+        <div id="location-name" style="color: var(--text-location); margin-bottom: 8px;">Unknown</div>
+        <div id="location-exits" style="font-size: 13px; color: var(--text-dim); font-family: system-ui, sans-serif;"></div>
+      </div>
+      <div class="panel" id="inventory-panel">
+        <h3>Inventory</h3>
+        <div id="inventory-list">
+          <div class="inventory-item" style="color: var(--text-dim);">Empty</div>
+        </div>
+      </div>
+      <div class="panel" id="actions-panel">
+        <h3>Actions</h3>
+        <button class="action-btn" onclick="submitAction('look around')">Look around</button>
+        <button class="action-btn" onclick="submitAction('check inventory')">Check inventory</button>
+      </div>
+    </div>
+    <div id="input-bar">
+      <input type="text" id="action-input" placeholder="What do you do?" autofocus />
+    </div>
+  </div>
+  <script type="module" src="src/app.ts"></script>
+</body>
+</html>
