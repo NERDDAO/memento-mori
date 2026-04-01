@@ -51,11 +51,35 @@ def make_location_crew(location_plan: str, region_name: str) -> Crew:
             "Create it as a Location entity in the KG using create_entity, then use create_edge "
             "to link it to the region with a LOCATED_IN relationship. "
             "Define the layout: key areas, points of interest, NPCs present, items found, "
-            "and any sub-areas worth exploring."
+            "and any sub-areas worth exploring.\n\n"
+            "ALSO generate a 2D ASCII tile grid for this location as JSON. "
+            "The grid must be exactly 40 columns wide by 20 rows tall (width*height = 800 tiles). "
+            "Use these tile characters:\n"
+            "  # = wall      . = floor     + = door/exit  T = table\n"
+            "  B = bar/counter  ~ = water  , = grass      : = gravel\n"
+            "  = = road      ^ = stairs\n"
+            "Place walls (#) around the entire perimeter. Fill the interior with floor tiles (.) "
+            "and thematic features that match the location description. Include NPC spawn points, "
+            "item locations, and exit positions that match the location's key areas.\n\n"
+            "Output the tile grid as a JSON block at the very end of your response, "
+            "wrapped in ```json code fences, matching this exact schema:\n"
+            "{\n"
+            '  "width": 40,\n'
+            '  "height": 20,\n'
+            '  "tiles": ["#", ".", "+", ...],  // flat string array, row-major, length = width*height\n'
+            '  "npcs": [{"x": 5, "y": 3, "ch": "K", "name": "Barkeeper"}],\n'
+            '  "items": [{"x": 10, "y": 7, "ch": "!", "name": "Health Potion"}],\n'
+            '  "exits": [{"x": 39, "y": 10, "ch": "+", "direction": "east", "target": "unknown"}],\n'
+            '  "spawn": {"x": 20, "y": 18}\n'
+            "}"
         ),
         expected_output=(
             "Location design including: name, type, key areas/rooms, points of interest, "
-            "notable NPCs, items, and the KG entity ID after creation."
+            "notable NPCs, items, and the KG entity ID after creation. "
+            "Followed by a ```json code block containing the RoomMap tile grid with fields: "
+            "width (40), height (20), tiles (flat array of 800 single-char strings), "
+            "npcs (array of {x,y,ch,name}), items (array of {x,y,ch,name}), "
+            "exits (array of {x,y,ch,direction,target}), and spawn ({x,y})."
         ),
         agent=architect,
     )
