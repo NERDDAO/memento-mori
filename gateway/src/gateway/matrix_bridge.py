@@ -110,13 +110,13 @@ class MatrixBridge:
                 "location": location or room.display_name or "unknown",
                 "state_update": state_update,
             }
-            if player_id:
-                # Send directly to the player who triggered it
+            # Send to the specific player, or broadcast to location, or all
+            # Only one path — no duplicates
+            if player_id and self.ws_hub.connections.get(player_id):
                 await self.ws_hub.send_to_player(player_id, msg)
-            if location:
+            elif location:
                 await self.ws_hub.broadcast_to_location(location, msg)
             else:
-                # Room not in map — broadcast to all
                 await self.ws_hub.broadcast_all(msg)
 
     async def register_player(self, player_name: str, player_id: str) -> str | None:
