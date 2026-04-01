@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from crewai.tools import tool
 from memento.bonfires_client import get_client
+from memento.tools import chain as _chain
 
 
 def _resolve_entity_uuid(name: str) -> str | None:
@@ -47,6 +48,15 @@ def create_entity(name: str, entity_type: str, summary: str) -> str:
     client = get_client()
     labels = [_sanitize_label(entity_type)]
     uuid = client.kg.create_entity(name, labels, {"summary": summary})
+    # Chain dual-write
+    if _chain.is_enabled():
+        entity_type_lower = entity_type.lower()
+        if entity_type_lower in ("character", "player", "npc"):
+            _chain.register_character(uuid, name, "", 1)
+        elif entity_type_lower in ("item", "weapon", "armor", "consumable"):
+            _chain.register_item(uuid, name, summary[:50], "", "")
+        elif entity_type_lower in ("location", "room", "region"):
+            _chain.register_location(uuid, name, summary[:50], "")
     return f"Created {entity_type} '{name}' with UUID: {uuid}"
 
 
@@ -71,6 +81,10 @@ def create_edge(source_name: str, target_name: str, relationship: str, fact: str
     if not tgt_uuid:
         return f"Error: could not find entity '{target_name}'"
     client.kg.create_edge(src_uuid, tgt_uuid, relationship, fact)
+    # Chain dual-write for death edges
+    if _chain.is_enabled() and relationship.upper() in ("DIED_AT", "KILLED_BY"):
+        source_uuid = _resolve_entity_uuid(source_name)
+        _chain.record_death(source_uuid or "", fact, target_name, 0, 0)
     return f"{source_name} --[{relationship}]--> {target_name}"
 
 
@@ -97,6 +111,10 @@ def mark_status(entity_name: str, status: str, cause: str = "") -> str:
         return f"Error: could not find entity '{entity_name}'"
     fact = f"{entity_name} {status}. {cause}".strip()
     client.kg.create_edge(uuid, uuid, "HAS_STATUS", fact)
+    # Chain dual-write for death status
+    if _chain.is_enabled() and status.lower() == "dead":
+        entity_uuid = _resolve_entity_uuid(entity_name)
+        _chain.record_death(entity_uuid or "", cause, "", 0, 0)
     return f"Marked '{entity_name}' as {status}"
 
 
@@ -114,6 +132,9 @@ def remember_event(summary: str) -> str:
     Use this for important moments: deaths, discoveries, betrayals, victories."""
     client = get_client()
     client.agents.sync(summary, chat_id="rpg:game-session")
+    # Chain dual-write
+    if _chain.is_enabled():
+        _chain.record_event("game_event", [], "", summary, 0)
     return f"Recorded: {summary}"
 
 
