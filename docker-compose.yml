@@ -1,0 +1,12 @@
+services:
+  synapse:
+    image: matrixdotorg/synapse:latest
+    container_name: memento-synapse
+    volumes:
+      - memento-mori-synapse-data:/data
+    ports:
+      - "8008:8008"
+
+volumes:
+  memento-mori-synapse-data:
+    external: true

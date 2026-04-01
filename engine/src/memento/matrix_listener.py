@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from nio import AsyncClient, MatrixRoom, RoomMessageText
+from nio import AsyncClient, InviteMemberEvent, MatrixRoom, RoomMessageText
 
 
 class EngineMatrixListener:
@@ -18,24 +18,44 @@ class EngineMatrixListener:
 
     async def start(self) -> None:
         """Connect to Matrix and start listening."""
+        if not self.token:
+            print("[engine] ERROR: MATRIX_BOT_TOKEN not set")
+            return
+
         self.client = AsyncClient(self.homeserver)
         self.client.access_token = self.token
+        # nio requires user_id to be set before most API calls
+        self.client.user_id = "@narrator:localhost"
 
         resp = await self.client.whoami()
-        if hasattr(resp, "user_id"):
+        if hasattr(resp, "user_id") and resp.user_id:
             self.client.user_id = resp.user_id
             print(f"[engine] Connected as {resp.user_id}")
+        else:
+            print(f"[engine] WARNING: whoami failed: {resp}")
 
+        # Join all existing rooms
+        try:
+            joined = await self.client.joined_rooms()
+            if hasattr(joined, "rooms"):
+                print(f"[engine] Already in {len(joined.rooms)} rooms")
+        except Exception as e:
+            print(f"[engine] Could not list rooms: {e}")
+
+        # Auto-join on invite
+        self.client.add_event_callback(self._on_invite, InviteMemberEvent)
         self.client.add_event_callback(self._on_action, RoomMessageText)
         print("[engine] Listening for player actions...")
         await self.client.sync_forever(timeout=30000)
 
+    async def _on_invite(self, room: MatrixRoom, event: InviteMemberEvent) -> None:
+        """Auto-join rooms when invited."""
+        if self.client and event.state_key == self.client.user_id:
+            await self.client.join(room.room_id)
+            print(f"[engine] Joined room: {room.display_name or room.room_id}")
+
     async def _on_action(self, room: MatrixRoom, event: RoomMessageText) -> None:
         """Handle a player action message."""
-        # Skip own messages
-        if self.client and event.sender == self.client.user_id:
-            return
-
         content = event.source.get("content", {})
         rpg_meta = content.get("com.bonfires.rpg", {})
 

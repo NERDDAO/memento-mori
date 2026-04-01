@@ -21,12 +21,17 @@ class CreateSessionResponse(BaseModel):
 
 @router.post("/session/create", response_model=CreateSessionResponse)
 async def create_session(req: CreateSessionRequest):
-    """Create a new game session — creates player in KG, generates opening narration."""
+    """Create a new game session — creates player in KG, registers Matrix user, generates opening narration."""
     try:
         from memento.session import SessionManager
         sm = SessionManager()
-        # Run sync SessionManager in thread
         result = await asyncio.to_thread(sm.create_player, req.player_name)
+
+        # Register a Matrix user for this player
+        from gateway.app import bridge
+        if bridge and bridge.connected:
+            await bridge.register_player(req.player_name, result["player_id"])
+
         return CreateSessionResponse(
             player_id=result["player_id"],
             session_id=result["session_id"],
@@ -34,10 +39,16 @@ async def create_session(req: CreateSessionRequest):
             opening_narrative=result.get("opening_narrative", ""),
         )
     except Exception as e:
-        # Fallback if engine not available
         import uuid
+        player_id = str(uuid.uuid4())
+
+        # Still try to register Matrix user in fallback
+        from gateway.app import bridge
+        if bridge and bridge.connected:
+            await bridge.register_player(req.player_name, player_id)
+
         return CreateSessionResponse(
-            player_id=str(uuid.uuid4()),
+            player_id=player_id,
             session_id="fallback",
             location="The Threshold",
             opening_narrative=f"Welcome, {req.player_name}. Your journey begins.",
