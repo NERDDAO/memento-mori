@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
 from nio import AsyncClient, MatrixRoom, RoomMessageText
@@ -68,10 +67,12 @@ class MatrixBridge:
         if rpg_meta.get("type") == "narrative":
             # Relay narrative to all connected clients in this room's location
             location = self.room_to_location.get(room.room_id, "unknown")
+            state_update = rpg_meta.get("state_update", {})
             await self.ws_hub.broadcast_to_location(location, {
                 "type": "narrative",
                 "text": body,
                 "location": location,
+                "state_update": state_update,
             })
 
     async def send_action(self, room_id: str, player_id: str, action_text: str) -> None:

@@ -47,8 +47,9 @@ class EngineMatrixListener:
         print(f"[engine] Action from {player_id}: {action_text}")
 
         # Run GameTurnFlow in a thread (sync CrewAI in async context)
-        narrative = await asyncio.to_thread(
-            self._run_turn, player_id, room.display_name or "Unknown", action_text
+        location_name = room.display_name or "Unknown"
+        narrative, state_update = await asyncio.to_thread(
+            self._run_turn, player_id, location_name, action_text
         )
 
         # Post narrative back to Matrix room
@@ -62,13 +63,14 @@ class EngineMatrixListener:
                     "com.bonfires.rpg": {
                         "type": "narrative",
                         "player_id": player_id,
+                        "state_update": state_update,
                     },
                 },
             )
 
     @staticmethod
-    def _run_turn(player_id: str, location_name: str, action: str) -> str:
-        """Run GameTurnFlow synchronously (called from thread)."""
+    def _run_turn(player_id: str, location_name: str, action: str) -> tuple[str, dict]:
+        """Run GameTurnFlow synchronously (called from thread). Returns (narrative, state_update)."""
         from memento.flows.game_turn import GameTurnFlow
 
         flow = GameTurnFlow()
@@ -76,7 +78,11 @@ class EngineMatrixListener:
         flow.state.location_name = location_name
         flow.state.action = action
         flow.kickoff()
-        return flow.state.narrative
+        state_update = {
+            "location": location_name,
+            "events": str(flow.state.events)[:500] if hasattr(flow.state, "events") else "",
+        }
+        return flow.state.narrative, state_update
 
 
 async def main():

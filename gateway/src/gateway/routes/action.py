@@ -25,8 +25,9 @@ async def submit_action(req: ActionRequest):
         room_id = await bridge.get_or_create_room(req.location)
         await bridge.send_action(room_id, req.player_id, req.action)
 
-    # Also send "thinking" indicator to client
+    # Track player location and send "thinking" indicator to client
     if ws_hub:
+        ws_hub.set_location(req.player_id, req.location)
         await ws_hub.send_to_player(req.player_id, {
             "type": "thinking",
             "action": req.action,
