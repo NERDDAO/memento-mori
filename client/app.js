@@ -122,37 +122,98 @@ async function sendAction(action) {
 }
 
 // src/renderer/text-renderer.ts
+var knownEntities = new Map;
+function setKnownEntities(entities) {
+  knownEntities = new Map;
+  for (const e of entities) {
+    knownEntities.set(e.name, { id: e.id, type: e.type });
+  }
+}
 function parseNarrative(text) {
   const segments = [];
   const pattern = /"([^"]+)"|(\d+ damage)|(\d+ health|\d+ HP)/g;
   let lastIndex = 0;
   let match;
+  const rawSegments = [];
   while ((match = pattern.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      segments.push({ text: text.slice(lastIndex, match.index), style: "normal" });
+      rawSegments.push({ text: text.slice(lastIndex, match.index), style: "normal" });
     }
     if (match[1]) {
-      segments.push({ text: `"${match[1]}"`, style: "npc" });
+      rawSegments.push({ text: `"${match[1]}"`, style: "npc" });
     } else if (match[2]) {
-      segments.push({ text: match[2], style: "damage" });
+      rawSegments.push({ text: match[2], style: "damage" });
     } else if (match[3]) {
-      segments.push({ text: match[3], style: "heal" });
+      rawSegments.push({ text: match[3], style: "heal" });
     }
     lastIndex = match.index + match[0].length;
   }
   if (lastIndex < text.length) {
-    segments.push({ text: text.slice(lastIndex), style: "normal" });
+    rawSegments.push({ text: text.slice(lastIndex), style: "normal" });
+  }
+  if (rawSegments.length === 0) {
+    rawSegments.push({ text, style: "normal" });
+  }
+  if (knownEntities.size === 0)
+    return rawSegments;
+  for (const seg of rawSegments) {
+    if (seg.style !== "normal") {
+      segments.push(seg);
+      continue;
+    }
+    const highlighted = highlightEntities(seg.text);
+    segments.push(...highlighted);
+  }
+  return segments;
+}
+function highlightEntities(text) {
+  if (knownEntities.size === 0)
+    return [{ text, style: "normal" }];
+  const names = Array.from(knownEntities.keys()).sort((a, b) => b.length - a.length);
+  const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const entityPattern = new RegExp(`(${escaped.join("|")})`, "gi");
+  const segments = [];
+  let lastIdx = 0;
+  let m;
+  while ((m = entityPattern.exec(text)) !== null) {
+    if (m.index > lastIdx) {
+      segments.push({ text: text.slice(lastIdx, m.index), style: "normal" });
+    }
+    const matchedName = m[1];
+    let entityId = "";
+    let entityType = "";
+    for (const [name, info] of knownEntities.entries()) {
+      if (name.toLowerCase() === matchedName.toLowerCase()) {
+        entityId = info.id;
+        entityType = info.type;
+        break;
+      }
+    }
+    segments.push({
+      text: matchedName,
+      style: "entity",
+      entityId,
+      entityType
+    });
+    lastIdx = m.index + matchedName.length;
+  }
+  if (lastIdx < text.length) {
+    segments.push({ text: text.slice(lastIdx), style: "normal" });
   }
   return segments.length ? segments : [{ text, style: "normal" }];
 }
 function renderSegments(segments) {
   return segments.map((seg) => {
+    if (seg.style === "entity" && seg.entityId) {
+      const typeClass = seg.entityType ? `entity-${seg.entityType}` : "";
+      return `<span class="entity-link ${typeClass}" data-entity-id="${escapeHtml(seg.entityId)}" data-entity-name="${escapeHtml(seg.text)}">${escapeHtml(seg.text)}</span>`;
+    }
     const cls = seg.style === "normal" ? "" : seg.style;
     return cls ? `<span class="${cls}">${escapeHtml(seg.text)}</span>` : escapeHtml(seg.text);
   }).join("");
 }
 function escapeHtml(text) {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 // node_modules/@chenglou/pretext/dist/bidi.js
@@ -2699,15 +2760,168 @@ var ENTITY_COLORS = {
   exit: "#50c8c8"
 };
 
+// src/map/card-renderer.ts
+var CARD_FONT = "13px monospace";
+var CARD_BOLD_FONT = "bold 14px monospace";
+var CARD_DIM_FONT = "11px monospace";
+var CHAR_W = 8.4;
+var LINE_H = 18;
+var CARD_COLS = 28;
+var CARD_W = CARD_COLS * CHAR_W + 16;
+var PAD = 8;
+var BOX = {
+  tl: "╔",
+  tr: "╗",
+  bl: "╚",
+  br: "╝",
+  h: "═",
+  v: "║",
+  ml: "╠",
+  mr: "╣",
+  mh: "═"
+};
+var COLORS = {
+  border: "#2a2a38",
+  bg: "#0e0e15",
+  name: "#d4a574",
+  label: "#5a5a70",
+  text: "#c8c8d0",
+  dim: "#4a4a58",
+  hint: "#5a5a70",
+  hpFull: "#50c878",
+  hpLow: "#e05050",
+  item: "#a335ee",
+  exit: "#50c8c8"
+};
+function drawCard(ctx, x, y, content) {
+  const maxTextW = (CARD_COLS - 2) * CHAR_W;
+  let curY = y;
+  let summaryLines = [];
+  if (content.summary) {
+    const prepared = prepare(content.summary, CARD_FONT);
+    const result = layout(prepared, maxTextW, LINE_H);
+    summaryLines = wrapText(content.summary, CARD_COLS - 4);
+  }
+  const nameLines = wrapText(content.name, CARD_COLS - 4);
+  const hasLabels = content.labels.length > 0;
+  const hasHealth = content.health != null;
+  const hasXp = content.xp != null;
+  const hasHint = !!content.hint;
+  let totalLines = nameLines.length;
+  if (hasLabels)
+    totalLines += 1;
+  totalLines += 1;
+  if (summaryLines.length)
+    totalLines += summaryLines.length + 1;
+  if (hasHealth)
+    totalLines += 1;
+  if (hasXp)
+    totalLines += 1;
+  if (hasHint)
+    totalLines += 2;
+  const cardH = (totalLines + 2) * LINE_H;
+  ctx.fillStyle = COLORS.bg;
+  ctx.fillRect(x, curY, CARD_W, cardH);
+  drawBoxLine(ctx, x, curY, BOX.tl, BOX.h, BOX.tr);
+  curY += LINE_H;
+  ctx.fillStyle = COLORS.name;
+  ctx.font = CARD_BOLD_FONT;
+  for (const line of nameLines) {
+    drawTextLine(ctx, x, curY, line, COLORS.name, CARD_BOLD_FONT);
+    curY += LINE_H;
+  }
+  if (hasLabels) {
+    const labelText = content.labels.join(" · ");
+    drawTextLine(ctx, x, curY, labelText, COLORS.label, CARD_DIM_FONT);
+    curY += LINE_H;
+  }
+  drawBoxLine(ctx, x, curY, BOX.ml, BOX.mh, BOX.mr);
+  curY += LINE_H;
+  if (summaryLines.length) {
+    for (const line of summaryLines) {
+      drawTextLine(ctx, x, curY, line, COLORS.text, CARD_FONT);
+      curY += LINE_H;
+    }
+    curY += LINE_H * 0.5;
+  }
+  if (hasHealth && content.maxHealth) {
+    const pct = content.health / content.maxHealth;
+    const barLen = CARD_COLS - 8;
+    const filled = Math.round(pct * barLen);
+    const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
+    const hpColor = pct > 0.3 ? COLORS.hpFull : COLORS.hpLow;
+    drawTextLine(ctx, x, curY, `HP ${bar} ${content.health}`, hpColor, CARD_FONT);
+    curY += LINE_H;
+  }
+  if (hasXp && content.xpThreshold) {
+    const pct = content.xp / content.xpThreshold;
+    const barLen = CARD_COLS - 8;
+    const filled = Math.round(pct * barLen);
+    const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
+    drawTextLine(ctx, x, curY, `XP ${bar} ${content.xp}`, COLORS.dim, CARD_FONT);
+    curY += LINE_H;
+  }
+  if (hasHint) {
+    curY += LINE_H * 0.5;
+    drawTextLine(ctx, x, curY, content.hint, COLORS.hint, CARD_DIM_FONT);
+    curY += LINE_H;
+  }
+  drawBoxLine(ctx, x, curY, BOX.bl, BOX.h, BOX.br);
+  curY += LINE_H;
+  ctx.fillStyle = COLORS.border;
+  ctx.font = CARD_FONT;
+  const rows = Math.floor((curY - y) / LINE_H);
+  for (let i = 1;i < rows - 1; i++) {
+    const rowY = y + i * LINE_H;
+    ctx.fillText(BOX.v, x + PAD, rowY + LINE_H / 2);
+    ctx.fillText(BOX.v, x + CARD_W - PAD, rowY + LINE_H / 2);
+  }
+  return curY - y;
+}
+function drawBoxLine(ctx, x, y, left, fill, right) {
+  ctx.font = CARD_FONT;
+  ctx.fillStyle = COLORS.border;
+  const line = left + fill.repeat(CARD_COLS - 2) + right;
+  ctx.textAlign = "left";
+  ctx.fillText(line, x + PAD, y + LINE_H / 2);
+  ctx.textAlign = "center";
+}
+function drawTextLine(ctx, x, y, text, color, font) {
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.textAlign = "left";
+  ctx.fillText(text, x + PAD + CHAR_W * 2, y + LINE_H / 2);
+  ctx.textAlign = "center";
+}
+function wrapText(text, maxCols) {
+  const words = text.split(" ");
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    if (current.length + word.length + 1 > maxCols) {
+      if (current)
+        lines.push(current);
+      current = word;
+    } else {
+      current = current ? current + " " + word : word;
+    }
+  }
+  if (current)
+    lines.push(current);
+  return lines;
+}
+
 // src/map/renderer.ts
 var TILE_W = 14;
 var TILE_H = 18;
 var FONT = "15px monospace";
+var GAP = 8;
 
 class MapRenderer {
   canvas;
   ctx;
   dpr;
+  cardContent = null;
   constructor(container) {
     this.dpr = Math.min(devicePixelRatio, 2);
     this.canvas = document.createElement("canvas");
@@ -2719,15 +2933,21 @@ class MapRenderer {
   get element() {
     return this.canvas;
   }
+  setCard(content) {
+    this.cardContent = content;
+  }
   render(map, playerX, playerY) {
-    const w = map.width * TILE_W;
-    const h = map.height * TILE_H;
-    this.canvas.width = w * this.dpr;
-    this.canvas.height = h * this.dpr;
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${h}px`;
+    const mapW = map.width * TILE_W;
+    const mapH = map.height * TILE_H;
+    const totalW = mapW + (this.cardContent ? GAP + CARD_W : 0);
+    this.canvas.width = totalW * this.dpr;
+    this.canvas.height = mapH * this.dpr;
+    this.canvas.style.width = `${totalW}px`;
+    this.canvas.style.height = `${mapH}px`;
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.fillStyle = "#0a0a0f";
+    ctx.fillRect(0, 0, totalW, mapH);
     ctx.font = FONT;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -2753,6 +2973,9 @@ class MapRenderer {
       this.drawEntity(npc.x, npc.y, npc.ch, ENTITY_COLORS.npc);
     }
     this.drawEntity(playerX, playerY, "@", ENTITY_COLORS.player);
+    if (this.cardContent) {
+      drawCard(ctx, mapW + GAP, 8, this.cardContent);
+    }
   }
   drawEntity(x, y, ch, color) {
     const ctx = this.ctx;
@@ -2760,6 +2983,8 @@ class MapRenderer {
     ctx.fillRect(x * TILE_W, y * TILE_H, TILE_W, TILE_H);
     ctx.fillStyle = color;
     ctx.font = FONT;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
     ctx.fillText(ch, x * TILE_W + TILE_W / 2, y * TILE_H + TILE_H / 2);
   }
   gridToScreen(gridX, gridY) {
@@ -2898,108 +3123,41 @@ function setupMapInput(controller, renderer, map) {
   return () => document.removeEventListener("keydown", handler);
 }
 
-// src/map/entity-card.ts
-var CARD_MAX_WIDTH = 260;
-var CARD_FONT = "13px system-ui, sans-serif";
-var CARD_NAME_FONT = "15px Georgia, 'Times New Roman', serif";
-var CARD_LINE_HEIGHT = 18;
-var CARD_NAME_LINE_HEIGHT = 22;
-var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-class EntityCardManager {
-  container;
-  cardEl;
-  cache = new Map;
-  currentId = "";
-  constructor(container) {
-    this.container = container;
-    this.cardEl = document.createElement("div");
-    this.cardEl.className = "entity-card";
-    this.cardEl.style.display = "none";
-    this.container.appendChild(this.cardEl);
-  }
-  async show(entityId, entityName, entityType, screenX, screenY) {
-    if (this.currentId === entityId && this.cardEl.style.display !== "none")
-      return;
-    this.currentId = entityId;
-    let card = this.cache.get(entityId);
-    if (!card) {
-      if (UUID_RE.test(entityId)) {
-        try {
-          const resp = await fetch(`/api/entity/${entityId}`);
-          const data = await resp.json();
-          if (data && data.name && !data.error) {
-            card = data;
-            this.cache.set(entityId, card);
-          }
-        } catch {}
-      }
-      if (!card && entityName) {
-        try {
-          const resp = await fetch(`/api/entity/search/${encodeURIComponent(entityName)}`);
-          const data = await resp.json();
-          if (data && data.name && !data.error) {
-            card = data;
-            this.cache.set(entityId, card);
-          }
-        } catch {}
-      }
-      if (!card) {
-        const typeLabels = {
-          npc: ["NPC"],
-          item: ["Item"],
-          exit: ["Exit"]
-        };
-        card = {
-          id: entityId,
-          name: entityName,
-          labels: typeLabels[entityType] || [],
-          summary: ""
-        };
-        this.cache.set(entityId, card);
-      }
-    }
-    const namePrepared = prepare(card.name, CARD_NAME_FONT);
-    const nameResult = layout(namePrepared, CARD_MAX_WIDTH, CARD_NAME_LINE_HEIGHT);
-    let descHeight = 0;
-    if (card.summary) {
-      const descPrepared = prepare(card.summary, CARD_FONT);
-      const descResult = layout(descPrepared, CARD_MAX_WIDTH, CARD_LINE_HEIGHT);
-      descHeight = descResult.height;
-    }
-    const totalHeight = 12 + nameResult.height + 20 + (descHeight ? descHeight + 8 : 0) + 24 + 12;
-    this.cardEl.style.left = `${screenX - 130}px`;
-    this.cardEl.style.top = `${screenY - totalHeight - 8}px`;
-    this.cardEl.style.width = `${CARD_MAX_WIDTH + 24}px`;
-    const labelsHtml = `<div class="card-labels">${card.labels.join(" · ")}</div>`;
-    const descHtml = card.summary ? `<div class="card-desc">${card.summary}</div>` : "";
-    const hintText = entityType === "exit" ? "Enter to travel" : entityType === "npc" ? "Enter to talk" : "Enter to examine";
-    this.cardEl.innerHTML = `
-      <div class="card-name">${card.name}</div>
-      ${labelsHtml}
-      ${descHtml}
-      <div class="card-hint">${hintText}</div>
-    `;
-    this.cardEl.style.display = "block";
-  }
-  hide() {
-    this.cardEl.style.display = "none";
-    this.currentId = "";
-  }
-  clearCache() {
-    this.cache.clear();
-  }
-}
-
 // src/panels/map.ts
 var renderer = null;
 var controller = null;
-var cardManager = null;
 var cleanupInput = null;
 var mapRef = { current: null };
+var entityCache = new Map;
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function fetchEntityData(id, name) {
+  const cached = entityCache.get(id);
+  if (cached)
+    return cached;
+  if (UUID_RE.test(id)) {
+    try {
+      const resp = await fetch(`/api/entity/${id}`);
+      const data = await resp.json();
+      if (data && data.name && !data.error) {
+        entityCache.set(id, data);
+        return data;
+      }
+    } catch {}
+  }
+  try {
+    const resp = await fetch(`/api/entity/search/${encodeURIComponent(name)}`);
+    const data = await resp.json();
+    if (data && data.name && !data.error) {
+      entityCache.set(id, data);
+      return data;
+    }
+  } catch {}
+  const fallback = { id, name, labels: [], summary: "" };
+  entityCache.set(id, fallback);
+  return fallback;
+}
 function initMapPanel(mapContainer, _onAction) {
   renderer = new MapRenderer(mapContainer);
-  cardManager = new EntityCardManager(document.body);
 }
 function updateMap(state, onAction) {
   if (!state.roomMap || !renderer)
@@ -3015,13 +3173,35 @@ function updateMap(state, onAction) {
       else if (type === "exit")
         onAction(`go ${entity.direction}`);
     }, (type, entity) => {
-      if (!cardManager || !renderer)
+      if (!renderer)
         return;
       if (type && entity) {
-        const screen = renderer.gridToScreen(entity.x, entity.y);
-        cardManager.show(entity.id || entity.name, entity.name, type, screen.x, screen.y);
+        const entityId = entity.id || entity.name;
+        fetchEntityData(entityId, entity.name).then((data) => {
+          const typeLabels = {
+            npc: ["NPC"],
+            item: ["Item"],
+            exit: ["Exit"]
+          };
+          const hints = {
+            npc: "[Enter] Talk",
+            item: "[Enter] Examine",
+            exit: "[Enter] Travel"
+          };
+          const card = {
+            type: "entity",
+            name: data.name || entity.name,
+            labels: data.labels.length ? data.labels : typeLabels[type] || [],
+            summary: data.summary || "",
+            hint: hints[type] || "[Enter] Interact"
+          };
+          renderer.setCard(card);
+          if (mapRef.current && controller) {
+            renderer.render(mapRef.current, controller.x, controller.y);
+          }
+        });
       } else {
-        cardManager.hide();
+        showPlayerCard(state);
       }
     });
     cleanupInput?.();
@@ -3029,7 +3209,24 @@ function updateMap(state, onAction) {
   } else {
     controller.loadMap(map);
   }
+  showPlayerCard(state);
   renderer.render(map, controller.x, controller.y);
+}
+function showPlayerCard(state) {
+  if (!renderer)
+    return;
+  const card = {
+    type: "player",
+    name: state.player.name,
+    labels: ["Player"],
+    summary: state.location.name,
+    health: state.player.health,
+    maxHealth: state.player.maxHealth,
+    level: state.player.level,
+    xp: state.player.xp,
+    xpThreshold: state.player.xpThreshold
+  };
+  renderer.setCard(card);
 }
 function renderLocationPanel(container, state, onAction) {
   let html = `<div style="color: var(--text-location); margin-bottom: 8px; font-size: 15px;">${state.location.name}</div>`;
@@ -3081,6 +3278,19 @@ function renderActionsPanel(container, state, onAction) {
 // src/app.ts
 var gameState;
 var narrative;
+function registerMapEntities(map) {
+  if (!map)
+    return;
+  const entities = [];
+  for (const npc of map.npcs)
+    entities.push({ name: npc.name, id: npc.id, type: "npc" });
+  for (const item of map.items)
+    entities.push({ name: item.name, id: item.id, type: "item" });
+  for (const exit of map.exits)
+    entities.push({ name: exit.target, id: exit.target, type: "location" });
+  entities.push({ name: map.name, id: map.id, type: "location" });
+  setKnownEntities(entities);
+}
 function renderAllPanels() {
   if (!gameState)
     return;
@@ -3164,6 +3374,8 @@ function handleMessage(msg) {
         applyStateUpdate(gameState, msg.state_update);
         const session2 = getSession();
         session2.currentLocation = gameState.location.name;
+        if (gameState.roomMap)
+          registerMapEntities(gameState.roomMap);
         renderAllPanels();
       }
       if (msg.state_update?.status === "dead" || msg.text && msg.text.toLowerCase().includes("you have died")) {
@@ -3187,6 +3399,7 @@ async function enterWorld(playerName) {
   if (!gameState.roomMap) {
     gameState.roomMap = getThresholdMap();
   }
+  registerMapEntities(gameState.roomMap);
   renderAllPanels();
   narrative.addBlock(`Welcome, ${playerName}. You find yourself at ${session2.currentLocation}.`, "system");
   if (session2.openingNarrative) {

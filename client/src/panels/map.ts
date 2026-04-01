@@ -1,22 +1,57 @@
 // src/panels/map.ts
 import type { GameState } from '../state/game-state';
 import type { RoomMap } from '../map/types';
+import type { EntityCardData } from '../map/entity-card';
+import type { CardContent } from '../map/card-renderer';
 import { MapRenderer } from '../map/renderer';
 import { PlayerController, setupMapInput } from '../map/movement';
-import { EntityCardManager } from '../map/entity-card';
 
 let renderer: MapRenderer | null = null;
 let controller: PlayerController | null = null;
-let cardManager: EntityCardManager | null = null;
 let cleanupInput: (() => void) | null = null;
 const mapRef = { current: null as RoomMap | null };
+
+// Entity data cache (fetched from KG)
+const entityCache: Map<string, EntityCardData> = new Map();
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function fetchEntityData(id: string, name: string): Promise<EntityCardData> {
+  const cached = entityCache.get(id);
+  if (cached) return cached;
+
+  // Try KG fetch for real UUIDs
+  if (UUID_RE.test(id)) {
+    try {
+      const resp = await fetch(`/api/entity/${id}`);
+      const data = await resp.json();
+      if (data && data.name && !data.error) {
+        entityCache.set(id, data);
+        return data;
+      }
+    } catch { /* fall through */ }
+  }
+
+  // Try search by name
+  try {
+    const resp = await fetch(`/api/entity/search/${encodeURIComponent(name)}`);
+    const data = await resp.json();
+    if (data && data.name && !data.error) {
+      entityCache.set(id, data);
+      return data;
+    }
+  } catch { /* fall through */ }
+
+  // Local fallback
+  const fallback: EntityCardData = { id, name, labels: [], summary: '' };
+  entityCache.set(id, fallback);
+  return fallback;
+}
 
 export function initMapPanel(
   mapContainer: HTMLElement,
   _onAction: (action: string) => void,
 ): void {
   renderer = new MapRenderer(mapContainer);
-  cardManager = new EntityCardManager(document.body);
 }
 
 export function updateMap(
@@ -28,7 +63,6 @@ export function updateMap(
   const map = state.roomMap;
   mapRef.current = map;
 
-  // Create or update controller
   if (!controller) {
     controller = new PlayerController(
       map,
@@ -38,20 +72,34 @@ export function updateMap(
         else if (type === 'item') onAction(`examine ${entity.name}`);
         else if (type === 'exit') onAction(`go ${entity.direction}`);
       },
-      // onProximity — shows entity card (free KG lookup)
+      // onProximity — show entity card on canvas
       (type, entity) => {
-        if (!cardManager || !renderer) return;
+        if (!renderer) return;
         if (type && entity) {
-          const screen = renderer.gridToScreen(entity.x, entity.y);
-          cardManager.show(
-            entity.id || entity.name,
-            entity.name,
-            type,
-            screen.x,
-            screen.y,
-          );
+          // Fetch from KG (async) then update card
+          const entityId = entity.id || entity.name;
+          fetchEntityData(entityId, entity.name).then(data => {
+            const typeLabels: Record<string, string[]> = {
+              npc: ['NPC'], item: ['Item'], exit: ['Exit'],
+            };
+            const hints: Record<string, string> = {
+              npc: '[Enter] Talk', item: '[Enter] Examine', exit: '[Enter] Travel',
+            };
+            const card: CardContent = {
+              type: 'entity',
+              name: data.name || entity.name,
+              labels: data.labels.length ? data.labels : (typeLabels[type!] || []),
+              summary: data.summary || '',
+              hint: hints[type!] || '[Enter] Interact',
+            };
+            renderer!.setCard(card);
+            if (mapRef.current && controller) {
+              renderer!.render(mapRef.current, controller.x, controller.y);
+            }
+          });
         } else {
-          cardManager.hide();
+          // Nothing nearby — show player card
+          showPlayerCard(state);
         }
       },
     );
@@ -62,10 +110,28 @@ export function updateMap(
     controller.loadMap(map);
   }
 
+  // Default: show player card
+  showPlayerCard(state);
   renderer.render(map, controller.x, controller.y);
 }
 
-// Keep the existing text-based render for the side panel location info
+function showPlayerCard(state: GameState): void {
+  if (!renderer) return;
+  const card: CardContent = {
+    type: 'player',
+    name: state.player.name,
+    labels: ['Player'],
+    summary: state.location.name,
+    health: state.player.health,
+    maxHealth: state.player.maxHealth,
+    level: state.player.level,
+    xp: state.player.xp,
+    xpThreshold: state.player.xpThreshold,
+  };
+  renderer.setCard(card);
+}
+
+// Keep the text-based location panel for the side (simplified)
 export function renderLocationPanel(
   container: HTMLElement,
   state: GameState,

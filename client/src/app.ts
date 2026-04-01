@@ -6,7 +6,7 @@
 
 import { createInitialState, applyStateUpdate, type GameState } from './state/game-state';
 import { getSession, initSession, sendAction, setMessageHandler, setConnectionHandler } from './state/session';
-import { parseNarrative, renderSegments } from './renderer/text-renderer';
+import { parseNarrative, renderSegments, setKnownEntities } from './renderer/text-renderer';
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
 import { renderCharacterPanel } from './panels/character';
@@ -17,6 +17,17 @@ import type { RoomMap } from './map/types';
 
 let gameState: GameState;
 let narrative: NarrativeController;
+
+// --- Entity registration for narrative highlighting ---
+function registerMapEntities(map: import('./map/types').RoomMap | null): void {
+  if (!map) return;
+  const entities: Array<{ name: string; id: string; type: string }> = [];
+  for (const npc of map.npcs) entities.push({ name: npc.name, id: npc.id, type: 'npc' });
+  for (const item of map.items) entities.push({ name: item.name, id: item.id, type: 'item' });
+  for (const exit of map.exits) entities.push({ name: exit.target, id: exit.target, type: 'location' });
+  entities.push({ name: map.name, id: map.id, type: 'location' });
+  setKnownEntities(entities);
+}
 
 // --- Panel rendering ---
 function renderAllPanels(): void {
@@ -115,6 +126,7 @@ function handleMessage(msg: any): void {
         applyStateUpdate(gameState, msg.state_update);
         const session = getSession();
         session.currentLocation = gameState.location.name;
+        if (gameState.roomMap) registerMapEntities(gameState.roomMap);
         renderAllPanels();
       }
 
@@ -144,6 +156,7 @@ async function enterWorld(playerName: string): Promise<void> {
   if (!gameState.roomMap) {
     gameState.roomMap = getThresholdMap();
   }
+  registerMapEntities(gameState.roomMap);
   renderAllPanels();
   narrative.addBlock(`Welcome, ${playerName}. You find yourself at ${session.currentLocation}.`, 'system');
 

@@ -208,6 +208,22 @@
       color: var(--text-location);
     }
 
+    .narrative-block .entity-link {
+      border-bottom: 1px dotted var(--text-dim);
+      cursor: pointer;
+      transition: color 0.15s;
+    }
+
+    .narrative-block .entity-link:hover {
+      border-bottom-color: var(--accent);
+      filter: brightness(1.3);
+    }
+
+    .narrative-block .entity-npc { color: #d4a574; }
+    .narrative-block .entity-item { color: #a335ee; }
+    .narrative-block .entity-exit { color: #50c8c8; }
+    .narrative-block .entity-location { color: #7aa2d4; }
+
     /* Thinking indicator */
     .thinking {
       color: var(--text-dim);

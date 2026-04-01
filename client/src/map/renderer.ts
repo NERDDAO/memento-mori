@@ -2,15 +2,18 @@
 
 import type { RoomMap } from './types';
 import { tileColors, ENTITY_COLORS } from './colors';
+import { drawCard, CARD_W, type CardContent } from './card-renderer';
 
 const TILE_W = 14;
 const TILE_H = 18;
 const FONT = '15px monospace';
+const GAP = 8; // gap between map and card panel
 
 export class MapRenderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private dpr: number;
+  private cardContent: CardContent | null = null;
 
   constructor(container: HTMLElement) {
     this.dpr = Math.min(devicePixelRatio, 2);
@@ -25,21 +28,33 @@ export class MapRenderer {
     return this.canvas;
   }
 
+  /** Set the card content to display next to the map. */
+  setCard(content: CardContent | null): void {
+    this.cardContent = content;
+  }
+
   render(map: RoomMap, playerX: number, playerY: number): void {
-    const w = map.width * TILE_W;
-    const h = map.height * TILE_H;
-    this.canvas.width = w * this.dpr;
-    this.canvas.height = h * this.dpr;
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${h}px`;
+    const mapW = map.width * TILE_W;
+    const mapH = map.height * TILE_H;
+    const totalW = mapW + (this.cardContent ? GAP + CARD_W : 0);
+
+    this.canvas.width = totalW * this.dpr;
+    this.canvas.height = mapH * this.dpr;
+    this.canvas.style.width = `${totalW}px`;
+    this.canvas.style.height = `${mapH}px`;
 
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+
+    // Clear entire canvas
+    ctx.fillStyle = '#0a0a0f';
+    ctx.fillRect(0, 0, totalW, mapH);
+
+    // Draw map tiles
     ctx.font = FONT;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Draw base tiles
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
         const ch = map.tiles[y * map.width + x] || ' ';
@@ -70,6 +85,11 @@ export class MapRenderer {
 
     // Draw player
     this.drawEntity(playerX, playerY, '@', ENTITY_COLORS.player);
+
+    // Draw card panel on the right
+    if (this.cardContent) {
+      drawCard(ctx, mapW + GAP, 8, this.cardContent);
+    }
   }
 
   private drawEntity(x: number, y: number, ch: string, color: string): void {
@@ -78,10 +98,12 @@ export class MapRenderer {
     ctx.fillRect(x * TILE_W, y * TILE_H, TILE_W, TILE_H);
     ctx.fillStyle = color;
     ctx.font = FONT;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     ctx.fillText(ch, x * TILE_W + TILE_W / 2, y * TILE_H + TILE_H / 2);
   }
 
-  /** Convert grid coordinates to screen pixel position (for card positioning). */
+  /** Convert grid coordinates to screen pixel position. */
   gridToScreen(gridX: number, gridY: number): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect();
     return {
