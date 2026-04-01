@@ -26,3 +26,8 @@ export const theme = {
 } as const;
 
 export type Theme = typeof theme;
+
+/** Returns CSS font shorthand string for Pretext prepare() calls. */
+export function narrativeFont(): string {
+  return `${theme.sizes.narrativeText}px ${theme.fonts.narrative}`;
+}
