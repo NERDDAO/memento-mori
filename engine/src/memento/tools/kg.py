@@ -35,12 +35,17 @@ def _format_search_results(result: dict) -> str:
     return "\n".join(parts)
 
 
+def _sanitize_label(label: str) -> str:
+    """Sanitize a label for Neo4j — no spaces, hyphens, or special chars."""
+    return label.replace(" ", "_").replace("-", "_").replace("(", "").replace(")", "")
+
+
 @tool("Create Game Entity")
 def create_entity(name: str, entity_type: str, summary: str) -> str:
     """Create a new entity in the game world (NPC, Location, Item, Region, Faction, Quest).
     Returns the UUID of the created entity."""
     client = get_client()
-    labels = [entity_type]
+    labels = [_sanitize_label(entity_type)]
     uuid = client.kg.create_entity(name, labels, {"summary": summary})
     return f"Created {entity_type} '{name}' with UUID: {uuid}"
 

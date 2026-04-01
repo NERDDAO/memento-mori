@@ -3090,39 +3090,49 @@ function renderAllPanels() {
   renderActionsPanel(document.getElementById("actions-list"), gameState, handleAction);
   updateMap(gameState, handleAction);
 }
-function getTestMap() {
-  const w = 30, h = 15;
+function getThresholdMap() {
+  const w = 35, h = 18;
   const tiles = [];
   for (let y = 0;y < h; y++) {
     for (let x = 0;x < w; x++) {
       if (y === 0 || y === h - 1 || x === 0 || x === w - 1)
         tiles.push("#");
-      else if (x === 5 && y >= 3 && y <= 5)
+      else if (x >= 5 && x <= 7 && y >= 3 && y <= 7)
         tiles.push("B");
-      else if ((x === 10 || x === 20) && (y === 4 || y === 8))
+      else if (x === 12 && (y === 4 || y === 5) || x === 20 && (y === 4 || y === 5))
         tiles.push("T");
+      else if (x === 12 && (y === 9 || y === 10) || x === 20 && (y === 9 || y === 10))
+        tiles.push("T");
+      else if (y === 14 && x >= 14 && x <= 20)
+        tiles.push(":");
       else
         tiles.push(".");
     }
   }
-  tiles[7 * w + (w - 1)] = "+";
+  tiles[9 * w + (w - 1)] = "+";
+  tiles[0 * w + 17] = "+";
+  tiles[(h - 1) * w + 17] = "+";
   return {
-    id: "test-tavern",
+    id: "c800dabf-b1ef-4033-a594-b1d7f80ee316",
     name: "The Threshold",
     width: w,
     height: h,
     tiles,
     npcs: [
-      { x: 6, y: 4, ch: "K", name: "Barkeeper", id: "npc-barkeeper" },
-      { x: 15, y: 6, ch: "M", name: "Merchant", id: "npc-merchant" }
+      { x: 6, y: 5, ch: "G", name: "Grumlock Stonebrow", id: "7c167ff0-d4c1-479f-b61d-22f108213575" },
+      { x: 22, y: 6, ch: "R", name: "Roric the Sly", id: "d4566673-e13a-4adc-9e35-2f6e45750664" },
+      { x: 15, y: 10, ch: "E", name: "Elara Brightwood", id: "0b3dc518-1420-4741-8fb6-72e7e75ca370" }
     ],
     items: [
-      { x: 12, y: 9, ch: "!", name: "Health Potion", id: "item-potion" }
+      { x: 13, y: 9, ch: "?", name: "Tattered Journal", id: "8fe4b8d7-f31e-4cf5-ae64-e74c566e8c4a" },
+      { x: 28, y: 3, ch: "!", name: "Dull Iron Dagger", id: "306b569d-c2d6-4c02-8ad5-e881969827b4" }
     ],
     exits: [
-      { x: 29, y: 7, ch: "+", direction: "east", target: "unknown" }
+      { x: 34, y: 9, ch: "+", direction: "east", target: "The Fog Road" },
+      { x: 17, y: 0, ch: "+", direction: "north", target: "The Skeletal Woods" },
+      { x: 17, y: 17, ch: "+", direction: "south", target: "The Wastes" }
     ],
-    spawn: { x: 15, y: 12 }
+    spawn: { x: 17, y: 15 }
   };
 }
 async function handleAction(action) {
@@ -3175,7 +3185,7 @@ async function enterWorld(playerName) {
   gameState = createInitialState(playerName);
   gameState.location.name = session2.currentLocation;
   if (!gameState.roomMap) {
-    gameState.roomMap = getTestMap();
+    gameState.roomMap = getThresholdMap();
   }
   renderAllPanels();
   narrative.addBlock(`Welcome, ${playerName}. You find yourself at ${session2.currentLocation}.`, "system");
