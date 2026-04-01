@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Memento Mori</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
     :root {
       --bg-primary: #0a0a0f;
       --bg-secondary: #12121a;
@@ -21,396 +19,215 @@
       --border: #2a2a38;
       --accent: #8b5cf6;
       --input-bg: #1a1a25;
+      --win-title-bg: #16161f;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      height: 100%; overflow: hidden;
+      background: var(--bg-primary); color: var(--text-primary);
+      font-family: 'Courier New', Consolas, monospace; font-size: 13px;
     }
 
-    body {
-      font-family: 'Georgia', 'Times New Roman', serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      height: 100vh;
-      overflow: hidden;
-    }
-
+    /* TUI Shell */
     #app {
-      display: grid;
-      grid-template-columns: 1fr 320px;
-      grid-template-rows: 1fr auto;
-      height: 100vh;
-      gap: 1px;
-      background: var(--border);
+      display: grid; grid-template-rows: auto 1fr auto;
+      height: 100vh; gap: 4px; padding: 4px;
     }
 
-    #left-column {
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      background: var(--bg-primary);
+    /* Header */
+    .tui-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 4px 12px; color: var(--text-dim); font-size: 12px;
+      border: 1px solid var(--border); border-radius: 2px; background: var(--bg-primary);
+    }
+    .tui-header .header-title { color: var(--accent); letter-spacing: 2px; font-weight: bold; }
+    .tui-header .header-moon { margin-right: 6px; }
+
+    /* Main grid */
+    #tui-main {
+      display: grid; grid-template-columns: 1fr 260px; gap: 4px;
+      overflow: hidden; min-height: 0;
+    }
+    #left-col { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+    #right-col { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; min-height: 0; }
+
+    /* Window */
+    .win {
+      border: 1px solid var(--border); border-radius: 2px;
+      display: flex; flex-direction: column; background: var(--bg-primary); min-height: 0;
+    }
+    .win-title {
+      background: var(--win-title-bg); padding: 2px 8px; font-size: 11px;
+      color: var(--text-dim); border-bottom: 1px solid var(--border);
+      text-transform: uppercase; letter-spacing: 1px; flex-shrink: 0;
+    }
+    .win-body { padding: 8px 10px; flex: 1; min-height: 0; }
+
+    /* Narrative */
+    #narrative-win { flex: 1; min-height: 0; }
+    #narrative-win .win-body {
+      overflow-y: auto; position: relative;
+      font-family: Georgia, 'Times New Roman', serif; font-size: 16px; line-height: 1.7;
     }
 
-    #map-container {
-      background: var(--bg-primary);
-      position: relative;
-      min-height: 200px;
-      max-height: 400px;
-      overflow: hidden;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    /* Map */
+    #map-win .win-body { padding: 0; }
+    #map-win canvas { display: block; width: 100%; }
+
+    /* Sidebar */
+    .sidebar-win .win-body { font-size: 13px; }
+
+    /* Command */
+    #command-win .win-body {
+      display: flex; align-items: center; gap: 8px; padding: 4px 10px;
+    }
+    #command-win .prompt-char { color: var(--text-dim); flex-shrink: 0; }
+    #command-win input {
+      flex: 1; background: none; border: none; color: var(--text-primary);
+      font-family: inherit; font-size: 14px; outline: none;
+    }
+    #command-win input::placeholder { color: var(--text-dim); opacity: 0.5; }
+
+    /* Dialog overlay */
+    .dialog-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center; z-index: 100;
+    }
+    .dialog-win {
+      border: 1px solid var(--border); border-radius: 2px; background: var(--bg-primary);
+      max-width: 500px; width: 90%; max-height: 60vh; display: flex; flex-direction: column;
+    }
+    .dialog-title {
+      background: var(--win-title-bg); padding: 4px 10px; font-size: 12px;
+      color: var(--text-npc); border-bottom: 1px solid var(--border); letter-spacing: 1px;
+    }
+    .dialog-body {
+      padding: 12px 16px; overflow-y: auto;
+      font-family: Georgia, 'Times New Roman', serif; font-size: 15px;
+      line-height: 1.6; color: var(--text-primary);
     }
 
-    #left-column #narrative-pane {
-      flex: 1;
-      overflow-y: auto;
+    /* Typewriter */
+    .tw-line { min-height: 1.6em; }
+    .tw-cursor {
+      color: var(--text-npc); animation: blink-cursor 0.8s step-end infinite;
     }
+    @keyframes blink-cursor { 50% { opacity: 0; } }
 
-    .entity-card {
-      position: fixed;
-      z-index: 50;
-      background: rgba(22, 22, 31, 0.95);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 12px;
-      max-width: 284px;
-      pointer-events: none;
-      animation: fadeIn 0.15s ease;
-    }
-
-    .card-name {
-      color: var(--text-npc);
-      font-family: Georgia, serif;
-      font-size: 15px;
-      font-weight: bold;
-      margin-bottom: 4px;
-    }
-
-    .card-labels {
-      color: var(--text-dim);
-      font-family: system-ui, sans-serif;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 8px;
-    }
-
-    .card-desc {
-      color: var(--text-primary);
-      font-family: system-ui, sans-serif;
-      font-size: 13px;
-      line-height: 1.5;
-      margin-bottom: 8px;
-    }
-
-    .card-hint {
-      color: var(--text-dim);
-      font-family: system-ui, sans-serif;
-      font-size: 11px;
-      font-style: italic;
-    }
-
-    #narrative-pane {
-      background: var(--bg-primary);
-      padding: 24px 32px;
-      line-height: 1.7;
-      font-size: 16px;
-      scrollbar-width: thin;
-      scrollbar-color: var(--border) transparent;
-    }
-
-    #side-panels {
-      background: var(--bg-secondary);
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-      grid-row: 1 / 3;
-      grid-column: 2;
-    }
-
-    .panel {
-      background: var(--bg-panel);
-      padding: 16px;
-    }
-
-    .panel h3 {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-      color: var(--text-dim);
-      margin-bottom: 12px;
-      font-family: system-ui, sans-serif;
-    }
-
-    #input-bar {
-      background: var(--bg-secondary);
-      padding: 12px 24px;
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      grid-column: 1;
-    }
-
-    #action-input {
-      flex: 1;
-      background: var(--input-bg);
-      border: 1px solid var(--border);
-      color: var(--text-primary);
-      font-family: 'Georgia', serif;
-      font-size: 15px;
-      padding: 10px 16px;
-      border-radius: 4px;
-      outline: none;
-    }
-
-    #action-input:focus {
-      border-color: var(--accent);
-    }
-
-    #action-input::placeholder {
-      color: var(--text-dim);
-    }
-
-    /* Narrative text styling */
-    .narrative-block {
-      margin-bottom: 20px;
-      animation: fadeIn 0.3s ease;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(4px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
+    /* Narrative blocks */
+    .narrative-block { margin-bottom: 16px; animation: fadeIn 0.3s ease; }
     .narrative-block.player-action {
-      color: var(--text-dim);
-      font-style: italic;
-      border-left: 2px solid var(--border);
-      padding-left: 16px;
+      font-style: italic; border-left: 2px solid var(--border);
+      padding-left: 10px; color: var(--text-dim);
     }
-
     .narrative-block.system {
-      color: var(--text-system);
-      font-family: system-ui, sans-serif;
-      font-size: 13px;
+      color: var(--text-system); font-family: 'Courier New', monospace; font-size: 13px;
     }
 
-    .narrative-block .npc-name {
-      color: var(--text-npc);
-      font-weight: bold;
-    }
+    /* Entity links */
+    .entity-link { text-decoration: underline dotted; cursor: pointer; transition: opacity 0.15s; }
+    .entity-link:hover { opacity: 0.8; }
+    .entity-npc { color: var(--text-npc); }
+    .entity-item { color: #a335ee; }
+    .entity-exit { color: #50c8c8; }
+    .entity-location { color: var(--text-location); }
 
-    .narrative-block .damage {
-      color: var(--text-damage);
-      font-weight: bold;
-    }
+    /* Inline text styles */
+    .npc-name, .npc { color: var(--text-npc); }
+    .damage { color: var(--text-damage); font-weight: bold; }
+    .heal { color: var(--text-heal); }
+    .italic { font-style: italic; }
+    .bold { font-weight: bold; }
+    .location { color: var(--text-location); }
 
-    .narrative-block .location-name {
-      color: var(--text-location);
-    }
+    /* Sidebar elements */
+    .bar-fill-hp { color: var(--text-damage); }
+    .bar-fill-xp { color: var(--accent); }
+    .bar-empty { color: var(--border); }
+    .stat-label { color: var(--text-dim); display: inline-block; width: 24px; }
+    .exit-row { cursor: pointer; padding: 1px 0; }
+    .exit-row:hover { color: #fff; }
+    .exit-dir { color: #50c8c8; }
+    .exit-dest { color: var(--text-dim); margin-left: 4px; }
+    .npc-row { padding: 1px 0; cursor: pointer; }
+    .npc-row:hover .npc { color: #fff; }
+    .npc-diamond { color: var(--text-npc); margin-right: 4px; }
+    .npc-role { color: var(--text-dim); margin-left: 4px; }
+    .item-row { padding: 1px 0; }
+    .item-bullet { color: var(--text-dim); margin-right: 4px; }
+    .item-equip { color: var(--text-dim); margin-left: 4px; font-size: 11px; }
+    .empty-msg { color: var(--text-dim); font-style: italic; }
 
-    .narrative-block .entity-link {
-      border-bottom: 1px dotted var(--text-dim);
-      cursor: pointer;
-      transition: color 0.15s;
-    }
+    /* Thinking */
+    .thinking { color: var(--text-system); font-style: italic; font-family: 'Courier New', monospace; font-size: 13px; }
+    .thinking::after { content: ''; animation: dots 1.5s steps(4,end) infinite; }
+    @keyframes dots { 0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'...'} }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
 
-    .narrative-block .entity-link:hover {
-      border-bottom-color: var(--accent);
-      filter: brightness(1.3);
-    }
+    /* Health bar */
+    .health-bar { height: 6px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 2px; }
+    .health-bar-fill { height: 100%; background: var(--text-damage); transition: width 0.3s; }
 
-    .narrative-block .entity-npc { color: #d4a574; }
-    .narrative-block .entity-item { color: #a335ee; }
-    .narrative-block .entity-exit { color: #50c8c8; }
-    .narrative-block .entity-location { color: #7aa2d4; }
-
-    /* Thinking indicator */
-    .thinking {
-      color: var(--text-dim);
-      font-style: italic;
-    }
-
-    .thinking::after {
-      content: '...';
-      animation: dots 1.5s infinite;
-    }
-
-    @keyframes dots {
-      0%, 20% { content: '.'; }
-      40% { content: '..'; }
-      60%, 100% { content: '...'; }
-    }
-
-    /* Side panel details */
-    .stat-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 4px 0;
-      font-family: system-ui, sans-serif;
-      font-size: 13px;
-    }
-
-    .stat-label { color: var(--text-dim); }
-    .stat-value { color: var(--text-primary); }
-
-    .health-bar {
-      height: 6px;
-      background: var(--border);
-      border-radius: 3px;
-      margin: 8px 0;
-      overflow: hidden;
-    }
-
-    .health-bar-fill {
-      height: 100%;
-      background: var(--text-heal);
-      border-radius: 3px;
-      transition: width 0.5s ease;
-    }
-
-    .inventory-item {
-      padding: 6px 0;
-      font-size: 13px;
-      font-family: system-ui, sans-serif;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .action-btn {
-      display: block;
-      width: 100%;
-      padding: 8px 12px;
-      margin: 4px 0;
-      background: var(--input-bg);
-      border: 1px solid var(--border);
-      color: var(--text-primary);
-      font-family: system-ui, sans-serif;
-      font-size: 13px;
-      text-align: left;
-      cursor: pointer;
-      border-radius: 3px;
-    }
-
-    .action-btn:hover {
-      border-color: var(--accent);
-      background: var(--bg-secondary);
-    }
-
+    /* Overlays */
     #char-create-overlay {
-      position: fixed; inset: 0; z-index: 100;
-      background: var(--bg-primary);
-      display: flex; align-items: center; justify-content: center;
-      transition: opacity 0.5s ease;
+      position: fixed; inset: 0; background: var(--bg-primary);
+      display: flex; align-items: center; justify-content: center; z-index: 200;
+      flex-direction: column; gap: 16px;
     }
-    #char-create-overlay.hidden { opacity: 0; pointer-events: none; }
-    .create-content { text-align: center; max-width: 400px; }
-    .create-content h1 {
-      font-size: 36px; color: var(--text-primary);
-      margin-bottom: 8px; letter-spacing: 4px;
+    #char-create-overlay h1 { color: var(--accent); font-size: 24px; letter-spacing: 4px; }
+    #char-create-overlay p { color: var(--text-dim); }
+    #char-create-overlay input {
+      background: var(--input-bg); border: 1px solid var(--border); color: var(--text-primary);
+      font-family: inherit; font-size: 16px; padding: 8px 16px; text-align: center;
+      outline: none; width: 240px;
     }
-    .tagline {
-      color: var(--text-dim); font-style: italic;
-      margin-bottom: 32px; font-size: 14px;
-    }
-    #char-name-input {
-      width: 100%; padding: 12px 16px; font-size: 18px;
-      background: var(--input-bg); border: 1px solid var(--border);
-      color: var(--text-primary); font-family: Georgia, serif;
-      border-radius: 4px; margin-bottom: 16px; outline: none;
-      text-align: center;
-    }
-    #char-name-input:focus { border-color: var(--accent); }
-    .enter-btn {
-      padding: 12px 32px; font-size: 14px;
-      background: transparent; border: 1px solid var(--accent);
-      color: var(--accent); cursor: pointer; border-radius: 4px;
-      font-family: system-ui, sans-serif; letter-spacing: 2px;
-      text-transform: uppercase; transition: all 0.2s;
-    }
-    .enter-btn:hover {
-      background: var(--accent); color: var(--bg-primary);
+    #char-create-overlay input:focus { border-color: var(--accent); }
+    #char-create-overlay button {
+      background: var(--accent); color: #fff; border: none; padding: 8px 24px;
+      font-family: inherit; cursor: pointer;
     }
     #death-overlay {
-      position: fixed; inset: 0; z-index: 100;
-      background: rgba(10, 10, 15, 0.95);
-      display: flex; align-items: center; justify-content: center;
-      transition: opacity 0.5s ease;
+      position: fixed; inset: 0; background: rgba(0,0,0,0.9);
+      display: none; align-items: center; justify-content: center; z-index: 200;
+      flex-direction: column; gap: 16px; color: var(--text-damage);
     }
-    #death-overlay.hidden { opacity: 0; pointer-events: none; }
-    #death-overlay h1 { color: var(--text-damage); }
+    #death-overlay h1 { font-size: 28px; letter-spacing: 6px; }
+    #death-overlay .death-cause { color: var(--text-dim); font-size: 14px; }
+    #death-overlay button {
+      background: none; border: 1px solid var(--border); color: var(--text-primary);
+      padding: 8px 24px; font-family: inherit; cursor: pointer; margin-top: 16px;
+    }
   </style>
 </head>
 <body>
-  <div id="char-create-overlay">
-    <div class="create-content">
-      <h1>Memento Mori</h1>
-      <p class="tagline">Remember that you will die.</p>
-      <div class="create-form">
-        <input type="text" id="char-name-input" placeholder="What is your name?" />
-        <button id="enter-world-btn" class="enter-btn">Enter the World</button>
-      </div>
-    </div>
-  </div>
-  <div id="death-overlay" class="hidden">
-    <div class="create-content">
-      <h1>You Have Died</h1>
-      <p class="tagline" id="death-cause">The world continues without you.</p>
-      <div id="death-stats" style="margin: 24px 0; font-family: system-ui, sans-serif; font-size: 13px; color: var(--text-dim);"></div>
-      <button id="new-char-btn" class="enter-btn">Create New Character</button>
-    </div>
-  </div>
   <div id="app">
-    <div id="left-column">
-      <div id="map-container">
-        <!-- Canvas injected by MapRenderer -->
+    <div id="tui-header"></div>
+    <div id="tui-main">
+      <div id="left-col">
+        <div id="narrative-mount"></div>
+        <div id="map-mount"></div>
       </div>
-      <div id="narrative-pane">
-        <div class="narrative-block system">
-          Connecting to Memento Mori...
-        </div>
-      </div>
-    </div>
-    <div id="side-panels">
-      <div class="panel" id="character-panel">
-        <h3>Character</h3>
-        <div class="stat-row">
-          <span class="stat-label">Name</span>
-          <span class="stat-value" id="char-name">—</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Level</span>
-          <span class="stat-value" id="char-level">1</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Health</span>
-          <span class="stat-value" id="char-health">100/100</span>
-        </div>
-        <div class="health-bar">
-          <div class="health-bar-fill" id="health-fill" style="width: 100%"></div>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">XP</span>
-          <span class="stat-value" id="char-xp">0/100</span>
-        </div>
-      </div>
-      <div class="panel" id="location-panel">
-        <h3>Location</h3>
-        <div id="location-name" style="color: var(--text-location); margin-bottom: 8px;">Unknown</div>
-        <div id="location-exits" style="font-size: 13px; color: var(--text-dim); font-family: system-ui, sans-serif;"></div>
-      </div>
-      <div class="panel" id="inventory-panel">
-        <h3>Inventory</h3>
-        <div id="inventory-list">
-          <div class="inventory-item" style="color: var(--text-dim);">Empty</div>
-        </div>
-      </div>
-      <div class="panel" id="actions-panel">
-        <h3>Actions</h3>
-        <div id="actions-list"></div>
+      <div id="right-col">
+        <div id="character-mount"></div>
+        <div id="inventory-mount"></div>
+        <div id="exits-mount"></div>
+        <div id="present-mount"></div>
       </div>
     </div>
-    <div id="input-bar">
-      <input type="text" id="action-input" placeholder="What do you do?" autofocus />
-    </div>
+    <div id="command-mount"></div>
+    <div id="dialog-mount"></div>
+  </div>
+  <div id="char-create-overlay">
+    <h1>MEMENTO MORI</h1>
+    <p>What is your name, wanderer?</p>
+    <input type="text" id="char-name-input" placeholder="Enter name" autofocus />
+    <button id="char-create-btn">Enter the World</button>
+  </div>
+  <div id="death-overlay">
+    <h1>YOU HAVE DIED</h1>
+    <p class="death-cause" id="death-cause"></p>
+    <p id="death-stats"></p>
+    <button id="death-restart-btn">Begin Again</button>
   </div>
   <script type="module" src="app.js"></script>
 </body>
