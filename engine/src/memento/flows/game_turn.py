@@ -11,6 +11,7 @@ from memento.flows.event_detection import EventDetectionFlow
 from memento.flows.combat import CombatFlow
 from memento.flows.episodic_memory import EpisodicMemoryFlow
 from memento.flows.quest import QuestFlow
+from memento.tools.time import advance_time
 
 
 class TurnState(BaseModel):
@@ -21,6 +22,7 @@ class TurnState(BaseModel):
     context: str = ""
     events: dict = {}
     narrative: str = ""
+    world_time: dict = {}
     plausible: bool = True
     rejection_reason: str = ""
 
@@ -143,4 +145,6 @@ class GameTurnFlow(Flow[TurnState]):
             memory_flow.kickoff()
         except Exception as e:
             print(f"[game-turn] Memory flow failed (non-fatal): {e}")
+        world_time = advance_time(1)
+        self.state.world_time = world_time.to_display()
         return narrative
