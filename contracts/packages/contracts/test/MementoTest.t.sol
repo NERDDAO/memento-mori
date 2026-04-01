@@ -164,24 +164,13 @@ contract MementoTest is MudTest {
 
   function testRecordEpisode() public {
     bytes32 epId = bytes32(uint256(40));
-    string memory entities = '["Kael","Dragon"]';
-    string memory edges = '["Kael->fought->Dragon"]';
+    bytes32 contentHash = keccak256(abi.encodePacked("episode-content-json"));
 
-    world.memento__recordEpisode(
-      epId,
-      "The Dragon's Demise",
-      "Kael slew the ancient dragon",
-      entities,
-      edges,
-      99
-    );
+    world.memento__recordEpisode(epId, contentHash, 99);
 
     assertEq(Episodes.getTick(epId), 99);
     assertEq(Episodes.getTimestamp(epId), block.timestamp);
-    assertEq(Episodes.getName(epId), "The Dragon's Demise");
-    assertEq(Episodes.getSummary(epId), "Kael slew the ancient dragon");
-    assertEq(Episodes.getEntities(epId), entities);
-    assertEq(Episodes.getEdges(epId), edges);
+    assertEq(Episodes.getContentHash(epId), contentHash);
   }
 
   // ---------------------------------------------------------------------------

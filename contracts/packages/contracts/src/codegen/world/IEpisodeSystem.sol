@@ -9,12 +9,5 @@ pragma solidity >=0.8.24;
  * @dev This interface is automatically generated from the corresponding system contract. Do not edit manually.
  */
 interface IEpisodeSystem {
-  function memento__recordEpisode(
-    bytes32 id,
-    string memory name,
-    string memory summary,
-    string memory entities,
-    string memory edges,
-    uint256 tick
-  ) external;
+  function memento__recordEpisode(bytes32 id, bytes32 contentHash, uint256 tick) external;
 }
