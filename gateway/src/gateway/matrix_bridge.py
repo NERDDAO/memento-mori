@@ -104,6 +104,19 @@ class MatrixBridge:
             location = self.room_to_location.get(room.room_id, "")
             state_update = rpg_meta.get("state_update", {})
             player_id = rpg_meta.get("player_id", "")
+
+            # Helper to send status to the relevant player(s)
+            async def _send_status(phase: str) -> None:
+                status_msg = {"type": "status", "phase": phase}
+                if player_id and self.ws_hub.connections.get(player_id):
+                    await self.ws_hub.send_to_player(player_id, status_msg)
+                elif location:
+                    await self.ws_hub.broadcast_to_location(location, status_msg)
+                else:
+                    await self.ws_hub.broadcast_all(status_msg)
+
+            await _send_status("extracting")
+
             msg = {
                 "type": "narrative",
                 "text": event.body,
@@ -118,6 +131,8 @@ class MatrixBridge:
                 await self.ws_hub.broadcast_to_location(location, msg)
             else:
                 await self.ws_hub.broadcast_all(msg)
+
+            await _send_status("synced")
 
     async def register_player(self, player_name: str, player_id: str) -> str | None:
         """Register a Matrix user for a player. Returns access_token or None."""
