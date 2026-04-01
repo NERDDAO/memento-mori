@@ -14,7 +14,7 @@ import { renderCharacterPanel } from './panels/character';
 import { renderInventoryPanel } from './panels/inventory';
 import { renderExitsPanel } from './panels/exits';
 import { renderPresentPanel } from './panels/present';
-import { createWindow, type Window as TuiWindow } from './ui/window';
+import { createWindow } from './ui/window';
 import { createHeader, type WorldTime } from './ui/header';
 import { createDialog } from './ui/dialog';
 import type { RoomMap } from './map/types';
@@ -226,6 +226,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 6. Narrative
   narrative = initNarrative(narrativeWin.body);
+
+  // 6b. Entity link clicks (delegated — works with virtual scroll)
+  narrativeWin.body.addEventListener('click', (e: MouseEvent) => {
+    const link = (e.target as HTMLElement).closest('.entity-link') as HTMLElement | null;
+    if (!link) return;
+    const name = link.dataset.entityName;
+    if (name) handleAction(`look at ${name}`);
+  });
 
   // 7. Command input
   commandWin.body.innerHTML = `

@@ -2986,6 +2986,18 @@ class NarrativeStore {
   getAll() {
     return this.blocks;
   }
+  removeById(id) {
+    const idx = this.blocks.findIndex((b) => b.id === id);
+    if (idx === -1)
+      return false;
+    this.blocks.splice(idx, 1);
+    this._totalHeight = idx > 0 ? this.blocks[idx - 1].y + this.blocks[idx - 1].height : 0;
+    for (let i = idx;i < this.blocks.length; i++) {
+      this.blocks[i].y = this._totalHeight;
+      this._totalHeight += this.blocks[i].height;
+    }
+    return true;
+  }
   remeasure(newWidth) {
     this.paneWidth = Math.max(newWidth - 64, 200);
     this._totalHeight = 0;
@@ -3009,6 +3021,7 @@ function initNarrative(container) {
   const store = new NarrativeStore(container.clientWidth);
   let userAtBottom = true;
   let renderScheduled = false;
+  let thinkingBlockId = null;
   const spacer = document.createElement("div");
   spacer.style.position = "relative";
   spacer.style.minHeight = "100%";
@@ -3055,7 +3068,7 @@ function initNarrative(container) {
     }
   }
   function addBlockInternal(text, html, type) {
-    store.add(text, html, type);
+    const block = store.add(text, html, type);
     spacer.style.height = `${store.totalHeight}px`;
     if (userAtBottom) {
       requestAnimationFrame(() => {
@@ -3063,6 +3076,7 @@ function initNarrative(container) {
       });
     }
     scheduleRender();
+    return block.id;
   }
   return {
     addBlock(text, type) {
@@ -3084,12 +3098,15 @@ function initNarrative(container) {
       addBlockInternal(text, html, type);
     },
     showThinking() {
-      this.addBlock("The world responds", "thinking");
+      thinkingBlockId = addBlockInternal("The world responds", "The world responds", "thinking");
     },
     removeThinking() {
-      const el = spacer.querySelector(".thinking");
-      if (el)
-        el.remove();
+      if (thinkingBlockId) {
+        store.removeById(thinkingBlockId);
+        thinkingBlockId = null;
+        spacer.style.height = `${store.totalHeight}px`;
+        scheduleRender();
+      }
     }
   };
 }
@@ -4112,6 +4129,14 @@ document.addEventListener("DOMContentLoaded", () => {
   npcDialog = createDialog();
   mount("dialog-mount", npcDialog.el);
   narrative = initNarrative(narrativeWin.body);
+  narrativeWin.body.addEventListener("click", (e) => {
+    const link = e.target.closest(".entity-link");
+    if (!link)
+      return;
+    const name = link.dataset.entityName;
+    if (name)
+      handleAction(`look at ${name}`);
+  });
   commandWin.body.innerHTML = `
     <span class="prompt-char">&gt;</span>
     <input type="text" id="action-input" placeholder="What do you do?" autocomplete="off" spellcheck="false" />

@@ -187,9 +187,11 @@
       background: var(--accent); color: #fff; border: none; padding: 8px 24px;
       font-family: inherit; cursor: pointer;
     }
+    .hidden { display: none !important; }
+
     #death-overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,0.9);
-      display: none; align-items: center; justify-content: center; z-index: 200;
+      display: flex; align-items: center; justify-content: center; z-index: 200;
       flex-direction: column; gap: 16px; color: var(--text-damage);
     }
     #death-overlay h1 { font-size: 28px; letter-spacing: 6px; }
@@ -224,7 +226,7 @@
     <input type="text" id="char-name-input" placeholder="Enter name" autofocus />
     <button id="char-create-btn">Enter the World</button>
   </div>
-  <div id="death-overlay">
+  <div id="death-overlay" class="hidden">
     <h1>YOU HAVE DIED</h1>
     <p class="death-cause" id="death-cause"></p>
     <p id="death-stats"></p>

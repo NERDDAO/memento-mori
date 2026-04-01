@@ -13,6 +13,7 @@ export function initNarrative(container: HTMLElement): NarrativeController {
   const store = new NarrativeStore(container.clientWidth);
   let userAtBottom = true;
   let renderScheduled = false;
+  let thinkingBlockId: string | null = null;
 
   // Create the virtual scroll container.
   // The "spacer" div sets the total scrollable height.
@@ -74,8 +75,8 @@ export function initNarrative(container: HTMLElement): NarrativeController {
     }
   }
 
-  function addBlockInternal(text: string, html: string, type: string): void {
-    store.add(text, html, type);
+  function addBlockInternal(text: string, html: string, type: string): string {
+    const block = store.add(text, html, type);
     spacer.style.height = `${store.totalHeight}px`;
 
     // Auto-scroll to bottom if user was at bottom
@@ -86,6 +87,7 @@ export function initNarrative(container: HTMLElement): NarrativeController {
     }
 
     scheduleRender();
+    return block.id;
   }
 
   return {
@@ -112,13 +114,16 @@ export function initNarrative(container: HTMLElement): NarrativeController {
     },
 
     showThinking() {
-      this.addBlock('The world responds', 'thinking');
+      thinkingBlockId = addBlockInternal('The world responds', 'The world responds', 'thinking');
     },
 
     removeThinking() {
-      // Remove the DOM element; store keeps the record but it won't be visible
-      const el = spacer.querySelector('.thinking');
-      if (el) el.remove();
+      if (thinkingBlockId) {
+        store.removeById(thinkingBlockId);
+        thinkingBlockId = null;
+        spacer.style.height = `${store.totalHeight}px`;
+        scheduleRender();
+      }
     },
   };
 }

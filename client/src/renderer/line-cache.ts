@@ -108,6 +108,20 @@ export class NarrativeStore {
     return this.blocks;
   }
 
+  /** Remove a block by ID and recompute Y offsets. */
+  removeById(id: string): boolean {
+    const idx = this.blocks.findIndex(b => b.id === id);
+    if (idx === -1) return false;
+    this.blocks.splice(idx, 1);
+    // Recompute Y offsets from the removed index onward
+    this._totalHeight = idx > 0 ? this.blocks[idx - 1].y + this.blocks[idx - 1].height : 0;
+    for (let i = idx; i < this.blocks.length; i++) {
+      this.blocks[i].y = this._totalHeight;
+      this._totalHeight += this.blocks[i].height;
+    }
+    return true;
+  }
+
   /**
    * Remeasure all blocks at a new width (called on window resize).
    * Pretext's layout() is ~0.09ms/500 texts, so this is cheap.
