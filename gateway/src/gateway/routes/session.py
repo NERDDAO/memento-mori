@@ -10,6 +10,7 @@ router = APIRouter()
 class CreateSessionRequest(BaseModel):
     player_name: str
     game_id: str = "default"
+    wallet_address: str = ""
 
 
 class CreateSessionResponse(BaseModel):
@@ -38,7 +39,7 @@ async def create_session(req: CreateSessionRequest):
             location=result["location_name"],
             opening_narrative=result.get("opening_narrative", ""),
         )
-    except Exception as e:
+    except Exception:
         import uuid
         player_id = str(uuid.uuid4())
 

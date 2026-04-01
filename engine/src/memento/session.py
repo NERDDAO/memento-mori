@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import uuid as _uuid
 from memento.bonfires_client import get_client
-from memento.tools.kg import create_entity, create_edge, search_world
 from memento.crews.narrative.narration import make_narration_crew
-from memento.flows.world_gen import WorldGenFlow
 
 
 class SessionManager:
@@ -49,7 +46,15 @@ class SessionManager:
         except Exception as e:
             print(f"[session] Failed to place player (non-fatal): {e}")
 
-        # 5. Generate opening narration
+        # 5. Register character on-chain (non-fatal)
+        try:
+            from memento.tools import chain as _chain
+            if _chain.is_enabled():
+                _chain.register_character(player_uuid, player_name, "", 1)
+        except Exception as e:
+            print(f"[session] Chain register_character failed (non-fatal): {e}")
+
+        # 6. Generate opening narration
         opening = self._generate_opening(player_name, location_name)
 
         return {
@@ -112,6 +117,14 @@ class SessionManager:
                 client.kg.create_edge(player_id, loc_uuid, "DIED_AT", f"Fell here. {cause}")
         except Exception as e:
             print(f"[session] Death marking failed: {e}")
+
+        # Record death on-chain (non-fatal)
+        try:
+            from memento.tools import chain as _chain
+            if _chain.is_enabled():
+                _chain.record_death(player_id, cause, location, 0, 0)
+        except Exception as e:
+            print(f"[session] Chain record_death failed (non-fatal): {e}")
 
         return {
             "status": "dead",
