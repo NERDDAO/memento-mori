@@ -44,3 +44,52 @@ export function formatAddress(addr: string): string {
   if (addr.length < 10) return addr;
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
+
+/**
+ * Send an ERC-20 transfer (for x402 payment).
+ * Returns the transaction hash.
+ */
+export async function sendPayment(
+  recipient: string,
+  amount: string,
+  assetContract: string,
+): Promise<string> {
+  if (!window.ethereum) throw new Error('No wallet provider');
+  const from = getAddress();
+  if (!from) throw new Error('Wallet not connected');
+
+  // ERC-20 transfer(address,uint256) function selector
+  const transferSelector = '0xa9059cbb';
+  // Encode recipient (pad to 32 bytes)
+  const encodedRecipient = recipient.toLowerCase().replace('0x', '').padStart(64, '0');
+  // Encode amount (hex, pad to 32 bytes)
+  const amountHex = BigInt(amount).toString(16).padStart(64, '0');
+  const data = transferSelector + encodedRecipient + amountHex;
+
+  const txHash = await window.ethereum.request({
+    method: 'eth_sendTransaction',
+    params: [{
+      from,
+      to: assetContract,
+      data,
+    }],
+  }) as string;
+
+  return txHash;
+}
+
+/**
+ * Wait for a transaction to be confirmed.
+ */
+export async function waitForTransaction(txHash: string): Promise<void> {
+  if (!window.ethereum) return;
+  for (let i = 0; i < 30; i++) {
+    const receipt = await window.ethereum.request({
+      method: 'eth_getTransactionReceipt',
+      params: [txHash],
+    });
+    if (receipt) return;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  throw new Error('Transaction not confirmed after 60s');
+}

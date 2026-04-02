@@ -28,14 +28,25 @@ class CreateSessionResponse(BaseModel):
     max_health: int = 100
     skills: dict = {}
     inventory: list[str] = []
+    session_token: str = ""
 
 
 @router.post("/session/create", response_model=CreateSessionResponse)
 async def create_session(req: CreateSessionRequest, request: Request):
-    """Create a new game session — creates player in KG, registers Matrix user, generates opening narration."""
+    """Create a new game session. Requires x402 payment when enabled."""
     from gateway.rate_limit import session_limiter
     client_ip = request.client.host if request.client else "unknown"
     session_limiter.check(client_ip)
+
+    # x402 payment check
+    from gateway.x402 import check_payment_receipt, verify_payment_receipt, payment_required_response
+    tx_hash = check_payment_receipt(request, req.wallet_address)
+    if tx_hash is None:
+        return payment_required_response()
+    if tx_hash != "disabled":
+        verified = await verify_payment_receipt(tx_hash, req.wallet_address)
+        if not verified:
+            return payment_required_response()
 
     try:
         from memento.session import SessionManager
@@ -51,6 +62,10 @@ async def create_session(req: CreateSessionRequest, request: Request):
         if bridge and bridge.connected:
             await bridge.register_player(req.player_name, result["player_id"])
 
+        # Create session token
+        from gateway.session_store import create_session as _create_session_token
+        token = _create_session_token(result["player_id"], req.wallet_address)
+
         return CreateSessionResponse(
             player_id=result["player_id"],
             session_id=result["session_id"],
@@ -61,6 +76,7 @@ async def create_session(req: CreateSessionRequest, request: Request):
             max_health=result.get("max_health", 100),
             skills=result.get("skills", {}),
             inventory=result.get("inventory", []),
+            session_token=token,
         )
     except Exception:
         logger.error("Session creation via KG failed, using fallback", exc_info=True)
@@ -99,8 +115,18 @@ class ResumeSessionRequest(BaseModel):
 
 
 @router.post("/session/resume")
-async def resume_session(req: ResumeSessionRequest):
-    """Resume an existing character session. Returns full player state from KG."""
+async def resume_session(req: ResumeSessionRequest, request: Request):
+    """Resume an existing character session. Requires x402 payment when enabled."""
+    # x402 payment check
+    from gateway.x402 import check_payment_receipt, verify_payment_receipt, payment_required_response
+    tx_hash = check_payment_receipt(request, req.wallet_address)
+    if tx_hash is None:
+        return payment_required_response()
+    if tx_hash != "disabled":
+        verified = await verify_payment_receipt(tx_hash, req.wallet_address)
+        if not verified:
+            return payment_required_response()
+
     try:
         from memento.session import SessionManager
         sm = SessionManager()
@@ -110,6 +136,10 @@ async def resume_session(req: ResumeSessionRequest):
         from gateway.app import bridge
         if bridge and bridge.connected:
             await bridge.register_player(result.get("player_name", "player"), req.player_id)
+
+        # Create session token
+        from gateway.session_store import create_session as _create_session_token
+        token = _create_session_token(result["player_id"], req.wallet_address)
 
         return {
             "player_id": result["player_id"],
@@ -121,6 +151,7 @@ async def resume_session(req: ResumeSessionRequest):
             "max_health": result.get("max_health", 100),
             "skills": result.get("skills", {}),
             "inventory": result.get("inventory", []),
+            "session_token": token,
         }
     except Exception:
         logger.error("Session resume failed", exc_info=True)

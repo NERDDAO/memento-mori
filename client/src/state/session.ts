@@ -1,5 +1,7 @@
 // src/state/session.ts
-/** Session management — auth, WebSocket connection, player identity. */
+/** Session management — auth, WebSocket connection, x402 payment, player identity. */
+
+import { sendPayment, waitForTransaction } from '../chain/wallet';
 
 // Use relative URLs so the client works behind any reverse proxy (Caddy, nginx)
 const GATEWAY_URL = '';
@@ -13,6 +15,7 @@ export interface Session {
   currentLocation: string;
   connected: boolean;
   openingNarrative: string;
+  token: string;
 }
 
 const session: Session = {
@@ -23,14 +26,20 @@ const session: Session = {
   currentLocation: '',
   connected: false,
   openingNarrative: '',
+  token: '',
 };
 
 let ws: WebSocket | null = null;
 let onMessage: ((msg: any) => void) | null = null;
 let onConnectionChange: ((connected: boolean) => void) | null = null;
+let onPaymentRequired: ((payment: any) => void) | null = null;
 
 export function setConnectionHandler(handler: (connected: boolean) => void): void {
   onConnectionChange = handler;
+}
+
+export function setPaymentHandler(handler: (payment: any) => void): void {
+  onPaymentRequired = handler;
 }
 
 export function getSession(): Session {
@@ -41,12 +50,51 @@ export function setMessageHandler(handler: (msg: any) => void): void {
   onMessage = handler;
 }
 
+/** Build headers with session token if available. */
+function authHeaders(): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (session.token) h['Authorization'] = `Bearer ${session.token}`;
+  return h;
+}
+
+/**
+ * Handle a 402 Payment Required response.
+ * Prompts wallet to send USDC, waits for confirmation, retries with receipt.
+ */
+async function handlePaymentRequired(
+  resp: Response,
+  retryFn: (receiptHeader: string) => Promise<Response>,
+): Promise<Response> {
+  const data = await resp.json();
+  const payment = data.payment;
+  if (!payment) throw new Error('Invalid 402 response — no payment instructions');
+
+  // Notify UI about payment
+  if (onPaymentRequired) onPaymentRequired(payment);
+
+  // Send payment via wallet
+  const txHash = await sendPayment(payment.recipient, payment.amount, payment.asset);
+  await waitForTransaction(txHash);
+
+  // Retry with receipt
+  return retryFn(txHash);
+}
+
 export async function initSession(playerName: string, walletAddress: string, archetype: string = ''): Promise<Session> {
-  const resp = await fetch(`${GATEWAY_URL}/api/session/create`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ player_name: playerName, wallet_address: walletAddress, archetype }),
-  });
+  const body = JSON.stringify({ player_name: playerName, wallet_address: walletAddress, archetype });
+
+  const makeRequest = (receiptHeader?: string) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (receiptHeader) headers['X-Payment-Receipt'] = receiptHeader;
+    return fetch(`${GATEWAY_URL}/api/session/create`, { method: 'POST', headers, body });
+  };
+
+  let resp = await makeRequest();
+
+  if (resp.status === 402) {
+    resp = await handlePaymentRequired(resp, (receipt) => makeRequest(receipt));
+  }
+
   const data = await resp.json();
   session.playerId = data.player_id;
   session.sessionId = data.session_id;
@@ -54,10 +102,12 @@ export async function initSession(playerName: string, walletAddress: string, arc
   session.walletAddress = walletAddress;
   session.currentLocation = data.location;
   session.openingNarrative = data.opening_narrative || '';
+  session.token = data.session_token || '';
 
   localStorage.setItem('mm_player_id', session.playerId);
   localStorage.setItem('mm_player_name', playerName);
   localStorage.setItem('mm_wallet', walletAddress);
+  localStorage.setItem('mm_token', session.token);
 
   connectWebSocket();
   return session;
@@ -92,11 +142,20 @@ export async function fetchExistingPlayers(walletAddress: string): Promise<any[]
 }
 
 export async function resumeSession(playerId: string, walletAddress: string): Promise<Session> {
-  const resp = await fetch(`${GATEWAY_URL}/api/session/resume`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ player_id: playerId, wallet_address: walletAddress }),
-  });
+  const body = JSON.stringify({ player_id: playerId, wallet_address: walletAddress });
+
+  const makeRequest = (receiptHeader?: string) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (receiptHeader) headers['X-Payment-Receipt'] = receiptHeader;
+    return fetch(`${GATEWAY_URL}/api/session/resume`, { method: 'POST', headers, body });
+  };
+
+  let resp = await makeRequest();
+
+  if (resp.status === 402) {
+    resp = await handlePaymentRequired(resp, (receipt) => makeRequest(receipt));
+  }
+
   const data = await resp.json();
   session.playerId = data.player_id;
   session.sessionId = data.session_id;
@@ -104,10 +163,12 @@ export async function resumeSession(playerId: string, walletAddress: string): Pr
   session.walletAddress = walletAddress;
   session.currentLocation = data.location;
   session.openingNarrative = '';
+  session.token = data.session_token || '';
 
   localStorage.setItem('mm_player_id', session.playerId);
   localStorage.setItem('mm_player_name', session.playerName);
   localStorage.setItem('mm_wallet', walletAddress);
+  localStorage.setItem('mm_token', session.token);
 
   connectWebSocket();
   return session;
@@ -116,7 +177,7 @@ export async function resumeSession(playerId: string, walletAddress: string): Pr
 export async function sendAction(action: string): Promise<void> {
   await fetch(`${GATEWAY_URL}/api/action`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify({
       player_id: session.playerId,
       action: action,
