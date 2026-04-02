@@ -42,6 +42,7 @@ class SessionManager:
             {
                 "summary": " ".join(summary_parts),
                 "archetype": archetype,
+                "wallet_address": wallet_address,
                 "health": str(health),
                 "max_health": str(max_health),
                 "skills": json.dumps(arch_skills),
@@ -140,6 +141,142 @@ class SessionManager:
         except Exception as e:
             logger.warning("Opening narration failed", exc_info=True)
             return f"You stand at {location_name}. The air is heavy with foreboding. Your journey begins."
+
+    def get_players_by_wallet(self, wallet_address: str) -> list[dict]:
+        """Find all player characters belonging to a wallet address.
+
+        Returns list of: {player_id, name, archetype, location, health, max_health, level, is_dead}
+        """
+        if not wallet_address:
+            return []
+
+        client = get_client()
+        try:
+            result = client.kg.search(f"Player {wallet_address}", num_results=20)
+            entities = result.get("entities", result.get("nodes", []))
+            edges = result.get("edges", [])
+
+            # Build a set of dead player UUIDs from edges
+            dead_uuids = set()
+            for edge in edges:
+                rel = edge.get("relationship", edge.get("name", "")).upper()
+                fact = edge.get("fact", "")
+                if "DEAD" in rel or "DEAD" in fact.upper():
+                    source = edge.get("source_uuid", edge.get("source_node_uuid", ""))
+                    if source:
+                        dead_uuids.add(source)
+
+            # Find location edges
+            location_map: dict[str, str] = {}
+            for edge in edges:
+                rel = edge.get("relationship", edge.get("name", "")).upper()
+                if rel == "LOCATED_IN":
+                    source = edge.get("source_uuid", edge.get("source_node_uuid", ""))
+                    target_name = edge.get("target_name", edge.get("target_node_name", ""))
+                    if source and target_name:
+                        location_map[source] = target_name
+
+            players = []
+            for entity in entities:
+                labels = entity.get("labels", [])
+                if "Player" not in labels:
+                    continue
+                # Filter by wallet_address
+                entity_wallet = entity.get("wallet_address", "")
+                if entity_wallet and entity_wallet.lower() != wallet_address.lower():
+                    continue
+
+                uuid = str(entity.get("uuid", ""))
+                skills_raw = entity.get("skills", "{}")
+                try:
+                    skills = json.loads(skills_raw) if isinstance(skills_raw, str) else skills_raw
+                except (json.JSONDecodeError, TypeError):
+                    skills = {}
+
+                players.append({
+                    "player_id": uuid,
+                    "name": entity.get("name", "Unknown"),
+                    "archetype": entity.get("archetype", ""),
+                    "location": location_map.get(uuid, "Unknown"),
+                    "health": int(entity.get("health", 100)),
+                    "max_health": int(entity.get("max_health", 100)),
+                    "level": int(entity.get("level", 1)),
+                    "skills": skills,
+                    "is_dead": uuid in dead_uuids,
+                })
+
+            return players
+        except Exception:
+            logger.warning("Failed to query players by wallet", exc_info=True)
+            return []
+
+    def resume_player(self, player_id: str) -> dict:
+        """Resume an existing player session. Returns player state from KG.
+
+        Returns: {player_id, player_name, location_name, archetype, health, max_health, skills, inventory}
+        """
+        client = get_client()
+        try:
+            entity = client.kg.get_entity(player_id)
+            if isinstance(entity, dict) and "entity" in entity:
+                entity = entity["entity"]
+
+            player_name = entity.get("name", "Unknown")
+            archetype = entity.get("archetype", "")
+            health = int(entity.get("health", 100))
+            max_health = int(entity.get("max_health", 100))
+
+            skills_raw = entity.get("skills", "{}")
+            try:
+                skills = json.loads(skills_raw) if isinstance(skills_raw, str) else skills_raw
+            except (json.JSONDecodeError, TypeError):
+                skills = {}
+
+            # Find location from edges
+            location_name = "The Threshold"
+            result = client.kg.search(player_name, num_results=10)
+            edges = result.get("edges", [])
+            for edge in edges:
+                rel = edge.get("relationship", edge.get("name", "")).upper()
+                if rel == "LOCATED_IN":
+                    source = edge.get("source_uuid", edge.get("source_node_uuid", ""))
+                    if source == player_id:
+                        location_name = edge.get("target_name", edge.get("target_node_name", "The Threshold"))
+                        break
+
+            # Find inventory from CARRIES edges
+            inventory = []
+            for edge in edges:
+                rel = edge.get("relationship", edge.get("name", "")).upper()
+                if rel == "CARRIES":
+                    source = edge.get("source_uuid", edge.get("source_node_uuid", ""))
+                    if source == player_id:
+                        item_name = edge.get("target_name", edge.get("target_node_name", ""))
+                        if item_name:
+                            inventory.append(item_name)
+
+            return {
+                "player_id": player_id,
+                "player_name": player_name,
+                "location_name": location_name,
+                "archetype": archetype,
+                "health": health,
+                "max_health": max_health,
+                "skills": skills,
+                "inventory": inventory,
+            }
+        except Exception:
+            logger.warning("Failed to resume player %s", player_id, exc_info=True)
+            return {
+                "player_id": player_id,
+                "player_name": "Unknown",
+                "location_name": "The Threshold",
+                "archetype": "",
+                "health": 100,
+                "max_health": 100,
+                "skills": {},
+                "inventory": [],
+            }
 
     def end_session(self, player_id: str) -> dict:
         """End a session — verify kEngram, sync context."""

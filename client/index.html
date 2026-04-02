@@ -302,6 +302,20 @@
     .skill-dots { color: var(--accent); font-size: 10px; letter-spacing: 1px; }
     .archetype-label { color: var(--accent); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
 
+    /* Character select */
+    .character-list { max-width: 400px; width: 100%; }
+    .char-select-card {
+      border: 1px solid var(--border); border-radius: 2px; padding: 10px 14px;
+      cursor: pointer; background: var(--bg-panel); margin-bottom: 6px;
+      transition: border-color 0.2s;
+    }
+    .char-select-card:hover:not(.dead) { border-color: var(--accent); }
+    .char-select-card.dead { opacity: 0.4; cursor: not-allowed; }
+    .char-select-name { color: var(--text-primary); font-size: 14px; font-weight: bold; }
+    .char-dead-badge { color: var(--text-damage); font-size: 11px; font-weight: normal; letter-spacing: 1px; }
+    .char-select-info { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+    .char-select-hp { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+
     /* Archetype cards */
     .archetype-cards {
       display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
@@ -405,7 +419,13 @@
         A browser wallet is required to play Memento Mori.
       </p>
     </div>
-    <!-- Step 2: Archetype selection (hidden until wallet connected) -->
+    <!-- Step 2: Character select (shown if existing characters found) -->
+    <div id="character-select-step" class="hidden">
+      <p style="color: var(--text-dim); margin-bottom: 8px;">Your characters</p>
+      <div id="character-list" class="character-list"></div>
+      <button id="new-char-btn" style="margin-top: 12px; background: none; border: 1px solid var(--border); color: var(--text-primary); padding: 8px 24px; font-family: inherit; cursor: pointer;">Create New Character</button>
+    </div>
+    <!-- Step 3: Archetype selection (hidden until wallet connected) -->
     <div id="archetype-step" class="hidden">
       <p style="color: var(--text-dim); margin-bottom: 8px;">Choose your path</p>
       <div id="archetype-cards" class="archetype-cards"></div>

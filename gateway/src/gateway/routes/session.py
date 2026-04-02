@@ -1,7 +1,7 @@
 """Session routes — create and join game sessions."""
 
 import asyncio
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
 from gateway.log import get_logger
@@ -78,6 +78,53 @@ async def create_session(req: CreateSessionRequest, request: Request):
             location="The Threshold",
             opening_narrative=f"Welcome, {req.player_name}. Your journey begins.",
         )
+
+
+@router.get("/players")
+async def get_players(wallet: str = Query(..., min_length=42, max_length=42, pattern=r'^0x[a-fA-F0-9]{40}$')):
+    """Get all characters belonging to a wallet address."""
+    try:
+        from memento.session import SessionManager
+        sm = SessionManager()
+        players = await asyncio.to_thread(sm.get_players_by_wallet, wallet)
+        return players
+    except Exception:
+        logger.error("Failed to query players by wallet", exc_info=True)
+        return []
+
+
+class ResumeSessionRequest(BaseModel):
+    player_id: str = Field(..., min_length=1, max_length=64)
+    wallet_address: str = Field(..., min_length=42, max_length=42, pattern=r'^0x[a-fA-F0-9]{40}$')
+
+
+@router.post("/session/resume")
+async def resume_session(req: ResumeSessionRequest):
+    """Resume an existing character session. Returns full player state from KG."""
+    try:
+        from memento.session import SessionManager
+        sm = SessionManager()
+        result = await asyncio.to_thread(sm.resume_player, req.player_id)
+
+        # Register Matrix user for reconnection
+        from gateway.app import bridge
+        if bridge and bridge.connected:
+            await bridge.register_player(result.get("player_name", "player"), req.player_id)
+
+        return {
+            "player_id": result["player_id"],
+            "session_id": f"session-{result['player_id'][:8]}",
+            "location": result["location_name"],
+            "player_name": result["player_name"],
+            "archetype": result.get("archetype", ""),
+            "health": result.get("health", 100),
+            "max_health": result.get("max_health", 100),
+            "skills": result.get("skills", {}),
+            "inventory": result.get("inventory", []),
+        }
+    except Exception:
+        logger.error("Session resume failed", exc_info=True)
+        return {"error": "Failed to resume session"}
 
 
 @router.get("/archetypes")

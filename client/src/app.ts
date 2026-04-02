@@ -5,7 +5,7 @@
  */
 
 import { createInitialState, applyStateUpdate, type GameState } from './state/game-state';
-import { getSession, initSession, sendAction, setMessageHandler, setConnectionHandler } from './state/session';
+import { getSession, initSession, resumeSession, fetchExistingPlayers, sendAction, setMessageHandler, setConnectionHandler } from './state/session';
 import { parseNarrative, renderSegments, setKnownEntities } from './renderer/text-renderer';
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
@@ -273,6 +273,29 @@ async function enterWorld(playerName: string, walletAddress: string): Promise<vo
   (document.getElementById('action-input') as HTMLInputElement).focus();
 }
 
+async function resumeCharacter(playerId: string, walletAddress: string): Promise<void> {
+  const overlay = document.getElementById('char-create-overlay')!;
+  overlay.classList.add('hidden');
+
+  const session = await resumeSession(playerId, walletAddress);
+  gameState = createInitialState(session.playerName);
+  gameState.location.name = session.currentLocation;
+  // Apply restored data
+  if ((session as any).archetype) gameState.player.archetype = (session as any).archetype;
+  if ((session as any).health) gameState.player.health = (session as any).health;
+  if ((session as any).max_health) gameState.player.maxHealth = (session as any).max_health;
+  if ((session as any).skills) gameState.player.skills = (session as any).skills;
+
+  if (!gameState.roomMap) {
+    applyStateUpdate(gameState, { room_map: getThresholdMap() });
+  }
+  registerMapEntities(gameState.roomMap);
+  renderAllPanels();
+  narrative.addBlock(`Welcome back, ${session.playerName}. You are at ${session.currentLocation}.`, 'system');
+
+  (document.getElementById('action-input') as HTMLInputElement).focus();
+}
+
 // --- Helper: replace a mount div with a component element ---
 function mount(mountId: string, el: HTMLElement): void {
   const mountEl = document.getElementById(mountId);
@@ -444,6 +467,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const archetypeStep = document.getElementById('archetype-step');
+  const characterSelectStep = document.getElementById('character-select-step');
+  const characterList = document.getElementById('character-list');
+  const newCharBtn = document.getElementById('new-char-btn');
 
   walletConnectBtn.addEventListener('click', async () => {
     try {
@@ -451,7 +477,46 @@ document.addEventListener('DOMContentLoaded', () => {
       const addr = await connectWallet();
       walletStep.classList.add('hidden');
       walletAddressEl.textContent = `\u2713 ${formatAddress(addr)}`;
-      // Show archetype selection (or skip to name if no archetype step)
+
+      // Check for existing characters
+      const existingPlayers = await fetchExistingPlayers(addr);
+      if (existingPlayers.length > 0 && characterSelectStep && characterList) {
+        // Show character select
+        characterSelectStep.classList.remove('hidden');
+        characterList.innerHTML = existingPlayers.map((p: any) => `
+          <div class="char-select-card${p.is_dead ? ' dead' : ''}" data-player-id="${p.player_id}">
+            <div class="char-select-name">${p.name}${p.is_dead ? ' <span class="char-dead-badge">PERISHED</span>' : ''}</div>
+            <div class="char-select-info">${p.archetype || 'wanderer'} &middot; Lv ${p.level || 1} &middot; ${p.location || 'Unknown'}</div>
+            <div class="char-select-hp">HP: ${p.health}/${p.max_health}</div>
+          </div>
+        `).join('');
+        // Click to resume
+        characterList.addEventListener('click', (e: MouseEvent) => {
+          const card = (e.target as HTMLElement).closest('.char-select-card') as HTMLElement | null;
+          if (!card) return;
+          if (card.classList.contains('dead')) return; // Can't resume dead characters
+          const playerId = card.dataset.playerId;
+          if (playerId) resumeCharacter(playerId, addr);
+        });
+      } else {
+        // No existing characters — go to archetype selection
+        if (archetypeStep) {
+          archetypeStep.classList.remove('hidden');
+          loadArchetypes();
+        } else {
+          nameStep.classList.remove('hidden');
+          nameInput.focus();
+        }
+      }
+    } catch {
+      walletPrompt.textContent = 'Connection rejected. Try again.';
+    }
+  });
+
+  // "New Character" button from character select screen
+  if (newCharBtn) {
+    newCharBtn.addEventListener('click', () => {
+      if (characterSelectStep) characterSelectStep.classList.add('hidden');
       if (archetypeStep) {
         archetypeStep.classList.remove('hidden');
         loadArchetypes();
@@ -459,10 +524,8 @@ document.addEventListener('DOMContentLoaded', () => {
         nameStep.classList.remove('hidden');
         nameInput.focus();
       }
-    } catch {
-      walletPrompt.textContent = 'Connection rejected. Try again.';
-    }
-  });
+    });
+  }
 
   // Archetype → Name step transition
   const archetypeNextBtn = document.getElementById('archetype-next-btn');

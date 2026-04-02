@@ -81,6 +81,37 @@ function connectWebSocket(): void {
   };
 }
 
+export async function fetchExistingPlayers(walletAddress: string): Promise<any[]> {
+  try {
+    const resp = await fetch(`${GATEWAY_URL}/api/players?wallet=${walletAddress}`);
+    return await resp.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function resumeSession(playerId: string, walletAddress: string): Promise<Session> {
+  const resp = await fetch(`${GATEWAY_URL}/api/session/resume`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ player_id: playerId, wallet_address: walletAddress }),
+  });
+  const data = await resp.json();
+  session.playerId = data.player_id;
+  session.sessionId = data.session_id;
+  session.playerName = data.player_name;
+  session.walletAddress = walletAddress;
+  session.currentLocation = data.location;
+  session.openingNarrative = '';
+
+  localStorage.setItem('mm_player_id', session.playerId);
+  localStorage.setItem('mm_player_name', session.playerName);
+  localStorage.setItem('mm_wallet', walletAddress);
+
+  connectWebSocket();
+  return session;
+}
+
 export async function sendAction(action: string): Promise<void> {
   await fetch(`${GATEWAY_URL}/api/action`, {
     method: 'POST',
