@@ -43,6 +43,84 @@ export interface WikiPanel {
   clear(): void;
 }
 
+type ChainTable = 'Characters' | 'Items' | 'Locations' | 'Deaths';
+
+interface ChainResponse {
+  table: string;
+  id: string;
+  data: Record<string, unknown> | Record<string, unknown>[];
+}
+
+const LABEL_TABLE_MAP: Record<string, ChainTable[]> = {
+  Character: ['Characters', 'Deaths'],
+  Player: ['Characters', 'Deaths'],
+  Item: ['Items'],
+  Weapon: ['Items'],
+  Armor: ['Items'],
+  Consumable: ['Items'],
+  Location: ['Locations'],
+  Room: ['Locations'],
+  Region: ['Locations'],
+};
+
+function tablesForLabels(labels: string[]): ChainTable[] {
+  for (const label of labels) {
+    if (label in LABEL_TABLE_MAP) return LABEL_TABLE_MAP[label];
+  }
+  return [];
+}
+
+async function fetchChainData(table: string, entityId: string): Promise<ChainResponse | null> {
+  try {
+    const resp = await fetch(`${GATEWAY}/api/chain/${table}/${entityId}`);
+    if (resp.status === 200) return resp.json();
+    return null;
+  } catch { return null; }
+}
+
+function formatTimestamp(ts: number): string {
+  if (!ts) return 'Unknown';
+  return new Date(ts * 1000).toLocaleDateString();
+}
+
+function formatAddr(addr: string): string {
+  if (!addr || addr.length < 10 || addr === '0x0000000000000000000000000000000000000000') return 'None';
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
+function renderCharacterChain(data: Record<string, unknown>, deaths: Record<string, unknown>[] | null): string {
+  let html = '<div class="wiki-page-heading">ONCHAIN RECORD</div>';
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Status</span> ${data.alive ? 'Alive' : 'Dead'}</div>`;
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Level</span> ${data.level ?? '?'}</div>`;
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Wallet</span> ${formatAddr(String(data.wallet || ''))}</div>`;
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Created</span> ${formatTimestamp(Number(data.createdAt || 0))}</div>`;
+  if (deaths && Array.isArray(deaths) && deaths.length > 0) {
+    html += '<div class="wiki-page-heading" style="margin-top:8px">DEATHS</div>';
+    for (const d of deaths) {
+      html += `<div class="wiki-chain-death">`;
+      html += `<div>\u2620 ${esc(String(d.cause || 'Unknown'))}</div>`;
+      html += `<div class="wiki-fact">${esc(String(d.location || ''))} \u00B7 Lv${d.level} \u00B7 Tick ${d.tick}</div>`;
+      html += `</div>`;
+    }
+  }
+  return html;
+}
+
+function renderItemChain(data: Record<string, unknown>): string {
+  let html = '<div class="wiki-page-heading">ONCHAIN RECORD</div>';
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Rarity</span> ${esc(String(data.rarity || 'Common'))}</div>`;
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Owner</span> ${formatAddr(String(data.ownerId || ''))}</div>`;
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Location</span> ${formatAddr(String(data.locationId || ''))}</div>`;
+  return html;
+}
+
+function renderLocationChain(data: Record<string, unknown>): string {
+  let html = '<div class="wiki-page-heading">ONCHAIN RECORD</div>';
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Region</span> ${esc(String(data.region || 'Unknown'))}</div>`;
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Discovered by</span> ${formatAddr(String(data.discoveredBy || ''))}</div>`;
+  return html;
+}
+
 export function createWikiPanel(): WikiPanel {
   const el = document.createElement('div');
   el.className = 'wiki-panel';
@@ -53,6 +131,8 @@ export function createWikiPanel(): WikiPanel {
   let currentId = '';
   let pages: WikiPage[] = [];
   let pageIdx = 0;
+  let activeTab: 'lore' | 'chain' = 'lore';
+  let currentLabels: string[] = [];
 
   async function fetchEntity(id: string): Promise<NeighborResponse | null> {
     if (cache.has(id)) return cache.get(id)!;
@@ -170,6 +250,10 @@ export function createWikiPanel(): WikiPanel {
 
     let html = '';
 
+    // Prepend tab bar if chain data available
+    const hasTabs = tablesForLabels(currentLabels).length > 0;
+    if (hasTabs) html = renderTabBar() + html;
+
     // Back button
     if (navStack.length > 1) {
       const prev = navStack[navStack.length - 2];
@@ -189,6 +273,8 @@ export function createWikiPanel(): WikiPanel {
     }
 
     el.innerHTML = html;
+
+    if (hasTabs) wireTabClicks();
 
     // Wire pagination
     const prevBtn = el.querySelector('.wiki-prev');
@@ -241,12 +327,66 @@ export function createWikiPanel(): WikiPanel {
     `;
   }
 
+  function renderTabBar(): string {
+    return `<div class="wiki-tabs">
+      <span class="wiki-tab ${activeTab === 'lore' ? 'active' : ''}" data-tab="lore">Lore</span>
+      <span class="wiki-tab ${activeTab === 'chain' ? 'active' : ''}" data-tab="chain">Chain</span>
+    </div>`;
+  }
+
+  function wireTabClicks() {
+    el.querySelectorAll('.wiki-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const t = (tab as HTMLElement).dataset.tab as 'lore' | 'chain';
+        if (t === activeTab) return;
+        activeTab = t;
+        if (t === 'lore') renderPage();
+        else renderChainTab(currentId, currentLabels);
+      });
+    });
+  }
+
+  async function renderChainTab(entityId: string, labels: string[]) {
+    const tables = tablesForLabels(labels);
+    if (!tables.length) {
+      el.innerHTML = '<div class="wiki-empty">No onchain data for this entity type</div>';
+      return;
+    }
+    el.innerHTML = '<div class="wiki-loading">Loading chain data\u2026</div>';
+
+    let html = renderTabBar();
+
+    if (tables.includes('Characters')) {
+      const charData = await fetchChainData('Characters', entityId);
+      const deathData = await fetchChainData('Deaths', entityId);
+      if (charData) {
+        html += renderCharacterChain(
+          charData.data as Record<string, unknown>,
+          deathData ? (Array.isArray(deathData.data) ? deathData.data : [deathData.data]) as Record<string, unknown>[] : null,
+        );
+      } else {
+        html += '<div class="wiki-empty">No onchain data</div>';
+      }
+    } else if (tables.includes('Items')) {
+      const itemData = await fetchChainData('Items', entityId);
+      html += itemData ? renderItemChain(itemData.data as Record<string, unknown>) : '<div class="wiki-empty">No onchain data</div>';
+    } else if (tables.includes('Locations')) {
+      const locData = await fetchChainData('Locations', entityId);
+      html += locData ? renderLocationChain(locData.data as Record<string, unknown>) : '<div class="wiki-empty">No onchain data</div>';
+    }
+
+    el.innerHTML = html;
+    wireTabClicks();
+  }
+
   async function show(entityId: string, entityName: string) {
     if (entityId === currentId) return;
     currentId = entityId;
     navStack.push({ id: entityId, name: entityName });
     el.innerHTML = '<div class="wiki-loading">Loading\u2026</div>';
     const data = await fetchEntity(entityId);
+    activeTab = 'lore';
+    if (data) currentLabels = data.entity.labels;
     if (data) {
       pages = buildPages(data);
       pageIdx = 0;
@@ -259,6 +399,8 @@ export function createWikiPanel(): WikiPanel {
   async function showByName(name: string) {
     el.innerHTML = '<div class="wiki-loading">Loading\u2026</div>';
     const data = await fetchByName(name);
+    activeTab = 'lore';
+    if (data) currentLabels = data.entity.labels;
     if (data) {
       currentId = data.entity.id;
       navStack.push({ id: data.entity.id, name: data.entity.name });
@@ -279,6 +421,8 @@ export function createWikiPanel(): WikiPanel {
       navStack.length = 0;
       pages = [];
       pageIdx = 0;
+      activeTab = 'lore';
+      currentLabels = [];
       el.innerHTML = '<div class="wiki-empty">Click an entity to browse</div>';
     },
   };

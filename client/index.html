@@ -153,6 +153,27 @@
     .wiki-page-btn:hover:not(.disabled) { color: var(--text-primary); }
     .wiki-page-btn.disabled { color: var(--border); cursor: default; }
     .wiki-page-num { color: var(--text-dim); }
+    .wiki-tabs {
+      display: flex; gap: 0; margin-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .wiki-tab {
+      padding: 2px 10px; font-size: 11px; letter-spacing: 1px;
+      color: var(--text-dim); cursor: pointer; text-transform: uppercase;
+      border-bottom: 2px solid transparent;
+    }
+    .wiki-tab:hover { color: var(--text-primary); }
+    .wiki-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .wiki-chain-row {
+      padding: 2px 0; font-size: 13px;
+    }
+    .wiki-chain-label {
+      color: var(--text-dim); display: inline-block; width: 90px; font-size: 11px;
+      letter-spacing: 0.5px; text-transform: uppercase;
+    }
+    .wiki-chain-death {
+      padding: 4px 0; border-bottom: 1px solid var(--border);
+    }
 
     /* Sidebar */
     .sidebar-win .win-body { font-size: 13px; }
