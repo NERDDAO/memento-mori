@@ -121,6 +121,10 @@ class MatrixBridge:
 
             await _send_status("extracting")
 
+            # Ensure schema_version is present in state updates
+            if isinstance(state_update, dict) and "schema_version" not in state_update:
+                state_update["schema_version"] = 1
+
             msg = {
                 "type": "narrative",
                 "text": event.body,

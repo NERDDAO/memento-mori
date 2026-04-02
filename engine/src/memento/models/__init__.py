@@ -5,6 +5,7 @@ from .world import Exit, Location, Region
 from .items import Item
 from .factions import Faction
 from .quests import Quest
+from .state_update import StateUpdate
 
 __all__ = [
     "EntityRef",
@@ -18,4 +19,5 @@ __all__ = [
     "Item",
     "Faction",
     "Quest",
+    "StateUpdate",
 ]

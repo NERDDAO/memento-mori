@@ -2,6 +2,8 @@
 /** Client-side game state — mirrors a subset of the KG. */
 
 import type { RoomMap } from '../map/types';
+import type { StateUpdate } from '../types/schema.generated';
+import { SCHEMA_VERSION } from '../types/schema.generated';
 
 export interface LocationExit {
   direction: string;
@@ -60,7 +62,11 @@ export function createInitialState(playerName: string): GameState {
   };
 }
 
-export function applyStateUpdate(state: GameState, update: Record<string, any>): void {
+export function applyStateUpdate(state: GameState, update: StateUpdate): void {
+  // Schema version check — warn if server sends a newer schema
+  if (update.schema_version && update.schema_version > SCHEMA_VERSION) {
+    console.warn(`Server schema version ${update.schema_version} > client ${SCHEMA_VERSION}. Please refresh.`);
+  }
   if (update.location) state.location.name = update.location;
   if (update.health != null) state.player.health = update.health;
   if (update.max_health != null) state.player.maxHealth = update.max_health;
