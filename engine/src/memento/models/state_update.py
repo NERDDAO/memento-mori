@@ -49,6 +49,47 @@ class RoomMapUpdate(BaseModel):
     spawn: dict = {}
 
 
+class CombatEvent(BaseModel):
+    """Structured combat outcome for client display."""
+    action_type: str = ""  # attack/ability/flee
+    target_name: str = ""
+    damage_dealt: int | None = None
+    target_dead: bool = False
+    xp_gained: int = 0
+
+
+class InventoryEvent(BaseModel):
+    """Structured inventory change for client notification."""
+    event_type: str = ""  # PICKUP/DROP/USE/EQUIP/TRADE
+    item_name: str = ""
+
+
+class EventSummary(BaseModel):
+    """Structured summary of events that occurred during this turn."""
+    categories: list[str] = []
+    combat: CombatEvent | None = None
+    inventory_changes: list[InventoryEvent] = []
+    quest_update: str = ""
+    reputation_changes: dict[str, float] = {}
+
+
+class QuestSummary(BaseModel):
+    """Active quest info for client display."""
+    name: str = ""
+    description: str = ""
+    current_stage: int = 0
+    total_stages: int = 0
+    giver: str = ""
+    completed: bool = False
+
+
+class FactionStanding(BaseModel):
+    """Faction reputation for client display."""
+    name: str = ""
+    reputation: float = 0.0
+    disposition: str = "neutral"  # hostile/unfriendly/neutral/friendly/allied
+
+
 class StateUpdate(BaseModel):
     """State update sent from engine to client after each turn.
 
@@ -67,6 +108,10 @@ class StateUpdate(BaseModel):
     inventory: list[InventoryItemUpdate] | None = None
     room_map: RoomMapUpdate | None = None
     world_time: WorldTimeDisplay | None = None
+    skills: dict[str, int] | None = None
+    events: EventSummary | None = None
+    active_quests: list[QuestSummary] | None = None
+    factions: list[FactionStanding] | None = None
     status: str | None = None
     cause: str | None = None
     subsystem_warnings: list[str] = []

@@ -42,6 +42,27 @@ export interface RoomMapUpdate {
   spawn?: Record<string, any>;
 }
 
+export interface CombatEvent {
+  action_type?: string;
+  target_name?: string;
+  damage_dealt?: number | null;
+  target_dead?: boolean;
+  xp_gained?: number;
+}
+
+export interface InventoryEvent {
+  event_type?: string;
+  item_name?: string;
+}
+
+export interface EventSummary {
+  categories?: string[];
+  combat?: CombatEvent | null;
+  inventory_changes?: InventoryEvent[];
+  quest_update?: string;
+  reputation_changes?: Record<string, any>;
+}
+
 export interface StateUpdate {
   schema_version?: number;
   location?: string | null;
@@ -55,6 +76,10 @@ export interface StateUpdate {
   inventory?: InventoryItemUpdate[] | null;
   room_map?: RoomMapUpdate | null;
   world_time?: WorldTimeDisplay | null;
+  skills?: Record<string, any> | null;
+  events?: EventSummary | null;
+  active_quests?: QuestSummary[] | null;
+  factions?: FactionStanding[] | null;
   status?: string | null;
   cause?: string | null;
   subsystem_warnings?: string[];

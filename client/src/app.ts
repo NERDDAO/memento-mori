@@ -14,6 +14,8 @@ import { renderCharacterPanel } from './panels/character';
 import { renderInventoryPanel } from './panels/inventory';
 import { renderExitsPanel } from './panels/exits';
 import { renderPresentPanel } from './panels/present';
+import { renderQuestLogPanel } from './panels/questlog';
+import { renderFactionsPanel } from './panels/factions';
 import { createWindow } from './ui/window';
 import { createHeader, type WorldTime } from './ui/header';
 import { createDialog } from './ui/dialog';
@@ -35,6 +37,8 @@ let characterWin: ReturnType<typeof createWindow>;
 let inventoryWin: ReturnType<typeof createWindow>;
 let exitsWin: ReturnType<typeof createWindow>;
 let presentWin: ReturnType<typeof createWindow>;
+let questWin: ReturnType<typeof createWindow>;
+let factionWin: ReturnType<typeof createWindow>;
 let commandWin: ReturnType<typeof createWindow>;
 
 // --- Entity registration for narrative highlighting ---
@@ -57,6 +61,8 @@ function renderAllPanels(): void {
   exitsWin.setTitle(gameState.location.name || 'Exits');
   renderExitsPanel(exitsWin.body, gameState, handleAction);
   renderPresentPanel(presentWin.body, gameState, handleAction);
+  renderQuestLogPanel(questWin.body, gameState.quests);
+  renderFactionsPanel(factionWin.body, gameState.factions);
   updateMap(gameState, handleAction);
 
   // Show current location in wiki by default
@@ -153,9 +159,34 @@ function handleMessage(msg: any): void {
         }
 
         renderAllPanels();
+
+        // Display event notifications
+        if (msg.state_update.events) {
+          const events = msg.state_update.events;
+          if (events.combat) {
+            const c = events.combat;
+            if (c.damage_dealt != null) {
+              narrative.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ''}`, 'event-combat');
+            }
+            if (c.xp_gained) {
+              narrative.addBlock(`[+${c.xp_gained} XP]`, 'event-xp');
+            }
+            if (c.target_dead) {
+              narrative.addBlock(`${c.target_name || 'Target'} has been slain.`, 'event-death');
+            }
+          }
+          if (events.inventory_changes) {
+            for (const inv of events.inventory_changes) {
+              const prefix = inv.event_type === 'DROP' ? '-' : '+';
+              narrative.addBlock(`[${prefix}${inv.item_name}]`, 'event-item');
+            }
+          }
+        }
       }
 
+      // Check for death via structured event or text fallback
       if (msg.state_update?.status === 'dead' ||
+          msg.state_update?.events?.combat?.target_dead ||
           (msg.text && msg.text.toLowerCase().includes('you have died'))) {
         showDeathScreen(msg.state_update?.cause || '');
       }
@@ -165,6 +196,12 @@ function handleMessage(msg: any): void {
       narrative.showThinking();
       statusBar.setPhase('thinking');
       break;
+    case 'death_feed': {
+      const skull = '\u2620';
+      const deathMsg = `${skull} ${msg.player_name || 'Unknown'} (Level ${msg.level || '?'}) fell at ${msg.location || 'unknown'}. ${msg.cause || ''}`;
+      narrative.addBlock(deathMsg, 'death-feed');
+      break;
+    }
     case 'status':
       if (msg.phase) statusBar.setPhase(msg.phase);
       if (msg.tick != null) statusBar.setTick(msg.tick);
@@ -175,14 +212,49 @@ function handleMessage(msg: any): void {
   }
 }
 
+// --- Archetype selection ---
+let selectedArchetype = '';
+
+async function loadArchetypes(): Promise<void> {
+  const container = document.getElementById('archetype-cards');
+  if (!container) return;
+  try {
+    const resp = await fetch('http://localhost:8080/api/archetypes');
+    const archetypes = await resp.json();
+    container.innerHTML = archetypes.map((a: any) => `
+      <div class="archetype-card" data-archetype="${a.name}">
+        <div class="archetype-name">${a.name}</div>
+        <div class="archetype-desc">${a.description}</div>
+        <div class="archetype-stats">HP: ${a.stats.health || 100} | Skills: ${Object.keys(a.skills).join(', ')}</div>
+        <div class="archetype-items">${a.starting_items.join(', ')}</div>
+      </div>
+    `).join('');
+    container.addEventListener('click', (e: MouseEvent) => {
+      const card = (e.target as HTMLElement).closest('.archetype-card') as HTMLElement | null;
+      if (!card) return;
+      container.querySelectorAll('.archetype-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+      selectedArchetype = card.dataset.archetype || '';
+    });
+  } catch {
+    // Fallback — no archetype selection available
+    container.innerHTML = '<div style="color:var(--text-dim)">Archetypes unavailable</div>';
+  }
+}
+
 // --- Character creation ---
 async function enterWorld(playerName: string, walletAddress: string): Promise<void> {
   const overlay = document.getElementById('char-create-overlay')!;
   overlay.classList.add('hidden');
 
-  const session = await initSession(playerName, walletAddress);
+  const session = await initSession(playerName, walletAddress, selectedArchetype);
   gameState = createInitialState(playerName);
   gameState.location.name = session.currentLocation;
+  // Apply archetype data from session response
+  if ((session as any).archetype) gameState.player.archetype = (session as any).archetype;
+  if ((session as any).health) gameState.player.health = (session as any).health;
+  if ((session as any).max_health) gameState.player.maxHealth = (session as any).max_health;
+  if ((session as any).skills) gameState.player.skills = (session as any).skills;
 
   if (!gameState.roomMap) {
     applyStateUpdate(gameState, { room_map: getThresholdMap() });
@@ -220,6 +292,8 @@ document.addEventListener('DOMContentLoaded', () => {
   inventoryWin = createWindow({ title: 'Inventory', id: 'inventory-win', className: 'sidebar-win resizable' });
   exitsWin = createWindow({ title: 'Exits', id: 'exits-win', className: 'sidebar-win resizable' });
   presentWin = createWindow({ title: 'Present', id: 'present-win', className: 'sidebar-win resizable' });
+  questWin = createWindow({ title: 'Quests', id: 'quest-win', className: 'sidebar-win resizable' });
+  factionWin = createWindow({ title: 'Factions', id: 'faction-win', className: 'sidebar-win resizable' });
   commandWin = createWindow({ title: 'Command', id: 'command-win' });
 
   // 3. Mount windows by replacing mount divs
@@ -229,6 +303,8 @@ document.addEventListener('DOMContentLoaded', () => {
   mount('inventory-mount', inventoryWin.el);
   mount('exits-mount', exitsWin.el);
   mount('present-mount', presentWin.el);
+  mount('quest-mount', questWin.el);
+  mount('faction-mount', factionWin.el);
   mount('command-mount', commandWin.el);
 
   // Status bar
@@ -316,18 +392,36 @@ document.addEventListener('DOMContentLoaded', () => {
     walletNoProvider.classList.remove('hidden');
   }
 
+  const archetypeStep = document.getElementById('archetype-step');
+
   walletConnectBtn.addEventListener('click', async () => {
     try {
       walletPrompt.textContent = 'Connecting...';
       const addr = await connectWallet();
       walletStep.classList.add('hidden');
-      nameStep.classList.remove('hidden');
       walletAddressEl.textContent = `\u2713 ${formatAddress(addr)}`;
-      nameInput.focus();
+      // Show archetype selection (or skip to name if no archetype step)
+      if (archetypeStep) {
+        archetypeStep.classList.remove('hidden');
+        loadArchetypes();
+      } else {
+        nameStep.classList.remove('hidden');
+        nameInput.focus();
+      }
     } catch {
       walletPrompt.textContent = 'Connection rejected. Try again.';
     }
   });
+
+  // Archetype → Name step transition
+  const archetypeNextBtn = document.getElementById('archetype-next-btn');
+  if (archetypeNextBtn) {
+    archetypeNextBtn.addEventListener('click', () => {
+      if (archetypeStep) archetypeStep.classList.add('hidden');
+      nameStep.classList.remove('hidden');
+      nameInput.focus();
+    });
+  }
 
   enterBtn.addEventListener('click', () => {
     const name = nameInput.value.trim() || 'Wanderer';

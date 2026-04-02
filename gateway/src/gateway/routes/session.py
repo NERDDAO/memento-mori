@@ -15,6 +15,7 @@ class CreateSessionRequest(BaseModel):
     player_name: str = Field(..., min_length=1, max_length=30, pattern=r'^[a-zA-Z0-9_ -]+$')
     game_id: str = Field("default", max_length=64)
     wallet_address: str = Field(..., min_length=42, max_length=42, pattern=r'^0x[a-fA-F0-9]{40}$')
+    archetype: str = Field("", max_length=20, pattern=r'^[a-zA-Z]*$')
 
 
 class CreateSessionResponse(BaseModel):
@@ -22,6 +23,11 @@ class CreateSessionResponse(BaseModel):
     session_id: str
     location: str
     opening_narrative: str = ""
+    archetype: str = ""
+    health: int = 100
+    max_health: int = 100
+    skills: dict = {}
+    inventory: list[str] = []
 
 
 @router.post("/session/create", response_model=CreateSessionResponse)
@@ -34,7 +40,11 @@ async def create_session(req: CreateSessionRequest, request: Request):
     try:
         from memento.session import SessionManager
         sm = SessionManager()
-        result = await asyncio.to_thread(sm.create_player, req.player_name, wallet_address=req.wallet_address)
+        result = await asyncio.to_thread(
+            sm.create_player, req.player_name,
+            wallet_address=req.wallet_address,
+            archetype=req.archetype,
+        )
 
         # Register a Matrix user for this player
         from gateway.app import bridge
@@ -46,6 +56,11 @@ async def create_session(req: CreateSessionRequest, request: Request):
             session_id=result["session_id"],
             location=result["location_name"],
             opening_narrative=result.get("opening_narrative", ""),
+            archetype=result.get("archetype", ""),
+            health=result.get("health", 100),
+            max_health=result.get("max_health", 100),
+            skills=result.get("skills", {}),
+            inventory=result.get("inventory", []),
         )
     except Exception:
         logger.error("Session creation via KG failed, using fallback", exc_info=True)
@@ -63,6 +78,24 @@ async def create_session(req: CreateSessionRequest, request: Request):
             location="The Threshold",
             opening_narrative=f"Welcome, {req.player_name}. Your journey begins.",
         )
+
+
+@router.get("/archetypes")
+async def list_archetypes():
+    """List available character archetypes."""
+    from memento.config.archetypes import list_archetypes as _list
+    archetypes = _list()
+    # Strip starting_items details for the preview (keep names only)
+    result = []
+    for arch in archetypes:
+        result.append({
+            "name": arch["name"],
+            "description": arch.get("description", ""),
+            "stats": arch.get("stats", {}),
+            "skills": arch.get("skills", {}),
+            "starting_items": [i["name"] for i in arch.get("starting_items", [])],
+        })
+    return result
 
 
 class JoinSessionRequest(BaseModel):

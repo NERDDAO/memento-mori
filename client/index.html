@@ -259,6 +259,32 @@
     .item-equip { color: var(--text-dim); margin-left: 4px; font-size: 11px; }
     .empty-msg { color: var(--text-dim); font-style: italic; }
 
+    /* Quest panel */
+    .quest-entry { padding: 4px 0; border-bottom: 1px solid var(--border); }
+    .quest-entry.completed { opacity: 0.5; }
+    .quest-name { color: var(--accent); font-size: 13px; }
+    .quest-done { color: var(--text-heal); font-size: 11px; margin-left: 4px; }
+    .quest-giver { color: var(--text-npc); font-size: 11px; }
+    .quest-progress { font-size: 11px; margin: 2px 0; }
+    .quest-stage { color: var(--text-dim); margin-left: 4px; }
+    .quest-desc { color: var(--text-dim); font-size: 11px; line-height: 1.4; margin-top: 2px; }
+
+    /* Faction panel */
+    .faction-entry { padding: 4px 0; border-bottom: 1px solid var(--border); }
+    .faction-name { color: var(--text-primary); font-size: 13px; }
+    .faction-bar { font-size: 11px; margin: 2px 0; }
+    .faction-hostile { color: var(--text-damage); }
+    .faction-neutral { color: var(--text-dim); }
+    .faction-friendly { color: var(--text-heal); }
+    .faction-disposition { font-size: 11px; margin-left: 4px; }
+
+    /* Event notifications */
+    .narrative-block.event-combat { color: var(--text-damage); font-family: 'Courier New', monospace; font-size: 13px; font-weight: bold; }
+    .narrative-block.event-xp { color: var(--accent); font-family: 'Courier New', monospace; font-size: 13px; }
+    .narrative-block.event-item { color: #a335ee; font-family: 'Courier New', monospace; font-size: 13px; }
+    .narrative-block.event-death { color: var(--text-damage); font-family: 'Courier New', monospace; font-size: 14px; letter-spacing: 1px; }
+    .narrative-block.death-feed { color: var(--text-damage); opacity: 0.7; font-family: 'Courier New', monospace; font-size: 12px; border-left: 2px solid var(--text-damage); padding-left: 8px; }
+
     /* Thinking */
     .thinking { color: var(--text-system); font-style: italic; font-family: 'Courier New', monospace; font-size: 13px; }
     .thinking::after { content: ''; animation: dots 1.5s steps(4,end) infinite; }
@@ -268,6 +294,29 @@
     /* Health bar */
     .health-bar { height: 6px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 2px; }
     .health-bar-fill { height: 100%; background: var(--text-damage); transition: width 0.3s; }
+
+    /* Skills */
+    .skills-section { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 4px; }
+    .skill-row { display: flex; justify-content: space-between; padding: 1px 0; }
+    .skill-name { color: var(--text-dim); font-size: 12px; }
+    .skill-dots { color: var(--accent); font-size: 10px; letter-spacing: 1px; }
+    .archetype-label { color: var(--accent); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+
+    /* Archetype cards */
+    .archetype-cards {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+      max-width: 500px; width: 100%;
+    }
+    .archetype-card {
+      border: 1px solid var(--border); border-radius: 2px; padding: 12px;
+      cursor: pointer; background: var(--bg-panel); transition: border-color 0.2s;
+    }
+    .archetype-card:hover { border-color: var(--text-dim); }
+    .archetype-card.selected { border-color: var(--accent); }
+    .archetype-name { color: var(--accent); font-size: 14px; font-weight: bold; text-transform: capitalize; margin-bottom: 4px; }
+    .archetype-desc { color: var(--text-dim); font-size: 12px; margin-bottom: 6px; }
+    .archetype-stats { color: var(--text-primary); font-size: 11px; margin-bottom: 2px; }
+    .archetype-items { color: var(--text-dim); font-size: 11px; font-style: italic; }
 
     /* Overlays */
     #char-create-overlay {
@@ -338,6 +387,8 @@
         <div id="inventory-mount"></div>
         <div id="exits-mount"></div>
         <div id="present-mount"></div>
+        <div id="quest-mount"></div>
+        <div id="faction-mount"></div>
       </div>
     </div>
     <div id="command-mount"></div>
@@ -354,7 +405,13 @@
         A browser wallet is required to play Memento Mori.
       </p>
     </div>
-    <!-- Step 2: Name (hidden until wallet connected) -->
+    <!-- Step 2: Archetype selection (hidden until wallet connected) -->
+    <div id="archetype-step" class="hidden">
+      <p style="color: var(--text-dim); margin-bottom: 8px;">Choose your path</p>
+      <div id="archetype-cards" class="archetype-cards"></div>
+      <button id="archetype-next-btn" style="margin-top: 12px;">Continue</button>
+    </div>
+    <!-- Step 3: Name (hidden until archetype selected) -->
     <div id="name-step" class="hidden">
       <p id="wallet-address" style="color: var(--text-heal); font-size: 12px; letter-spacing: 1px;"></p>
       <p>What is your name, wanderer?</p>

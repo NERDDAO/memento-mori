@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
 from memento.bonfires_client import get_client
+from memento.config.archetypes import get_archetype
 from memento.crews.narrative.narration import make_narration_crew
 from memento.log import get_logger
 
@@ -12,18 +15,37 @@ logger = get_logger(__name__)
 class SessionManager:
     """Manages game sessions — player creation, placement, and cleanup."""
 
-    def create_player(self, player_name: str, wallet_address: str = "") -> dict:
+    def create_player(self, player_name: str, wallet_address: str = "", archetype: str = "") -> dict:
         """Create a new player in the KG and return session info.
 
-        Returns: {player_id, session_id, location_name, opening_narrative}
+        Returns: {player_id, session_id, location_name, opening_narrative, archetype, stats, skills, inventory}
         """
         client = get_client()
+
+        # 0. Load archetype config (if specified)
+        arch_config = get_archetype(archetype) if archetype else {}
+        arch_stats = arch_config.get("stats", {})
+        arch_skills = arch_config.get("skills", {})
+        arch_items = arch_config.get("starting_items", [])
+
+        health = arch_stats.get("health", 100)
+        max_health = arch_stats.get("max_health", 100)
+
+        summary_parts = [f"A new soul enters the world. {player_name} stands at the threshold."]
+        if archetype:
+            summary_parts.append(f"Archetype: {archetype}. {arch_config.get('description', '')}")
 
         # 1. Create player entity in KG
         player_uuid = client.kg.create_entity(
             player_name,
             ["Player"],
-            {"summary": f"A new soul enters the world. {player_name} stands at the threshold."},
+            {
+                "summary": " ".join(summary_parts),
+                "archetype": archetype,
+                "health": str(health),
+                "max_health": str(max_health),
+                "skills": json.dumps(arch_skills),
+            },
         )
 
         # 2. Create session kEngram
@@ -57,7 +79,21 @@ class SessionManager:
         except Exception as e:
             logger.warning("Chain register_character failed", exc_info=True)
 
-        # 6. Generate opening narration
+        # 6. Create starting items from archetype
+        inventory_names = []
+        for item_def in arch_items:
+            try:
+                item_uuid = client.kg.create_entity(
+                    item_def["name"],
+                    item_def.get("labels", ["Item"]),
+                    {"summary": item_def.get("summary", "")},
+                )
+                client.kg.create_edge(player_uuid, item_uuid, "CARRIES", "")
+                inventory_names.append(item_def["name"])
+            except Exception:
+                logger.warning("Failed to create starting item: %s", item_def.get("name"), exc_info=True)
+
+        # 7. Generate opening narration
         opening = self._generate_opening(player_name, location_name)
 
         return {
@@ -65,13 +101,22 @@ class SessionManager:
             "session_id": session_id,
             "location_name": location_name,
             "opening_narrative": opening,
+            "archetype": archetype,
+            "health": health,
+            "max_health": max_health,
+            "skills": arch_skills,
+            "inventory": inventory_names,
         }
 
     def _find_starting_location(self) -> str:
-        """Find an existing location or return a default."""
+        """Find an existing location or return a default.
+
+        Searches KG for locations, preferring ones with room_map data.
+        Falls back to The Threshold.
+        """
         client = get_client()
         try:
-            result = client.kg.search("tavern inn starting location", num_results=3)
+            result = client.kg.search("tavern inn starting location", num_results=5)
             entities = result.get("entities", result.get("nodes", []))
             for entity in entities:
                 labels = entity.get("labels", [])

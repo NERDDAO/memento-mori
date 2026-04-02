@@ -96,17 +96,47 @@ class EngineMatrixListener:
     def _run_turn(player_id: str, location_name: str, action: str) -> tuple[str, dict]:
         """Run GameTurnFlow synchronously (called from thread). Returns (narrative, state_update)."""
         from memento.flows.game_turn import GameTurnFlow
+        from memento.models.state_update import StateUpdate, EventSummary, CombatEvent, QuestSummary
 
         flow = GameTurnFlow()
         flow.state.player_name = player_id
         flow.state.location_name = location_name
         flow.state.action = action
         flow.kickoff()
-        state_update = {
-            "location": location_name,
-            "events": str(flow.state.events)[:500] if hasattr(flow.state, "events") else "",
-        }
-        return flow.state.narrative, state_update
+
+        # Build structured event summary from flow state
+        events_summary = None
+        flow_events = getattr(flow.state, "events", {})
+        if flow_events and isinstance(flow_events, dict):
+            categories = flow_events.get("categories", [])
+            combat = None
+            if "combat" in categories and "combat_result" in flow_events:
+                combat = CombatEvent(
+                    action_type=flow_events.get("action_type", "attack"),
+                    target_name=flow_events.get("combat_target", ""),
+                    target_dead="dead" in str(flow_events.get("combat_consequences", "")).lower(),
+                )
+            events_summary = EventSummary(
+                categories=categories,
+                combat=combat,
+            )
+
+        # Query active quests for this player
+        active_quests = None
+        raw_quests = GameTurnFlow.query_active_quests(player_id)
+        if raw_quests:
+            active_quests = [
+                QuestSummary(**q) for q in raw_quests
+            ]
+
+        state_update = StateUpdate(
+            location=location_name,
+            world_time=flow.state.world_time if isinstance(flow.state.world_time, dict) else None,
+            events=events_summary,
+            active_quests=active_quests,
+            subsystem_warnings=getattr(flow.state, "subsystem_warnings", []),
+        )
+        return flow.state.narrative, state_update.model_dump(exclude_none=True)
 
 
 async def main():

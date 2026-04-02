@@ -1,0 +1,75 @@
+archetypes:
+  warrior:
+    description: "Heavy armor, strong attacks, low subtlety"
+    stats:
+      health: 120
+      max_health: 120
+    skills:
+      swordsmanship: 2
+      blocking: 2
+      intimidation: 1
+    starting_items:
+      - name: "Iron Sword"
+        labels: ["Item", "Weapon"]
+        summary: "A sturdy iron blade, well-balanced and reliable. Shows signs of careful maintenance."
+        slot: "main_hand"
+      - name: "Battered Shield"
+        labels: ["Item", "Shield"]
+        summary: "A wooden shield reinforced with iron bands. Dented but functional."
+        slot: "off_hand"
+
+  rogue:
+    description: "Fast, sneaky, deadly up close"
+    stats:
+      health: 80
+      max_health: 80
+    skills:
+      sneaking: 2
+      lockpicking: 2
+      pickpocket: 1
+    starting_items:
+      - name: "Twin Daggers"
+        labels: ["Item", "Weapon"]
+        summary: "A matched pair of slim daggers with blackened blades. Silent and lethal."
+        slot: "main_hand"
+      - name: "Lockpick Set"
+        labels: ["Item", "Tool"]
+        summary: "A leather roll containing picks, tension wrenches, and a rake. Well-used."
+        slot: "belt"
+
+  mage:
+    description: "Fragile but devastating arcane power"
+    stats:
+      health: 60
+      max_health: 60
+    skills:
+      spellcraft: 3
+      lore: 2
+    starting_items:
+      - name: "Gnarled Staff"
+        labels: ["Item", "Weapon", "Arcane"]
+        summary: "A twisted oak staff capped with a dull crystal. Hums faintly when gripped."
+        slot: "main_hand"
+      - name: "Tome of Sparks"
+        labels: ["Item", "Readable", "Arcane"]
+        summary: "A thin grimoire bound in charred leather. Contains basic fire incantations."
+        slot: "belt"
+
+  ranger:
+    description: "Survivor, tracker, deadly at range"
+    stats:
+      health: 90
+      max_health: 90
+    skills:
+      archery: 2
+      tracking: 2
+      foraging: 1
+    starting_items:
+      - name: "Hunting Bow"
+        labels: ["Item", "Weapon", "Ranged"]
+        summary: "A short recurve bow of yew wood. Light, accurate, and well-worn from use."
+        slot: "main_hand"
+      - name: "Waterskin"
+        labels: ["Item", "Consumable"]
+        summary: "A leather waterskin filled with clean water. Essential for survival."
+        slot: "belt"

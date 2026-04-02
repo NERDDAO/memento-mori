@@ -108,7 +108,10 @@ class GameTurnFlow(Flow[TurnState]):
                 quest_flow.state.player_level = 1
                 quest_flow.kickoff()
                 self.state.events["quest_result"] = quest_flow.state.quest_concept
-            except Exception as e:
+
+                # Persist quest to KG and link to player
+                self._persist_quest(quest_flow)
+            except Exception:
                 logger.warning("Quest flow failed", exc_info=True)
                 self.state.subsystem_warnings.append("quest_unavailable")
 
@@ -225,3 +228,67 @@ class GameTurnFlow(Flow[TurnState]):
 
         except Exception as e:
             logger.warning(f"Episode chain sync failed: {e}")
+
+    def _persist_quest(self, quest_flow) -> None:
+        """Persist quest data to KG and link to player."""
+        try:
+            from memento.bonfires_client import get_client
+            client = get_client()
+
+            quest_name = quest_flow.state.quest_concept[:100].split("\n")[0].strip()
+            if not quest_name:
+                return
+
+            quest_uuid = client.kg.create_entity(
+                quest_name,
+                ["Quest"],
+                {
+                    "summary": quest_flow.state.quest_concept[:500],
+                    "stages": quest_flow.state.quest_stages[:500],
+                    "dialogue": quest_flow.state.quest_dialogue[:500],
+                    "location": quest_flow.state.location,
+                    "giver": quest_flow.state.npc,
+                },
+            )
+
+            # Link quest to player
+            if self.state.player_uuid:
+                client.kg.create_edge(self.state.player_uuid, quest_uuid, "HAS_QUEST", "")
+            # Link quest to location
+            from memento.tools.kg import _resolve_entity_uuid
+            loc_uuid = _resolve_entity_uuid(self.state.location_name)
+            if loc_uuid:
+                client.kg.create_edge(quest_uuid, loc_uuid, "AVAILABLE_AT", "")
+
+            logger.info("Persisted quest: %s (%s)", quest_name, quest_uuid)
+        except Exception:
+            logger.warning("Failed to persist quest", exc_info=True)
+
+    @staticmethod
+    def query_active_quests(player_uuid: str) -> list[dict]:
+        """Query KG for player's active quests. Returns list of quest summaries."""
+        if not player_uuid:
+            return []
+        try:
+            from memento.bonfires_client import get_client
+            client = get_client()
+
+            result = client.kg.search(f"quest player {player_uuid}", num_results=10)
+            entities = result.get("entities", result.get("nodes", []))
+
+            quests = []
+            for entity in entities:
+                labels = entity.get("labels", [])
+                if "Quest" in labels:
+                    quests.append({
+                        "name": entity.get("name", "Unknown Quest"),
+                        "description": entity.get("summary", ""),
+                        "giver": entity.get("giver", ""),
+                        "current_stage": 0,
+                        "total_stages": 3,
+                        "completed": False,
+                    })
+            return quests
+        except Exception:
+            logger.warning("Failed to query active quests", exc_info=True)
+            return []

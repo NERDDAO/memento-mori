@@ -15,19 +15,26 @@ else
     echo "Warning: no .env file found"
 fi
 
+# Seed world if requested
+if [ "$1" = "--seed" ]; then
+    echo "Seeding world (this will take several minutes)..."
+    python -m memento.seed --world ${@:2}
+    echo "Seeding complete."
+fi
+
 # Build client
 echo "Building client..."
-(cd client && ~/.bun/bin/bun build src/app.ts --outdir . 2>&1) || echo "Client build skipped"
+(cd client && bun build src/app.ts --outdir . 2>&1) || echo "Client build skipped"
 
 # Start gateway (serves client + API)
 echo "Starting gateway on :8080..."
-(cd gateway && /home/at0x/miniconda3/bin/uvicorn gateway.app:app --host 0.0.0.0 --port 8080) &
+(cd gateway && uvicorn gateway.app:app --host 0.0.0.0 --port 8080) &
 GATEWAY_PID=$!
 
 # Start engine listener (if Matrix env vars set)
 if [ -n "$MATRIX_HOMESERVER" ] && [ -n "$MATRIX_BOT_TOKEN" ]; then
     echo "Starting engine Matrix listener..."
-    (cd engine && /home/at0x/miniconda3/bin/python -m memento.matrix_listener) &
+    (cd engine && python -m memento.matrix_listener) &
     ENGINE_PID=$!
     echo "Engine PID: $ENGINE_PID"
 else
