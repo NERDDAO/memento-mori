@@ -7,8 +7,9 @@ A permadeath MUD powered by CrewAI, where AI agents collaboratively narrate a da
 ```
 Client (TypeScript/Bun)          Gateway (FastAPI)              Engine (CrewAI/Python)
 Pretext-rendered MUD UI    -->   Matrix bridge + WebSocket  --> 32 crews, 42 agents, 11 flows
-character creation               room-per-location              Bonfires KG for world state
-virtualized narrative             action queuing                 episodic memory via Graphiti
+mandatory wallet (EIP-1193)      MUD indexer proxy              Bonfires KG for world state
+wiki with Lore/Chain tabs        canonical entity filter         episodic memory via Graphiti
+virtualized narrative             action queuing                 dual-write KG + Redstone L2
 dynamic side panels               state sync                    permadeath with memorials
 ```
 
@@ -19,9 +20,10 @@ dynamic side panels               state sync                    permadeath with 
 | Layer | Tech | Purpose |
 |-------|------|---------|
 | Engine | Python, CrewAI, Pydantic | AI agent orchestration, game logic |
-| Gateway | FastAPI, matrix-nio | HTTP/WebSocket bridge, Matrix transport |
-| Client | TypeScript, Bun, Pretext | Rich text MUD interface |
+| Gateway | FastAPI, matrix-nio, httpx | HTTP/WebSocket bridge, Matrix transport, MUD indexer proxy |
+| Client | TypeScript, Bun, Pretext | Rich text MUD interface, wallet gate |
 | Data | Bonfires KG (Neo4j), Matrix (Synapse) | World graph, chat persistence |
+| Chain | MUD framework, Solidity, Redstone L2 | Onchain world state, canonical entity verification |
 | LLM | OpenRouter (Gemini Flash) | All AI reasoning |
 
 ### How It Works
@@ -46,6 +48,7 @@ dynamic side panels               state sync                    permadeath with 
 
 - Python 3.10+
 - Bun (for client build)
+- Browser wallet (MetaMask or EIP-1193 compatible)
 - OpenRouter API key
 - Bonfires API access (for KG)
 
@@ -70,6 +73,12 @@ export OPENROUTER_API_KEY="your-key"
 export BONFIRE_API_KEY="your-key"
 export BONFIRE_ID="your-bonfire-id"
 export BONFIRE_AGENT_ID="your-agent-id"
+
+# Chain (optional — game works without, but no onchain persistence)
+export REDSTONE_RPC="https://rpc.redstone.xyz"
+export MUD_WORLD_ADDRESS="0x..."
+export ENGINE_PRIVATE_KEY="0x..."
+export MUD_INDEXER_URL="http://localhost:3001"
 
 # Engine-only (no gateway needed)
 cd engine && python -m memento.flows.run_turn
@@ -130,15 +139,20 @@ memento-mori/
       ws.py                        # WebSocket hub, location-aware broadcast
       routes/
         action.py                  # POST /api/action
-        session.py                 # POST /api/session/create
+        session.py                 # POST /api/session/create (requires wallet_address)
         state.py                   # GET /api/state (queries KG)
+        entity.py                  # GET /api/entity/{id} — KG entity lookup, canonical verification
+        chain.py                   # GET /api/chain/{table}/{id} — MUD indexer proxy
+      chain_client.py              # MUD indexer HTTP client, canonical verification helpers
 
   client/                          # Pretext MUD interface
-    index.html                     # Dark fantasy layout, character creation + death overlays
+    index.html                     # Dark fantasy layout, wallet gate + character creation + death overlays
     src/
-      app.ts                       # Orchestrator: wires panels, handles messages
+      app.ts                       # Orchestrator: wires panels, wallet gate, handles messages
+      chain/
+        wallet.ts                  # EIP-1193 wallet connection (connectWallet, hasProvider, formatAddress)
       state/
-        session.ts                 # Session management, WebSocket, reconnect
+        session.ts                 # Session management, wallet address, WebSocket, reconnect
         game-state.ts              # GameState interface, applyStateUpdate, renderState
       renderer/
         text-renderer.ts           # Styled segment parser (NPC dialogue, damage, healing)
@@ -151,6 +165,12 @@ memento-mori/
         inventory.ts               # Item list with rarity colors
         map.ts                     # Location, exits, NPCs present
         actions.ts                 # Dynamic contextual action buttons
+
+  contracts/                       # MUD framework (Redstone L2)
+    packages/contracts/
+      mud.config.ts                # MUD table definitions (7 tables)
+      src/systems/                 # Solidity systems (Character, Item, Location, Event, Reputation, Episode)
+      src/codegen/                 # Auto-generated table libraries
 
   defs/                            # Game content
     banned_words.yaml              # Slopword filter list
@@ -165,11 +185,28 @@ memento-mori/
 When a character dies:
 - Player node stays in the KG forever (append-only, never deleted)
 - `HAS_STATUS: DEAD` and `DIED_AT` edges are created
+- Death recorded onchain (immutable, timestamped)
 - NPCs remember the fallen character
 - Items drop at the death location
 - Session kEngram is finalized as a memorial
 - The death feed announces to all players
 - A new character starts with nothing in the same world
+
+### Onchain Integration (Redstone L2)
+
+All significant world mutations are dual-written to the Bonfires KG and Redstone L2 via MUD tables. The chain is the **canonicality gate** — entities only appear in the client if they exist onchain.
+
+| Table | What it stores |
+|-------|---------------|
+| Characters | Name, wallet, level, alive/dead, creation time |
+| Deaths | Cause, location, level at death, game tick |
+| Items | Name, rarity, owner, location |
+| Locations | Name, region, discoverer |
+| WorldEvents | Type, actors, location, summary, tick |
+| Episodes | Full Graphiti extraction (entities + edges as JSON) |
+| Reputation | Wallet, faction, standing |
+
+The gateway proxies MUD indexer reads via `/api/chain/{table}/{id}`. The wiki's Chain tab displays structured onchain fields alongside KG lore. Wallet connection is mandatory (x402 payments).
 
 ### Knowledge Graph
 
