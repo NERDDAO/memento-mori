@@ -266,6 +266,11 @@
       background: var(--accent); color: #fff; border: none; padding: 8px 24px;
       font-family: inherit; cursor: pointer;
     }
+    #wallet-connect-btn {
+      background: var(--accent); color: #fff; border: none; padding: 8px 24px;
+      font-family: inherit; cursor: pointer;
+    }
+    #wallet-address { margin-bottom: 8px; }
     .hidden { display: none !important; }
 
     #death-overlay {
@@ -320,9 +325,21 @@
   </div>
   <div id="char-create-overlay">
     <h1>MEMENTO MORI</h1>
-    <p>What is your name, wanderer?</p>
-    <input type="text" id="char-name-input" placeholder="Enter name" autofocus />
-    <button id="char-create-btn">Enter the World</button>
+    <!-- Step 1: Wallet -->
+    <div id="wallet-step">
+      <p id="wallet-prompt">Connect your wallet to enter</p>
+      <button id="wallet-connect-btn">Connect Wallet</button>
+      <p id="wallet-no-provider" class="hidden" style="color: var(--text-damage); font-size: 13px;">
+        A browser wallet is required to play Memento Mori.
+      </p>
+    </div>
+    <!-- Step 2: Name (hidden until wallet connected) -->
+    <div id="name-step" class="hidden">
+      <p id="wallet-address" style="color: var(--text-heal); font-size: 12px; letter-spacing: 1px;"></p>
+      <p>What is your name, wanderer?</p>
+      <input type="text" id="char-name-input" placeholder="Enter name" />
+      <button id="char-create-btn">Enter the World</button>
+    </div>
   </div>
   <div id="death-overlay" class="hidden">
     <h1>YOU HAVE DIED</h1>
