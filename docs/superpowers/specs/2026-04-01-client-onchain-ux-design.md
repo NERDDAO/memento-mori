@@ -186,6 +186,7 @@ Browser (mandatory wallet via window.ethereum)
 - `client/src/state/session.ts` — `Session.walletAddress`, `initSession(name, wallet)` sends `wallet_address` in POST body, persist to localStorage
 - `client/src/ui/wiki.ts` — tab bar (Lore/Chain), `fetchChainData(table, id)`, chain tab render logic per entity type
 - `gateway/src/gateway/routes/session.py` — `wallet_address: str` on `CreateSessionRequest` (required field)
+- `gateway/src/gateway/routes/entity.py` — cross-reference MUD indexer for canonical entity verification, strip non-onchain entities from responses
 
 ### Unchanged
 - `client/src/ui/status.ts` — already complete
@@ -202,6 +203,35 @@ Browser (mandatory wallet via window.ethereum)
   - Run `@latticexyz/store-indexer` as a sidecar service and proxy to it
   - Or use a hosted indexer if available for Redstone
 - `uuid` to bytes32 conversion (reuse logic from `engine/src/memento/tools/chain.py`)
+
+## Canonical Entity Verification
+
+The chain is the canonicality gate. Entities only appear in the client if they exist onchain.
+
+### Enforcement
+
+The gateway's `/api/entity/{id}/neighbors` endpoint cross-references the MUD indexer before returning KG data:
+
+1. Fetch entity + neighbors from KG (existing flow)
+2. For each entity in the response (primary + neighbors), check the corresponding MUD table:
+   - Labels containing `Character` or `Player` → check `Characters` table
+   - Labels containing `Item`, `Weapon`, `Armor`, `Consumable` → check `Items` table
+   - Labels containing `Location`, `Room`, `Region` → check `Locations` table
+3. Strip any entity without an onchain record from the response
+4. Strip edges that reference stripped entities
+
+This applies to all entity endpoints: `/api/entity/{id}/neighbors`, `/api/entity/{id}`, `/api/entity/search/{name}`.
+
+### Sync Lag
+
+The engine writes KG first, chain second (async, ~2s Redstone block time). During this window, a freshly created entity is invisible in the wiki. The status bar shows the sync pipeline ("Pushing onchain...") so the player understands the world is being inscribed. No special handling — the loading state is intentional and healthy.
+
+### Why Hard Filter
+
+- Entities can only be created through crew endpoints (engine CrewAI flows)
+- The chain is the proof that a crew properly created the entity
+- Phantom KG entities (from bugs, partial writes, manual DB edits) are automatically excluded
+- Simplifies the client — no "unverified" states to render
 
 ## Out of Scope
 
