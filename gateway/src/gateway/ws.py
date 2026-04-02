@@ -53,3 +53,17 @@ class WebSocketHub:
         """Send a message to all connected players."""
         for pid in list(self.connections.keys()):
             await self.send_to_player(pid, message)
+
+    async def broadcast_death(
+        self, player_name: str, level: int, cause: str, location: str
+    ) -> None:
+        """Broadcast a permadeath announcement to all connected players."""
+        msg = {
+            "type": "death_feed",
+            "player_name": player_name,
+            "level": level,
+            "cause": cause,
+            "location": location,
+        }
+        logger.info("Death feed: %s (Lv %d) at %s — %s", player_name, level, location, cause)
+        await self.broadcast_all(msg)

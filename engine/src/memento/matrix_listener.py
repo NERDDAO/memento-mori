@@ -96,7 +96,7 @@ class EngineMatrixListener:
     def _run_turn(player_id: str, location_name: str, action: str) -> tuple[str, dict]:
         """Run GameTurnFlow synchronously (called from thread). Returns (narrative, state_update)."""
         from memento.flows.game_turn import GameTurnFlow
-        from memento.models.state_update import StateUpdate, EventSummary, CombatEvent
+        from memento.models.state_update import StateUpdate, EventSummary, CombatEvent, QuestSummary
 
         flow = GameTurnFlow()
         flow.state.player_name = player_id
@@ -121,10 +121,19 @@ class EngineMatrixListener:
                 combat=combat,
             )
 
+        # Query active quests for this player
+        active_quests = None
+        raw_quests = GameTurnFlow.query_active_quests(player_id)
+        if raw_quests:
+            active_quests = [
+                QuestSummary(**q) for q in raw_quests
+            ]
+
         state_update = StateUpdate(
             location=location_name,
             world_time=flow.state.world_time if isinstance(flow.state.world_time, dict) else None,
             events=events_summary,
+            active_quests=active_quests,
             subsystem_warnings=getattr(flow.state, "subsystem_warnings", []),
         )
         return flow.state.narrative, state_update.model_dump(exclude_none=True)

@@ -21,6 +21,22 @@ class ActionResponse(BaseModel):
     status: str = "queued"
 
 
+class DeathBroadcast(BaseModel):
+    player_name: str = Field(..., min_length=1, max_length=30)
+    level: int = Field(1, ge=1)
+    cause: str = Field("", max_length=200)
+    location: str = Field("", max_length=200)
+
+
+@router.post("/death/broadcast")
+async def broadcast_death(req: DeathBroadcast):
+    """Broadcast a permadeath announcement to all connected players."""
+    from gateway.app import ws_hub
+    if ws_hub:
+        await ws_hub.broadcast_death(req.player_name, req.level, req.cause, req.location)
+    return {"status": "broadcast"}
+
+
 @router.post("/action", response_model=ActionResponse)
 async def submit_action(req: ActionRequest):
     """Submit a player action. The engine processes it asynchronously via Matrix."""

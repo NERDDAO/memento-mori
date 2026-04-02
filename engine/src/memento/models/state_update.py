@@ -73,6 +73,23 @@ class EventSummary(BaseModel):
     reputation_changes: dict[str, float] = {}
 
 
+class QuestSummary(BaseModel):
+    """Active quest info for client display."""
+    name: str = ""
+    description: str = ""
+    current_stage: int = 0
+    total_stages: int = 0
+    giver: str = ""
+    completed: bool = False
+
+
+class FactionStanding(BaseModel):
+    """Faction reputation for client display."""
+    name: str = ""
+    reputation: float = 0.0
+    disposition: str = "neutral"  # hostile/unfriendly/neutral/friendly/allied
+
+
 class StateUpdate(BaseModel):
     """State update sent from engine to client after each turn.
 
@@ -93,6 +110,8 @@ class StateUpdate(BaseModel):
     world_time: WorldTimeDisplay | None = None
     skills: dict[str, int] | None = None
     events: EventSummary | None = None
+    active_quests: list[QuestSummary] | None = None
+    factions: list[FactionStanding] | None = None
     status: str | None = None
     cause: str | None = None
     subsystem_warnings: list[str] = []

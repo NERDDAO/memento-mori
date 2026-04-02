@@ -39,6 +39,19 @@ export interface GameState {
     rarity: string;
     equipped: boolean;
   }>;
+  quests: Array<{
+    name: string;
+    description: string;
+    currentStage: number;
+    totalStages: number;
+    giver: string;
+    completed: boolean;
+  }>;
+  factions: Array<{
+    name: string;
+    reputation: number;
+    disposition: string;
+  }>;
   roomMap: RoomMap | null;
 }
 
@@ -62,6 +75,8 @@ export function createInitialState(playerName: string): GameState {
       items: [],
     },
     inventory: [],
+    quests: [],
+    factions: [],
     roomMap: null,
   };
 }
@@ -111,6 +126,23 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
         id: i.id || '',
       }));
     }
+  }
+  if (update.active_quests) {
+    state.quests = (update.active_quests as any[]).map((q: any) => ({
+      name: q.name || '',
+      description: q.description || '',
+      currentStage: q.current_stage || 0,
+      totalStages: q.total_stages || 0,
+      giver: q.giver || '',
+      completed: q.completed || false,
+    }));
+  }
+  if (update.factions) {
+    state.factions = (update.factions as any[]).map((f: any) => ({
+      name: f.name || '',
+      reputation: f.reputation || 0,
+      disposition: f.disposition || 'neutral',
+    }));
   }
 }
 

@@ -14,6 +14,8 @@ import { renderCharacterPanel } from './panels/character';
 import { renderInventoryPanel } from './panels/inventory';
 import { renderExitsPanel } from './panels/exits';
 import { renderPresentPanel } from './panels/present';
+import { renderQuestLogPanel } from './panels/questlog';
+import { renderFactionsPanel } from './panels/factions';
 import { createWindow } from './ui/window';
 import { createHeader, type WorldTime } from './ui/header';
 import { createDialog } from './ui/dialog';
@@ -35,6 +37,8 @@ let characterWin: ReturnType<typeof createWindow>;
 let inventoryWin: ReturnType<typeof createWindow>;
 let exitsWin: ReturnType<typeof createWindow>;
 let presentWin: ReturnType<typeof createWindow>;
+let questWin: ReturnType<typeof createWindow>;
+let factionWin: ReturnType<typeof createWindow>;
 let commandWin: ReturnType<typeof createWindow>;
 
 // --- Entity registration for narrative highlighting ---
@@ -57,6 +61,8 @@ function renderAllPanels(): void {
   exitsWin.setTitle(gameState.location.name || 'Exits');
   renderExitsPanel(exitsWin.body, gameState, handleAction);
   renderPresentPanel(presentWin.body, gameState, handleAction);
+  renderQuestLogPanel(questWin.body, gameState.quests);
+  renderFactionsPanel(factionWin.body, gameState.factions);
   updateMap(gameState, handleAction);
 
   // Show current location in wiki by default
@@ -190,6 +196,12 @@ function handleMessage(msg: any): void {
       narrative.showThinking();
       statusBar.setPhase('thinking');
       break;
+    case 'death_feed': {
+      const skull = '\u2620';
+      const deathMsg = `${skull} ${msg.player_name || 'Unknown'} (Level ${msg.level || '?'}) fell at ${msg.location || 'unknown'}. ${msg.cause || ''}`;
+      narrative.addBlock(deathMsg, 'death-feed');
+      break;
+    }
     case 'status':
       if (msg.phase) statusBar.setPhase(msg.phase);
       if (msg.tick != null) statusBar.setTick(msg.tick);
@@ -280,6 +292,8 @@ document.addEventListener('DOMContentLoaded', () => {
   inventoryWin = createWindow({ title: 'Inventory', id: 'inventory-win', className: 'sidebar-win resizable' });
   exitsWin = createWindow({ title: 'Exits', id: 'exits-win', className: 'sidebar-win resizable' });
   presentWin = createWindow({ title: 'Present', id: 'present-win', className: 'sidebar-win resizable' });
+  questWin = createWindow({ title: 'Quests', id: 'quest-win', className: 'sidebar-win resizable' });
+  factionWin = createWindow({ title: 'Factions', id: 'faction-win', className: 'sidebar-win resizable' });
   commandWin = createWindow({ title: 'Command', id: 'command-win' });
 
   // 3. Mount windows by replacing mount divs
@@ -289,6 +303,8 @@ document.addEventListener('DOMContentLoaded', () => {
   mount('inventory-mount', inventoryWin.el);
   mount('exits-mount', exitsWin.el);
   mount('present-mount', presentWin.el);
+  mount('quest-mount', questWin.el);
+  mount('faction-mount', factionWin.el);
   mount('command-mount', commandWin.el);
 
   // Status bar

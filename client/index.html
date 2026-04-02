@@ -259,11 +259,31 @@
     .item-equip { color: var(--text-dim); margin-left: 4px; font-size: 11px; }
     .empty-msg { color: var(--text-dim); font-style: italic; }
 
+    /* Quest panel */
+    .quest-entry { padding: 4px 0; border-bottom: 1px solid var(--border); }
+    .quest-entry.completed { opacity: 0.5; }
+    .quest-name { color: var(--accent); font-size: 13px; }
+    .quest-done { color: var(--text-heal); font-size: 11px; margin-left: 4px; }
+    .quest-giver { color: var(--text-npc); font-size: 11px; }
+    .quest-progress { font-size: 11px; margin: 2px 0; }
+    .quest-stage { color: var(--text-dim); margin-left: 4px; }
+    .quest-desc { color: var(--text-dim); font-size: 11px; line-height: 1.4; margin-top: 2px; }
+
+    /* Faction panel */
+    .faction-entry { padding: 4px 0; border-bottom: 1px solid var(--border); }
+    .faction-name { color: var(--text-primary); font-size: 13px; }
+    .faction-bar { font-size: 11px; margin: 2px 0; }
+    .faction-hostile { color: var(--text-damage); }
+    .faction-neutral { color: var(--text-dim); }
+    .faction-friendly { color: var(--text-heal); }
+    .faction-disposition { font-size: 11px; margin-left: 4px; }
+
     /* Event notifications */
     .narrative-block.event-combat { color: var(--text-damage); font-family: 'Courier New', monospace; font-size: 13px; font-weight: bold; }
     .narrative-block.event-xp { color: var(--accent); font-family: 'Courier New', monospace; font-size: 13px; }
     .narrative-block.event-item { color: #a335ee; font-family: 'Courier New', monospace; font-size: 13px; }
     .narrative-block.event-death { color: var(--text-damage); font-family: 'Courier New', monospace; font-size: 14px; letter-spacing: 1px; }
+    .narrative-block.death-feed { color: var(--text-damage); opacity: 0.7; font-family: 'Courier New', monospace; font-size: 12px; border-left: 2px solid var(--text-damage); padding-left: 8px; }
 
     /* Thinking */
     .thinking { color: var(--text-system); font-style: italic; font-family: 'Courier New', monospace; font-size: 13px; }
@@ -367,6 +387,8 @@
         <div id="inventory-mount"></div>
         <div id="exits-mount"></div>
         <div id="present-mount"></div>
+        <div id="quest-mount"></div>
+        <div id="faction-mount"></div>
       </div>
     </div>
     <div id="command-mount"></div>

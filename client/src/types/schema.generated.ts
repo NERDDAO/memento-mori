@@ -78,6 +78,8 @@ export interface StateUpdate {
   world_time?: WorldTimeDisplay | null;
   skills?: Record<string, any> | null;
   events?: EventSummary | null;
+  active_quests?: QuestSummary[] | null;
+  factions?: FactionStanding[] | null;
   status?: string | null;
   cause?: string | null;
   subsystem_warnings?: string[];
