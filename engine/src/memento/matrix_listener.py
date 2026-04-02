@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 
 from nio import AsyncClient, InviteMemberEvent, MatrixRoom, RoomMessageText
 
 from memento.log import get_logger
 
 logger = get_logger(__name__)
+
+
+# Global lock — serializes all GameTurnFlow execution across threads.
+# Prevents concurrent KG mutations and world-time races.
+_turn_lock = threading.Lock()
 
 
 class EngineMatrixListener:
@@ -119,6 +125,11 @@ class EngineMatrixListener:
     @staticmethod
     def _run_turn(player_id: str, location_name: str, action: str) -> tuple[str, dict]:
         """Run GameTurnFlow synchronously (called from thread). Returns (narrative, state_update)."""
+        with _turn_lock:
+            return EngineMatrixListener._run_turn_inner(player_id, location_name, action)
+
+    @staticmethod
+    def _run_turn_inner(player_id: str, location_name: str, action: str) -> tuple[str, dict]:
         from memento.flows.game_turn import GameTurnFlow
         from memento.models.state_update import StateUpdate, EventSummary, CombatEvent, QuestSummary
 
@@ -165,6 +176,11 @@ class EngineMatrixListener:
     @staticmethod
     def _run_batch_turn(location_name: str, actions: list[dict]) -> tuple[str, dict]:
         """Run GameTurnFlow with multiple actions. Returns (narrative, state_update)."""
+        with _turn_lock:
+            return EngineMatrixListener._run_batch_turn_inner(location_name, actions)
+
+    @staticmethod
+    def _run_batch_turn_inner(location_name: str, actions: list[dict]) -> tuple[str, dict]:
         from memento.flows.game_turn import GameTurnFlow
         from memento.models.state_update import StateUpdate
 
