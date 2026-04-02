@@ -220,10 +220,56 @@ def get_threshold_map() -> dict | None:
     return result["map"]
 
 
+def seed_world(theme: str = "dark fantasy crossroads", player_level: int = 1, num_locations: int = 5) -> dict:
+    """Seed a complete world: Threshold + generated region with interconnected locations.
+
+    This is the main entry point for world initialization. It:
+    1. Ensures The Threshold exists (the starting tavern)
+    2. Runs WorldGenFlow to generate a region with locations, NPCs, and items
+    3. Returns a summary of what was created
+
+    This is expensive (many LLM calls). Run once per world, not per player.
+    """
+    logger.info("Seeding world: theme=%s, level=%d, locations=%d", theme, player_level, num_locations)
+
+    # 1. Ensure The Threshold exists
+    threshold = seed_threshold()
+    logger.info("Threshold ready: %s", threshold["uuid"])
+
+    # 2. Generate region with locations
+    from memento.flows.world_gen import WorldGenFlow
+    flow = WorldGenFlow()
+    flow.state.theme = theme
+    flow.state.player_level = player_level
+    flow.state.num_locations = num_locations
+    flow.kickoff()
+
+    locations_created = [loc.name for loc in flow.state.locations]
+    logger.info("World seeded: region=%s, locations=%s", flow.state.region_name, locations_created)
+
+    return {
+        "threshold_uuid": threshold["uuid"],
+        "region_name": flow.state.region_name,
+        "locations": locations_created,
+        "num_locations": len(locations_created),
+    }
+
+
 if __name__ == "__main__":
-    import json as _json
-    result = seed_threshold()
-    logger.info("Result: created=%s, uuid=%s", result["created"], result["uuid"])
-    logger.info("NPCs: %d", len(result["map"]["npcs"]))
-    logger.info("Items: %d", len(result["map"]["items"]))
-    logger.info("Exits: %d", len(result["map"]["exits"]))
+    import sys
+
+    if "--world" in sys.argv:
+        # Full world seed
+        theme = "dark fantasy crossroads"
+        for i, arg in enumerate(sys.argv):
+            if arg == "--theme" and i + 1 < len(sys.argv):
+                theme = sys.argv[i + 1]
+        result = seed_world(theme=theme)
+        logger.info("World seed complete: %s", result)
+    else:
+        # Just The Threshold
+        result = seed_threshold()
+        logger.info("Result: created=%s, uuid=%s", result["created"], result["uuid"])
+        logger.info("NPCs: %d", len(result["map"]["npcs"]))
+        logger.info("Items: %d", len(result["map"]["items"]))
+        logger.info("Exits: %d", len(result["map"]["exits"]))

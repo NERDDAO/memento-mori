@@ -175,14 +175,49 @@ function handleMessage(msg: any): void {
   }
 }
 
+// --- Archetype selection ---
+let selectedArchetype = '';
+
+async function loadArchetypes(): Promise<void> {
+  const container = document.getElementById('archetype-cards');
+  if (!container) return;
+  try {
+    const resp = await fetch('http://localhost:8080/api/archetypes');
+    const archetypes = await resp.json();
+    container.innerHTML = archetypes.map((a: any) => `
+      <div class="archetype-card" data-archetype="${a.name}">
+        <div class="archetype-name">${a.name}</div>
+        <div class="archetype-desc">${a.description}</div>
+        <div class="archetype-stats">HP: ${a.stats.health || 100} | Skills: ${Object.keys(a.skills).join(', ')}</div>
+        <div class="archetype-items">${a.starting_items.join(', ')}</div>
+      </div>
+    `).join('');
+    container.addEventListener('click', (e: MouseEvent) => {
+      const card = (e.target as HTMLElement).closest('.archetype-card') as HTMLElement | null;
+      if (!card) return;
+      container.querySelectorAll('.archetype-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+      selectedArchetype = card.dataset.archetype || '';
+    });
+  } catch {
+    // Fallback — no archetype selection available
+    container.innerHTML = '<div style="color:var(--text-dim)">Archetypes unavailable</div>';
+  }
+}
+
 // --- Character creation ---
 async function enterWorld(playerName: string, walletAddress: string): Promise<void> {
   const overlay = document.getElementById('char-create-overlay')!;
   overlay.classList.add('hidden');
 
-  const session = await initSession(playerName, walletAddress);
+  const session = await initSession(playerName, walletAddress, selectedArchetype);
   gameState = createInitialState(playerName);
   gameState.location.name = session.currentLocation;
+  // Apply archetype data from session response
+  if ((session as any).archetype) gameState.player.archetype = (session as any).archetype;
+  if ((session as any).health) gameState.player.health = (session as any).health;
+  if ((session as any).max_health) gameState.player.maxHealth = (session as any).max_health;
+  if ((session as any).skills) gameState.player.skills = (session as any).skills;
 
   if (!gameState.roomMap) {
     applyStateUpdate(gameState, { room_map: getThresholdMap() });
@@ -316,18 +351,36 @@ document.addEventListener('DOMContentLoaded', () => {
     walletNoProvider.classList.remove('hidden');
   }
 
+  const archetypeStep = document.getElementById('archetype-step');
+
   walletConnectBtn.addEventListener('click', async () => {
     try {
       walletPrompt.textContent = 'Connecting...';
       const addr = await connectWallet();
       walletStep.classList.add('hidden');
-      nameStep.classList.remove('hidden');
       walletAddressEl.textContent = `\u2713 ${formatAddress(addr)}`;
-      nameInput.focus();
+      // Show archetype selection (or skip to name if no archetype step)
+      if (archetypeStep) {
+        archetypeStep.classList.remove('hidden');
+        loadArchetypes();
+      } else {
+        nameStep.classList.remove('hidden');
+        nameInput.focus();
+      }
     } catch {
       walletPrompt.textContent = 'Connection rejected. Try again.';
     }
   });
+
+  // Archetype → Name step transition
+  const archetypeNextBtn = document.getElementById('archetype-next-btn');
+  if (archetypeNextBtn) {
+    archetypeNextBtn.addEventListener('click', () => {
+      if (archetypeStep) archetypeStep.classList.add('hidden');
+      nameStep.classList.remove('hidden');
+      nameInput.focus();
+    });
+  }
 
   enterBtn.addEventListener('click', () => {
     const name = nameInput.value.trim() || 'Wanderer';

@@ -67,6 +67,7 @@ class StateUpdate(BaseModel):
     inventory: list[InventoryItemUpdate] | None = None
     room_map: RoomMapUpdate | None = None
     world_time: WorldTimeDisplay | None = None
+    skills: dict[str, int] | None = None
     status: str | None = None
     cause: str | None = None
     subsystem_warnings: list[str] = []

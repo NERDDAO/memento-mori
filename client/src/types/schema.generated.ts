@@ -55,6 +55,7 @@ export interface StateUpdate {
   inventory?: InventoryItemUpdate[] | null;
   room_map?: RoomMapUpdate | null;
   world_time?: WorldTimeDisplay | null;
+  skills?: Record<string, any> | null;
   status?: string | null;
   cause?: string | null;
   subsystem_warnings?: string[];

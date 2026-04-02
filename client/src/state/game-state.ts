@@ -19,11 +19,13 @@ export interface LocationEntity {
 export interface GameState {
   player: {
     name: string;
+    archetype: string;
     level: number;
     health: number;
     maxHealth: number;
     xp: number;
     xpThreshold: number;
+    skills: Record<string, number>;
   };
   location: {
     name: string;
@@ -44,11 +46,13 @@ export function createInitialState(playerName: string): GameState {
   return {
     player: {
       name: playerName,
+      archetype: '',
       level: 1,
       health: 100,
       maxHealth: 100,
       xp: 0,
       xpThreshold: 100,
+      skills: {},
     },
     location: {
       name: 'Unknown',
@@ -82,6 +86,7 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
       equipped: i.equipped || false,
     }));
   }
+  if (update.skills) state.player.skills = update.skills as Record<string, number>;
   if (update.room_map) {
     state.roomMap = update.room_map;
     // Sync roomMap entities into location for sidebar panels

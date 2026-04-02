@@ -40,11 +40,11 @@ export function setMessageHandler(handler: (msg: any) => void): void {
   onMessage = handler;
 }
 
-export async function initSession(playerName: string, walletAddress: string): Promise<Session> {
+export async function initSession(playerName: string, walletAddress: string, archetype: string = ''): Promise<Session> {
   const resp = await fetch(`${GATEWAY_URL}/api/session/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ player_name: playerName, wallet_address: walletAddress }),
+    body: JSON.stringify({ player_name: playerName, wallet_address: walletAddress, archetype }),
   });
   const data = await resp.json();
   session.playerId = data.player_id;
