@@ -1,6 +1,6 @@
 """Quest stages crew — breaks a quest into discrete stages with completion conditions."""
 
-from crewai import Agent, Crew, Task, Process, LLM
+from memento.core import Agent, Crew, Task, Process, LLM
 from memento.config import get_model_for_crew
 
 

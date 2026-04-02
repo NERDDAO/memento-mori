@@ -1,6 +1,6 @@
 """Permadeath crew — narrates death and creates a memorial in the knowledge graph."""
 
-from crewai import Agent, Crew, Task, Process, LLM
+from memento.core import Agent, Crew, Task, Process, LLM
 from memento.config import get_model_for_crew
 from memento.tools.kg import search_world, mark_status, create_edge, remember_event, pin_entity
 

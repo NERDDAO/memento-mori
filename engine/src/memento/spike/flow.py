@@ -1,7 +1,7 @@
 """Spike flow — validates CrewAI Flow state passing with KG data."""
 
-from crewai import LLM
-from crewai.flow.flow import Flow, listen, start
+from memento.core import LLM
+from memento.core import Flow, listen, start
 from pydantic import BaseModel
 from memento.spike.crew import make_spike_crew
 
@@ -33,10 +33,12 @@ class SpikeFlow(Flow[SpikeState]):
 
 
 def main():
+    from memento.log import get_logger
+    _logger = get_logger(__name__)
     flow = SpikeFlow()
     result = flow.kickoff()
-    print(f"\nFlow state: location={flow.state.location_name}, npc={flow.state.npc_name}")
-    print(f"Flow result: {result}")
+    _logger.info("Flow state: location=%s, npc=%s", flow.state.location_name, flow.state.npc_name)
+    _logger.info("Flow result: %s", result)
 
 
 if __name__ == "__main__":

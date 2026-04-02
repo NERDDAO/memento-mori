@@ -1,6 +1,6 @@
 """Combat flow — assess, resolve, apply consequences, check death."""
 
-from crewai.flow.flow import Flow, listen, router, start
+from memento.core import Flow, listen, router, start
 from pydantic import BaseModel
 
 from memento.crews.combat.assessment import make_combat_assessment_crew

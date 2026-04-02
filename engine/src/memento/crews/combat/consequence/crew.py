@@ -1,6 +1,6 @@
 """Consequence crew — applies combat outcomes to the knowledge graph."""
 
-from crewai import Agent, Crew, Task, Process, LLM
+from memento.core import Agent, Crew, Task, Process, LLM
 from memento.config import get_model_for_crew
 from memento.tools.kg import update_entity, create_edge
 from memento.tools.mechanics import calculate_xp, evaluate_disposition

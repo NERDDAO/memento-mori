@@ -1,6 +1,6 @@
 """Event merge crew — deduplicates, resolves conflicts, and orders events by priority."""
 
-from crewai import Agent, Crew, Task, Process, LLM
+from memento.core import Agent, Crew, Task, Process, LLM
 from memento.config import get_model_for_crew
 
 

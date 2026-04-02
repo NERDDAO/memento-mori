@@ -1,6 +1,9 @@
 """Run a single game turn — for manual testing."""
 
 from memento.flows.game_turn import GameTurnFlow
+from memento.log import get_logger
+
+logger = get_logger(__name__)
 
 
 def main():
@@ -11,13 +14,13 @@ def main():
 
     flow.kickoff()
 
-    print("\n" + "=" * 60)
-    print("NARRATIVE:")
-    print("=" * 60)
-    print(flow.state.narrative)
-    print("=" * 60)
-    print(f"Events: {flow.state.events}")
-    print(f"Plausible: {flow.state.plausible}")
+    logger.info("\n" + "=" * 60)
+    logger.info("NARRATIVE:")
+    logger.info("=" * 60)
+    logger.info(flow.state.narrative)
+    logger.info("=" * 60)
+    logger.info("Events: %s", flow.state.events)
+    logger.info("Plausible: %s", flow.state.plausible)
 
 
 if __name__ == "__main__":

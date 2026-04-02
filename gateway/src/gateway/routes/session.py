@@ -1,16 +1,20 @@
 """Session routes — create and join game sessions."""
 
 import asyncio
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, Request
+from pydantic import BaseModel, Field
+
+from gateway.log import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
 
 class CreateSessionRequest(BaseModel):
-    player_name: str
-    game_id: str = "default"
-    wallet_address: str
+    player_name: str = Field(..., min_length=1, max_length=30, pattern=r'^[a-zA-Z0-9_ -]+$')
+    game_id: str = Field("default", max_length=64)
+    wallet_address: str = Field(..., min_length=42, max_length=42, pattern=r'^0x[a-fA-F0-9]{40}$')
 
 
 class CreateSessionResponse(BaseModel):
@@ -21,8 +25,12 @@ class CreateSessionResponse(BaseModel):
 
 
 @router.post("/session/create", response_model=CreateSessionResponse)
-async def create_session(req: CreateSessionRequest):
+async def create_session(req: CreateSessionRequest, request: Request):
     """Create a new game session — creates player in KG, registers Matrix user, generates opening narration."""
+    from gateway.rate_limit import session_limiter
+    client_ip = request.client.host if request.client else "unknown"
+    session_limiter.check(client_ip)
+
     try:
         from memento.session import SessionManager
         sm = SessionManager()
@@ -40,6 +48,7 @@ async def create_session(req: CreateSessionRequest):
             opening_narrative=result.get("opening_narrative", ""),
         )
     except Exception:
+        logger.error("Session creation via KG failed, using fallback", exc_info=True)
         import uuid
         player_id = str(uuid.uuid4())
 

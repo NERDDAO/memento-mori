@@ -1,7 +1,8 @@
 """Narration crew — generates game narrative from context and events."""
 
-from crewai import Agent, Crew, Task, Process, LLM
+from memento.core import Agent, Crew, Task, Process, LLM
 from memento.config import load_config, get_model_for_crew
+from memento.sanitize import sanitize_for_prompt
 from memento.tools.kg import search_world
 
 
@@ -15,6 +16,7 @@ def make_narration_crew(
     config = load_config()
     tone = config["game"]["tone"]
     model = get_model_for_crew("narration")
+    action = sanitize_for_prompt(action, max_length=500)
 
     narrator = Agent(
         role="Master Narrator",

@@ -1,6 +1,6 @@
 """World generation flow — creates regions with locations, NPCs, and items."""
 
-from crewai.flow.flow import Flow, listen, start
+from memento.core import Flow, listen, start
 from pydantic import BaseModel
 
 from memento.crews.world_gen.region_design import make_region_design_crew

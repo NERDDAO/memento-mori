@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  engine-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install engine
+        run: pip install -e engine[dev] --no-deps && pip install pydantic pyyaml pytest
+      - name: Run engine tests
+        run: python -m pytest engine/tests/ -v --ignore=engine/tests/test_kg_tools.py --ignore=engine/tests/test_mechanics.py --ignore=engine/tests/test_session.py
+
+  gateway-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install packages
+        run: |
+          pip install -e engine --no-deps -e gateway --no-deps
+          pip install pydantic pyyaml pytest fastapi
+      - name: Run gateway tests
+        run: python -m pytest gateway/tests/ -v
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -e engine --no-deps -e gateway --no-deps && pip install pydantic pyyaml
+      - name: Check for print() in production code
+        run: |
+          if grep -r "print(" engine/src/ gateway/src/ --include="*.py"; then
+            echo "ERROR: print() found in production code. Use logger instead."
+            exit 1
+          fi
+      - name: Verify type generation is up to date
+        run: |
+          python scripts/gen-types.py
+          git diff --exit-code client/src/types/schema.generated.ts || {
+            echo "ERROR: Generated types are out of date. Run: python scripts/gen-types.py"
+            exit 1
+          }

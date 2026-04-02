@@ -1,6 +1,9 @@
 """Run world generation — for manual testing."""
 
 from memento.flows.world_gen import WorldGenFlow
+from memento.log import get_logger
+
+logger = get_logger(__name__)
 
 
 def main():
@@ -8,20 +11,20 @@ def main():
     flow.state.theme = "haunted marshlands"
     flow.state.player_level = 3
 
-    print("Starting world generation for: haunted marshlands")
-    print("This will take several minutes (many LLM calls)...")
+    logger.info("Starting world generation for: haunted marshlands")
+    logger.info("This will take several minutes (many LLM calls)...")
 
     flow.kickoff()
 
-    print("\n" + "=" * 60)
-    print("WORLD GENERATION COMPLETE")
-    print("=" * 60)
-    print(f"Region: {flow.state.region_name}")
-    print(f"Locations created: {len(flow.state.locations_created)}")
+    logger.info("\n" + "=" * 60)
+    logger.info("WORLD GENERATION COMPLETE")
+    logger.info("=" * 60)
+    logger.info("Region: %s", flow.state.region_name)
+    logger.info("Locations created: %d", len(flow.state.locations_created))
     for i, loc in enumerate(flow.state.locations_created):
-        print(f"\n--- Location {i+1} ---")
-        print(loc)
-    print("=" * 60)
+        logger.info("\n--- Location %d ---", i + 1)
+        logger.info(loc)
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":

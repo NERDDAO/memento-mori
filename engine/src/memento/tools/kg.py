@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from crewai.tools import tool
+from memento.core import tool
 from memento.bonfires_client import get_client
 from memento.tools import chain as _chain
 

@@ -1,6 +1,6 @@
 """Combat event detector — identifies combat triggers in player actions."""
 
-from crewai import Agent, Crew, Task, Process, LLM
+from memento.core import Agent, Crew, Task, Process, LLM
 from memento.config import get_model_for_crew
 
 

@@ -1,6 +1,6 @@
 """NPC generation flow — creates NPCs for a location."""
 
-from crewai.flow.flow import Flow, listen, start
+from memento.core import Flow, listen, start
 from pydantic import BaseModel
 
 from memento.crews.npc_gen.planning import make_npc_planning_crew

@@ -3,6 +3,10 @@
 import asyncio
 from fastapi import APIRouter, Query
 
+from gateway.log import get_logger
+
+logger = get_logger(__name__)
+
 router = APIRouter()
 
 
@@ -43,9 +47,11 @@ async def get_state(player_id: str = Query(...)):
             "inventory": inventory,
         }
     except Exception:
+        logger.error("KG state query failed, returning degraded state", exc_info=True)
         return {
             "player_id": player_id,
             "location": "Unknown",
             "health": 100,
             "inventory": [],
+            "degraded": True,
         }

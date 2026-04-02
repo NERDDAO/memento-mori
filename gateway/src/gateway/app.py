@@ -5,8 +5,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from gateway.log import get_logger
 from gateway.matrix_bridge import MatrixBridge
 from gateway.ws import WebSocketHub
+
+logger = get_logger(__name__)
 
 
 bridge: MatrixBridge | None = None
@@ -65,6 +68,9 @@ async def websocket_endpoint(websocket: WebSocket, player_id: str):
             # Keep connection alive, receive pings
             await websocket.receive_text()
     except WebSocketDisconnect:
+        ws_hub.disconnect(player_id)
+    except Exception:
+        logger.warning("WebSocket error for %s, disconnecting", player_id, exc_info=True)
         ws_hub.disconnect(player_id)
 
 

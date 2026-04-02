@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from memento.bonfires_client import get_client
 from memento.crews.narrative.narration import make_narration_crew
+from memento.log import get_logger
+
+logger = get_logger(__name__)
 
 
 class SessionManager:
@@ -32,7 +35,7 @@ class SessionManager:
             )
             client.kengrams.pin(kengram.id, player_uuid)
         except Exception as e:
-            print(f"[session] kEngram creation failed (non-fatal): {e}")
+            logger.warning("kEngram creation failed", exc_info=True)
 
         # 3. Find or create starting location
         location_name = self._find_starting_location()
@@ -44,7 +47,7 @@ class SessionManager:
             if loc_uuid:
                 client.kg.create_edge(player_uuid, loc_uuid, "LOCATED_IN", "")
         except Exception as e:
-            print(f"[session] Failed to place player (non-fatal): {e}")
+            logger.warning("Failed to place player at location", exc_info=True)
 
         # 5. Register character on-chain (non-fatal)
         try:
@@ -52,7 +55,7 @@ class SessionManager:
             if _chain.is_enabled():
                 _chain.register_character(player_uuid, player_name, wallet_address, 1)
         except Exception as e:
-            print(f"[session] Chain register_character failed (non-fatal): {e}")
+            logger.warning("Chain register_character failed", exc_info=True)
 
         # 6. Generate opening narration
         opening = self._generate_opening(player_name, location_name)
@@ -90,7 +93,7 @@ class SessionManager:
             result = crew.kickoff()
             return result.raw
         except Exception as e:
-            print(f"[session] Opening narration failed: {e}")
+            logger.warning("Opening narration failed", exc_info=True)
             return f"You stand at {location_name}. The air is heavy with foreboding. Your journey begins."
 
     def end_session(self, player_id: str) -> dict:
@@ -102,7 +105,7 @@ class SessionManager:
                 chat_id=f"rpg:session-{player_id[:8]}",
             )
         except Exception as e:
-            print(f"[session] Sync failed (non-fatal): {e}")
+            logger.warning("Session sync failed", exc_info=True)
         return {"status": "ended", "player_id": player_id}
 
     def handle_death(self, player_id: str, cause: str, location: str) -> dict:
@@ -116,7 +119,7 @@ class SessionManager:
             if loc_uuid:
                 client.kg.create_edge(player_id, loc_uuid, "DIED_AT", f"Fell here. {cause}")
         except Exception as e:
-            print(f"[session] Death marking failed: {e}")
+            logger.error("Death marking failed", exc_info=True)
 
         # Record death on-chain (non-fatal)
         try:
@@ -124,7 +127,7 @@ class SessionManager:
             if _chain.is_enabled():
                 _chain.record_death(player_id, cause, location, 0, 0)
         except Exception as e:
-            print(f"[session] Chain record_death failed (non-fatal): {e}")
+            logger.warning("Chain record_death failed", exc_info=True)
 
         return {
             "status": "dead",

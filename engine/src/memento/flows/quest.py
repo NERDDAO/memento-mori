@@ -1,6 +1,6 @@
 """Quest flow — designs a quest, breaks it into stages, and writes NPC dialogue."""
 
-from crewai.flow.flow import Flow, listen, start
+from memento.core import Flow, listen, start
 from pydantic import BaseModel
 from memento.crews.quest.design import make_quest_design_crew
 from memento.crews.quest.stages import make_quest_stage_crew

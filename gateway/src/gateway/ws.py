@@ -7,6 +7,10 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from gateway.log import get_logger
+
+logger = get_logger(__name__)
+
 
 class WebSocketHub:
     """Manages WebSocket connections per player."""
@@ -36,6 +40,7 @@ class WebSocketHub:
             try:
                 await ws.send_json(message)
             except Exception:
+                logger.warning("WebSocket send failed for %s, disconnecting", player_id, exc_info=True)
                 self.disconnect(player_id)
 
     async def broadcast_to_location(self, location: str, message: dict[str, Any]) -> None:

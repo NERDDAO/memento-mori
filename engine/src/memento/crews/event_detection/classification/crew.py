@@ -1,6 +1,6 @@
 """Action classification crew — categorizes player actions into event types."""
 
-from crewai import Agent, Crew, Task, Process, LLM
+from memento.core import Agent, Crew, Task, Process, LLM
 from memento.config import get_model_for_crew
 
 

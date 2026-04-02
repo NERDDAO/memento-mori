@@ -1,7 +1,7 @@
 """Main game turn flow — the core gameplay loop."""
 
-from crewai import LLM
-from crewai.flow.flow import Flow, listen, router, start
+from memento.core import LLM
+from memento.core import Flow, listen, router, start
 from pydantic import BaseModel
 from memento.config import load_config
 from memento.crews.context import make_context_crew
@@ -11,7 +11,10 @@ from memento.flows.event_detection import EventDetectionFlow
 from memento.flows.combat import CombatFlow
 from memento.flows.episodic_memory import EpisodicMemoryFlow
 from memento.flows.quest import QuestFlow
+from memento.log import get_logger
 from memento.tools.time import advance_time
+
+logger = get_logger(__name__)
 
 
 class TurnState(BaseModel):
@@ -25,6 +28,7 @@ class TurnState(BaseModel):
     world_time: dict = {}
     plausible: bool = True
     rejection_reason: str = ""
+    subsystem_warnings: list[str] = []
 
 
 class GameTurnFlow(Flow[TurnState]):
@@ -105,7 +109,8 @@ class GameTurnFlow(Flow[TurnState]):
                 quest_flow.kickoff()
                 self.state.events["quest_result"] = quest_flow.state.quest_concept
             except Exception as e:
-                print(f"[game-turn] Quest flow failed (non-fatal): {e}")
+                logger.warning("Quest flow failed", exc_info=True)
+                self.state.subsystem_warnings.append("quest_unavailable")
 
         if "social" in categories:
             try:
@@ -117,7 +122,8 @@ class GameTurnFlow(Flow[TurnState]):
                 rep_result = rep_crew.kickoff()
                 self.state.events["reputation"] = rep_result.raw
             except Exception as e:
-                print(f"[game-turn] Reputation failed (non-fatal): {e}")
+                logger.warning("Reputation flow failed", exc_info=True)
+                self.state.subsystem_warnings.append("reputation_unavailable")
 
         return self.state.events
 
@@ -144,7 +150,8 @@ class GameTurnFlow(Flow[TurnState]):
             memory_flow.state.session_id = self.state.player_uuid
             memory_flow.kickoff()
         except Exception as e:
-            print(f"[game-turn] Memory flow failed (non-fatal): {e}")
+            logger.warning("Memory flow failed", exc_info=True)
+            self.state.subsystem_warnings.append("memory_unavailable")
         world_time = advance_time(1)
         self.state.world_time = world_time.to_display()
 
