@@ -182,22 +182,12 @@ def record_event(event_type: str, actors: list[str], location: str, summary: str
     )
 
 
-def record_episode(
-    uuid: str,
-    name: str,
-    summary: str,
-    entities: list[dict],
-    edges: list[dict],
-    tick: int,
-) -> None:
-    """Record a Graphiti episode onchain with extracted entities and edges as JSON."""
+def record_episode(uuid: str, content_hash: bytes, tick: int) -> None:
+    """Record an episode content hash onchain."""
     _send_tx(
         "recordEpisode",
         _uuid_to_bytes32(uuid),
-        name[:200],
-        summary[:1000],
-        json.dumps(entities, default=str)[:2000],
-        json.dumps(edges, default=str)[:2000],
+        content_hash,
         tick,
     )
 
