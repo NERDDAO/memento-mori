@@ -47,4 +47,4 @@ def test_record_death_noop_when_disabled():
 
 def test_record_episode_noop_when_disabled():
     from memento.tools.chain import record_episode
-    record_episode("ep-uuid", "Turn 1", "Something happened", [{"name": "Foo"}], [{"source": "A", "target": "B"}], 1)
+    record_episode("ep-uuid", b"\x00" * 32, 1)
