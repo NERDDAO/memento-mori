@@ -29,7 +29,8 @@ class EngineMatrixListener:
         self.client = AsyncClient(self.homeserver)
         self.client.access_token = self.token
         # nio requires user_id to be set before most API calls
-        self.client.user_id = "@narrator:localhost"
+        domain = os.getenv("MATRIX_DOMAIN", "localhost")
+        self.client.user_id = f"@narrator:{domain}"
 
         resp = await self.client.whoami()
         if hasattr(resp, "user_id") and resp.user_id:

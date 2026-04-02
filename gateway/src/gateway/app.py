@@ -81,7 +81,9 @@ async def websocket_endpoint(websocket: WebSocket, player_id: str):
         ws_hub.disconnect(player_id)
 
 
-# Static file serving — must be last (mounts at "/")
-client_dir = Path(__file__).parent.parent.parent.parent / "client"
-if client_dir.exists():
-    app.mount("/", StaticFiles(directory=str(client_dir), html=True), name="client")
+# Static file serving — only in local dev (Caddy serves files in production)
+import os as _os
+if not _os.getenv("CADDY_PROXY"):
+    client_dir = Path(__file__).parent.parent.parent.parent / "client"
+    if client_dir.exists():
+        app.mount("/", StaticFiles(directory=str(client_dir), html=True), name="client")

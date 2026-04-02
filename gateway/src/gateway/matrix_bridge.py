@@ -25,6 +25,7 @@ class MatrixBridge:
         self.homeserver = homeserver
         self.token = token  # narrator bot token
         self.ws_hub = ws_hub
+        self.domain = os.getenv("MATRIX_DOMAIN", "localhost")
         self.client: AsyncClient | None = None
         self.connected = False
         self.room_to_location: dict[str, str] = {}
@@ -35,7 +36,7 @@ class MatrixBridge:
         """Connect to Matrix homeserver as narrator bot."""
         self.client = AsyncClient(self.homeserver)
         self.client.access_token = self.token
-        self.client.user_id = "@narrator:localhost"
+        self.client.user_id = f"@narrator:{self.domain}"
         try:
             resp = await self.client.whoami()
             if hasattr(resp, "user_id") and resp.user_id:
@@ -204,7 +205,7 @@ class MatrixBridge:
 
         # Invite player to the room (as narrator), then join as player
         username = f"player_{player_id[:8]}"
-        player_user_id = f"@{username}:localhost"
+        player_user_id = f"@{username}:{self.domain}"
 
         async with aiohttp.ClientSession() as session:
             # Narrator invites player
@@ -254,7 +255,7 @@ class MatrixBridge:
 
         # Try to resolve existing room alias via REST API
         alias = f"loc-{location_name.lower().replace(' ', '-')}"
-        full_alias = f"#{alias}:localhost"
+        full_alias = f"#{alias}:{self.domain}"
         try:
             async with aiohttp.ClientSession() as session:
                 encoded = full_alias.replace("#", "%23")

@@ -1,0 +1,49 @@
+# Memento Mori — Synapse homeserver configuration
+# This is a minimal config for a private game server (no federation).
+
+server_name: "${MATRIX_DOMAIN:-localhost}"
+
+# Listeners
+listeners:
+  - port: 8008
+    type: http
+    resources:
+      - names: [client]
+        compress: false
+
+# Database — SQLite for simplicity (switch to Postgres for scale)
+database:
+  name: sqlite3
+  args:
+    database: /data/homeserver.db
+
+# Disable federation — private game server
+federation_domain_whitelist: []
+allow_public_rooms_over_federation: false
+
+# Registration — programmatic only (gateway registers players)
+enable_registration: true
+enable_registration_without_verification: true
+
+# Rate limiting for Matrix client API
+rc_message:
+  per_second: 10
+  burst_count: 30
+
+# Room history — keep forever (canonical game log)
+retention:
+  enabled: false
+
+# Disable features we don't need
+enable_search: false
+url_preview_enabled: false
+enable_metrics: false
+
+# Signing key (auto-generated on first run)
+signing_key_path: "/data/signing.key"
+
+# Media store
+media_store_path: "/data/media_store"
+
+# Logging
+log_config: "/data/log.config"

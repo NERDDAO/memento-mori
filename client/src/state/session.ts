@@ -1,8 +1,9 @@
 // src/state/session.ts
 /** Session management — auth, WebSocket connection, player identity. */
 
-const GATEWAY_URL = 'http://localhost:8080';
-const WS_URL = 'ws://localhost:8080/ws';
+// Use relative URLs so the client works behind any reverse proxy (Caddy, nginx)
+const GATEWAY_URL = '';
+const WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
 
 export interface Session {
   playerId: string;

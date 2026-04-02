@@ -1,0 +1,27 @@
+{$PUBLIC_DOMAIN:localhost} {
+    # WebSocket — must come before /api to match first
+    handle /ws/* {
+        reverse_proxy gateway:8080 {
+            transport http {
+                read_timeout 0
+            }
+        }
+    }
+
+    # API
+    handle /api/* {
+        reverse_proxy gateway:8080
+    }
+
+    # Health check
+    handle /health {
+        reverse_proxy gateway:8080
+    }
+
+    # Static client files
+    handle {
+        root * /srv/client
+        try_files {path} /index.html
+        file_server
+    }
+}

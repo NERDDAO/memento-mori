@@ -1,0 +1,12 @@
+FROM node:20-slim
+
+WORKDIR /app
+
+RUN npm install -g @latticexyz/store-indexer
+
+EXPOSE 3001
+
+CMD ["npx", "store-indexer", \
+     "--rpc", "${REDSTONE_RPC}", \
+     "--world", "${MUD_WORLD_ADDRESS}", \
+     "--port", "3001"]
