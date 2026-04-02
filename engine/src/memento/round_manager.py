@@ -77,6 +77,18 @@ class RoundManager:
                 except Exception as e:
                     logger.error("Round close callback error", exc_info=True)
 
+    async def close_round(self, location: str) -> None:
+        """Immediately close and fire the round for a location (solo fast-path)."""
+        round_ = self.active_rounds.pop(location, None)
+        if not round_ or round_.closed:
+            return
+        round_.closed = True
+        for callback in self._callbacks:
+            try:
+                await callback(location, round_.actions)
+            except Exception:
+                logger.error("Round close callback error", exc_info=True)
+
     @property
     def active_count(self) -> int:
         return len(self.active_rounds)

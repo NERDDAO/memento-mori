@@ -59,38 +59,62 @@ class EngineMatrixListener:
             logger.info("Joined room: %s", room.display_name or room.room_id)
 
     async def _on_action(self, room: MatrixRoom, event: RoomMessageText) -> None:
-        """Handle a player action message."""
+        """Handle player action messages — single or batch."""
         content = event.source.get("content", {})
         rpg_meta = content.get("com.bonfires.rpg", {})
 
-        if rpg_meta.get("type") != "player-action":
-            return
+        msg_type = rpg_meta.get("type", "")
 
-        player_id = rpg_meta.get("player_id", "unknown")
-        action_text = event.body
-        logger.info("Action from %s: %s", player_id, action_text)
+        if msg_type == "player-action-batch":
+            # Batch turn — multiple actions from RoundManager
+            actions = rpg_meta.get("actions", [])
+            location_name = rpg_meta.get("location", room.display_name or "Unknown")
+            logger.info("Batch turn at %s: %d actions", location_name, len(actions))
 
-        # Run GameTurnFlow in a thread (sync CrewAI in async context)
-        location_name = room.display_name or "Unknown"
-        narrative, state_update = await asyncio.to_thread(
-            self._run_turn, player_id, location_name, action_text
-        )
-
-        # Post narrative back to Matrix room
-        if self.client and narrative:
-            await self.client.room_send(
-                room.room_id,
-                "m.room.message",
-                {
-                    "msgtype": "m.text",
-                    "body": narrative,
-                    "com.bonfires.rpg": {
-                        "type": "narrative",
-                        "player_id": player_id,
-                        "state_update": state_update,
-                    },
-                },
+            narrative, state_update = await asyncio.to_thread(
+                self._run_batch_turn, location_name, actions
             )
+
+            if self.client and narrative:
+                await self.client.room_send(
+                    room.room_id,
+                    "m.room.message",
+                    {
+                        "msgtype": "m.text",
+                        "body": narrative,
+                        "com.bonfires.rpg": {
+                            "type": "narrative",
+                            "location": location_name,
+                            "state_update": state_update,
+                        },
+                    },
+                )
+
+        elif msg_type == "player-action":
+            # Legacy single action (backwards compatibility)
+            player_id = rpg_meta.get("player_id", "unknown")
+            action_text = event.body
+            logger.info("Action from %s: %s", player_id, action_text)
+
+            location_name = room.display_name or "Unknown"
+            narrative, state_update = await asyncio.to_thread(
+                self._run_turn, player_id, location_name, action_text
+            )
+
+            if self.client and narrative:
+                await self.client.room_send(
+                    room.room_id,
+                    "m.room.message",
+                    {
+                        "msgtype": "m.text",
+                        "body": narrative,
+                        "com.bonfires.rpg": {
+                            "type": "narrative",
+                            "player_id": player_id,
+                            "state_update": state_update,
+                        },
+                    },
+                )
 
     @staticmethod
     def _run_turn(player_id: str, location_name: str, action: str) -> tuple[str, dict]:
@@ -134,6 +158,32 @@ class EngineMatrixListener:
             world_time=flow.state.world_time if isinstance(flow.state.world_time, dict) else None,
             events=events_summary,
             active_quests=active_quests,
+            subsystem_warnings=getattr(flow.state, "subsystem_warnings", []),
+        )
+        return flow.state.narrative, state_update.model_dump(exclude_none=True)
+
+    @staticmethod
+    def _run_batch_turn(location_name: str, actions: list[dict]) -> tuple[str, dict]:
+        """Run GameTurnFlow with multiple actions. Returns (narrative, state_update)."""
+        from memento.flows.game_turn import GameTurnFlow
+        from memento.models.state_update import StateUpdate
+
+        flow = GameTurnFlow()
+        flow.state.location_name = location_name
+        # Set first player as primary (for context gathering), pass all actions
+        if actions:
+            flow.state.player_name = actions[0].get("player_name", "unknown")
+        flow.state.actions = actions
+        # Build combined action string for crews that expect a single action
+        combined = "; ".join(
+            f"{a.get('player_name', '?')}: {a.get('action', '?')}" for a in actions
+        )
+        flow.state.action = combined
+        flow.kickoff()
+
+        state_update = StateUpdate(
+            location=location_name,
+            world_time=flow.state.world_time if isinstance(flow.state.world_time, dict) else None,
             subsystem_warnings=getattr(flow.state, "subsystem_warnings", []),
         )
         return flow.state.narrative, state_update.model_dump(exclude_none=True)

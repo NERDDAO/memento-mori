@@ -39,22 +39,29 @@ async def broadcast_death(req: DeathBroadcast):
 
 @router.post("/action", response_model=ActionResponse)
 async def submit_action(req: ActionRequest):
-    """Submit a player action. The engine processes it asynchronously via Matrix."""
+    """Submit a player action. Batched by location via RoundManager."""
     from gateway.rate_limit import action_limiter
     action_limiter.check(req.player_id)
 
-    from gateway.app import bridge, ws_hub
+    from gateway.app import round_manager, ws_hub
 
-    if bridge and bridge.connected:
-        room_id = await bridge.get_or_create_room(req.location)
-        await bridge.send_action(room_id, req.player_id, req.action)
-
-    # Track player location and send "thinking" indicator to client
+    # Track player location
     if ws_hub:
         ws_hub.set_location(req.player_id, req.location)
-        await ws_hub.send_to_player(req.player_id, {
-            "type": "thinking",
-            "action": req.action,
-        })
+
+    if round_manager:
+        await round_manager.submit_action(
+            req.player_id, req.player_id, req.location, req.action
+        )
+        # Solo fast-path: if only 1 player at location, close round immediately
+        if ws_hub and ws_hub.players_at_location(req.location) <= 1:
+            await round_manager.close_round(req.location)
+        else:
+            # Multi-player: send thinking indicator
+            if ws_hub:
+                await ws_hub.send_to_player(req.player_id, {
+                    "type": "thinking",
+                    "action": req.action,
+                })
 
     return ActionResponse(status="queued")

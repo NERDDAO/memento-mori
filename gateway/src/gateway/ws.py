@@ -33,6 +33,10 @@ class WebSocketHub:
         """Track which location a player is in."""
         self.player_locations[player_id] = location
 
+    def players_at_location(self, location: str) -> int:
+        """Count connected players at a given location."""
+        return sum(1 for loc in self.player_locations.values() if loc == location)
+
     async def send_to_player(self, player_id: str, message: dict[str, Any]) -> None:
         """Send a message to a specific player."""
         ws = self.connections.get(player_id)

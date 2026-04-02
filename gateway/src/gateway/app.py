@@ -8,18 +8,22 @@ from pathlib import Path
 from gateway.log import get_logger
 from gateway.matrix_bridge import MatrixBridge
 from gateway.ws import WebSocketHub
+from memento.round_manager import RoundManager
+from gateway.round_callback import make_round_callback
 
 logger = get_logger(__name__)
 
 
 bridge: MatrixBridge | None = None
 ws_hub: WebSocketHub | None = None
+round_manager: RoundManager | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global bridge, ws_hub
+    global bridge, ws_hub, round_manager
     ws_hub = WebSocketHub()
+    round_manager = RoundManager(window_seconds=20)
     # Matrix bridge connects on startup if env vars are set
     import os
     homeserver = os.getenv("MATRIX_HOMESERVER", "")
@@ -27,6 +31,7 @@ async def lifespan(app: FastAPI):
     if homeserver and token:
         bridge = MatrixBridge(homeserver, token, ws_hub)
         await bridge.connect()
+        round_manager.on_round_close(make_round_callback(bridge, ws_hub))
     yield
     if bridge:
         await bridge.disconnect()

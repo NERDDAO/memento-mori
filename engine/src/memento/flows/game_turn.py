@@ -22,6 +22,7 @@ class TurnState(BaseModel):
     player_uuid: str = ""
     location_name: str = ""
     action: str = ""
+    actions: list[dict] = []
     context: str = ""
     events: dict = {}
     narrative: str = ""
@@ -223,7 +224,19 @@ class GameTurnFlow(Flow[TurnState]):
             if isinstance(self.state.world_time, dict):
                 tick = self.state.world_time.get("tick", 0)
 
-            _chain.record_episode(ep_uuid, ep_name, ep_summary, entity_list, edge_list, tick)
+            from memento.tools.ipfs import pin_json
+            episode_data = {
+                "version": 1,
+                "episodeId": ep_uuid,
+                "tick": tick,
+                "name": ep_name,
+                "summary": ep_summary,
+                "entities": entity_list,
+                "edges": edge_list,
+            }
+            cid, content_hash = pin_json(episode_data)
+            if cid and content_hash:
+                _chain.record_episode(ep_uuid, content_hash, tick)
             logger.info(f"Episode synced to chain: {ep_name}")
 
         except Exception as e:

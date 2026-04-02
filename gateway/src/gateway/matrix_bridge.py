@@ -112,10 +112,11 @@ class MatrixBridge:
             # Helper to send status to the relevant player(s)
             async def _send_status(phase: str) -> None:
                 status_msg = {"type": "status", "phase": phase}
-                if player_id and self.ws_hub.connections.get(player_id):
-                    await self.ws_hub.send_to_player(player_id, status_msg)
-                elif location:
+                location = rpg_meta.get("location", self.room_to_location.get(room.room_id, ""))
+                if location:
                     await self.ws_hub.broadcast_to_location(location, status_msg)
+                elif player_id and self.ws_hub.connections.get(player_id):
+                    await self.ws_hub.send_to_player(player_id, status_msg)
                 else:
                     await self.ws_hub.broadcast_all(status_msg)
 
@@ -131,12 +132,13 @@ class MatrixBridge:
                 "location": location or room.display_name or "unknown",
                 "state_update": state_update,
             }
-            # Send to the specific player, or broadcast to location, or all
-            # Only one path — no duplicates
-            if player_id and self.ws_hub.connections.get(player_id):
-                await self.ws_hub.send_to_player(player_id, msg)
-            elif location:
+            # Batch narratives go to all players at location
+            # Single-player narratives go to the specific player
+            location = rpg_meta.get("location", self.room_to_location.get(room.room_id, ""))
+            if location:
                 await self.ws_hub.broadcast_to_location(location, msg)
+            elif player_id and self.ws_hub.connections.get(player_id):
+                await self.ws_hub.send_to_player(player_id, msg)
             else:
                 await self.ws_hub.broadcast_all(msg)
 
