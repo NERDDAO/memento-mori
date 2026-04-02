@@ -1,7 +1,7 @@
 """Spike crew — validates CrewAI + Bonfires KG integration."""
 
-from crewai import Agent, Crew, Task, Process
-from crewai import LLM
+from memento.core import Agent, Crew, Task, Process
+from memento.core import LLM
 from memento.tools.kg import create_entity, search_world
 
 

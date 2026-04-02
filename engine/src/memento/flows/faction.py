@@ -1,6 +1,6 @@
 """Faction flow — generates factions and their relationships for a region."""
 
-from crewai.flow.flow import Flow, listen, start
+from memento.core import Flow, listen, start
 from pydantic import BaseModel
 from memento.crews.faction.generation import make_faction_generation_crew
 

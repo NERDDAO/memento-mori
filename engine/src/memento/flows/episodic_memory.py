@@ -1,6 +1,6 @@
 """Episodic memory flow — consolidates a scene into an episode and writes NPC memories."""
 
-from crewai.flow.flow import Flow, listen, start
+from memento.core import Flow, listen, start
 from pydantic import BaseModel
 from memento.crews.narrative.memory.crew import make_memory_consolidation_crew, make_npc_memory_crew
 

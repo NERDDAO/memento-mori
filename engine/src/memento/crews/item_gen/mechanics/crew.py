@@ -1,6 +1,6 @@
 """Item mechanics crew — assigns mechanical stats to a designed item concept."""
 
-from crewai import Agent, Crew, Task, Process, LLM
+from memento.core import Agent, Crew, Task, Process, LLM
 from memento.config import get_model_for_crew
 
 

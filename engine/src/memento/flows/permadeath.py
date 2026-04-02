@@ -1,6 +1,6 @@
 """Permadeath flow — narrate death, mark dead, create memorial."""
 
-from crewai.flow.flow import Flow, listen, start
+from memento.core import Flow, listen, start
 from pydantic import BaseModel
 
 from memento.crews.combat.permadeath import make_permadeath_crew

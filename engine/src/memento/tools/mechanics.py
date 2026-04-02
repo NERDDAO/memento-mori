@@ -1,7 +1,7 @@
 """Deterministic game mechanic tools — pure math, no LLM calls."""
 
 import random
-from crewai.tools import tool
+from memento.core import tool
 
 
 @tool("Roll Skill Check")

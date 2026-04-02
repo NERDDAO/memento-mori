@@ -1,6 +1,6 @@
 """Event detection flow — classify action, dispatch detectors, merge results."""
 
-from crewai.flow.flow import Flow, listen, start
+from memento.core import Flow, listen, start
 from pydantic import BaseModel
 from memento.crews.event_detection.classification import make_classification_crew
 from memento.crews.event_detection.combat import make_combat_detector_crew

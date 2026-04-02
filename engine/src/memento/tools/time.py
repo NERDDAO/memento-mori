@@ -1,5 +1,5 @@
 # engine/src/memento/tools/time.py
-from crewai.tools import tool
+from memento.core import tool
 from memento.models.time import WorldTime
 
 _world_time = WorldTime(tick=0)

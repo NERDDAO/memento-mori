@@ -1,6 +1,6 @@
 """Location crew — builds out a single location with layout, description, and secrets."""
 
-from crewai import Agent, Crew, Task, Process, LLM
+from memento.core import Agent, Crew, Task, Process, LLM
 from memento.config import get_model_for_crew
 from memento.tools.kg import search_world, create_entity, create_edge
 

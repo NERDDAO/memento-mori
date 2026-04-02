@@ -1,7 +1,7 @@
 """Spike flow — validates CrewAI Flow state passing with KG data."""
 
-from crewai import LLM
-from crewai.flow.flow import Flow, listen, start
+from memento.core import LLM
+from memento.core import Flow, listen, start
 from pydantic import BaseModel
 from memento.spike.crew import make_spike_crew
 

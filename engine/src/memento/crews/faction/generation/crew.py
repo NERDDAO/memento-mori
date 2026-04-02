@@ -1,6 +1,6 @@
 """Faction generation crew — creates factions and maps their relationships."""
 
-from crewai import Agent, Crew, Task, Process, LLM
+from memento.core import Agent, Crew, Task, Process, LLM
 from memento.config import get_model_for_crew
 from memento.tools.kg import search_world, create_entity, create_edge
 

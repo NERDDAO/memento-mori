@@ -1,6 +1,6 @@
 """Item generation flow — creates items for a location."""
 
-from crewai.flow.flow import Flow, listen, start
+from memento.core import Flow, listen, start
 from pydantic import BaseModel
 
 from memento.crews.item_gen.concept import make_item_concept_crew

@@ -1,7 +1,7 @@
 """Main game turn flow — the core gameplay loop."""
 
-from crewai import LLM
-from crewai.flow.flow import Flow, listen, router, start
+from memento.core import LLM
+from memento.core import Flow, listen, router, start
 from pydantic import BaseModel
 from memento.config import load_config
 from memento.crews.context import make_context_crew
