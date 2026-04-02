@@ -42,6 +42,21 @@ def test_end_session():
     assert result["status"] == "ended"
 
 
+def test_create_player_with_wallet():
+    mock = _make_mock_client()
+    with patch("memento.session.get_client", return_value=mock):
+        with patch("memento.session.make_narration_crew") as mock_crew:
+            mock_crew.return_value.kickoff.return_value.raw = "Welcome."
+            with patch("memento.tools.kg.get_client", return_value=mock):
+                with patch("memento.tools.chain.is_enabled", return_value=True):
+                    with patch("memento.tools.chain.register_character") as mock_chain:
+                        sm = SessionManager()
+                        result = sm.create_player("Kael", wallet_address="0xabc123")
+
+    assert result["player_id"] == "player-uuid-123"
+    mock_chain.assert_called_once_with("player-uuid-123", "Kael", "0xabc123", 1)
+
+
 def test_handle_death():
     mock = _make_mock_client()
     with patch("memento.session.get_client", return_value=mock):

@@ -9,7 +9,7 @@ from memento.crews.narrative.narration import make_narration_crew
 class SessionManager:
     """Manages game sessions — player creation, placement, and cleanup."""
 
-    def create_player(self, player_name: str) -> dict:
+    def create_player(self, player_name: str, wallet_address: str = "") -> dict:
         """Create a new player in the KG and return session info.
 
         Returns: {player_id, session_id, location_name, opening_narrative}
@@ -50,7 +50,7 @@ class SessionManager:
         try:
             from memento.tools import chain as _chain
             if _chain.is_enabled():
-                _chain.register_character(player_uuid, player_name, "", 1)
+                _chain.register_character(player_uuid, player_name, wallet_address, 1)
         except Exception as e:
             print(f"[session] Chain register_character failed (non-fatal): {e}")
 

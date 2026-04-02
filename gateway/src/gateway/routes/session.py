@@ -10,7 +10,7 @@ router = APIRouter()
 class CreateSessionRequest(BaseModel):
     player_name: str
     game_id: str = "default"
-    wallet_address: str = ""
+    wallet_address: str
 
 
 class CreateSessionResponse(BaseModel):
@@ -26,7 +26,7 @@ async def create_session(req: CreateSessionRequest):
     try:
         from memento.session import SessionManager
         sm = SessionManager()
-        result = await asyncio.to_thread(sm.create_player, req.player_name)
+        result = await asyncio.to_thread(sm.create_player, req.player_name, wallet_address=req.wallet_address)
 
         # Register a Matrix user for this player
         from gateway.app import bridge
