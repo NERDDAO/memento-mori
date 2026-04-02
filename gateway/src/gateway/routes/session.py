@@ -141,6 +141,12 @@ async def resume_session(req: ResumeSessionRequest, request: Request):
         from gateway.session_store import create_session as _create_session_token
         token = _create_session_token(result["player_id"], req.wallet_address)
 
+        # Fetch recent room history for context
+        recent_history: list[dict] = []
+        from gateway.app import bridge
+        if bridge and bridge.connected:
+            recent_history = await bridge.get_room_history(result["location_name"], limit=20)
+
         return {
             "player_id": result["player_id"],
             "session_id": f"session-{result['player_id'][:8]}",
@@ -152,6 +158,7 @@ async def resume_session(req: ResumeSessionRequest, request: Request):
             "skills": result.get("skills", {}),
             "inventory": result.get("inventory", []),
             "session_token": token,
+            "recent_history": recent_history,
         }
     except Exception:
         logger.error("Session resume failed", exc_info=True)

@@ -296,3 +296,38 @@ class MatrixBridge:
         self.location_to_room[location_name] = room_id
         self.room_to_location[room_id] = location_name
         return room_id
+
+    async def get_room_history(self, location_name: str, limit: int = 20) -> list[dict]:
+        """Fetch recent narrative messages from a location's Matrix room.
+
+        Used to give reconnecting players context for what happened while away.
+        Returns list of {text, player_id, timestamp} dicts, oldest first.
+        """
+        room_id = self.location_to_room.get(location_name)
+        if not room_id or not self.token:
+            return []
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                resp = await session.get(
+                    f"{self.homeserver}/_matrix/client/v3/rooms/{room_id}/messages",
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    params={"dir": "b", "limit": str(limit)},
+                )
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                messages = []
+                for event in reversed(data.get("chunk", [])):
+                    content = event.get("content", {})
+                    rpg_meta = content.get("com.bonfires.rpg", {})
+                    if rpg_meta.get("type") == "narrative":
+                        messages.append({
+                            "text": content.get("body", ""),
+                            "player_id": rpg_meta.get("player_id", ""),
+                            "timestamp": event.get("origin_server_ts", 0),
+                        })
+                return messages
+        except Exception:
+            logger.warning("Failed to fetch room history for %s", location_name, exc_info=True)
+            return []
