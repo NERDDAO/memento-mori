@@ -8,6 +8,7 @@ export interface Session {
   playerId: string;
   sessionId: string;
   playerName: string;
+  walletAddress: string;
   currentLocation: string;
   connected: boolean;
   openingNarrative: string;
@@ -17,6 +18,7 @@ const session: Session = {
   playerId: '',
   sessionId: '',
   playerName: '',
+  walletAddress: '',
   currentLocation: '',
   connected: false,
   openingNarrative: '',
@@ -38,21 +40,23 @@ export function setMessageHandler(handler: (msg: any) => void): void {
   onMessage = handler;
 }
 
-export async function initSession(playerName: string): Promise<Session> {
+export async function initSession(playerName: string, walletAddress: string): Promise<Session> {
   const resp = await fetch(`${GATEWAY_URL}/api/session/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ player_name: playerName }),
+    body: JSON.stringify({ player_name: playerName, wallet_address: walletAddress }),
   });
   const data = await resp.json();
   session.playerId = data.player_id;
   session.sessionId = data.session_id;
   session.playerName = playerName;
+  session.walletAddress = walletAddress;
   session.currentLocation = data.location;
   session.openingNarrative = data.opening_narrative || '';
 
   localStorage.setItem('mm_player_id', session.playerId);
   localStorage.setItem('mm_player_name', playerName);
+  localStorage.setItem('mm_wallet', walletAddress);
 
   connectWebSocket();
   return session;
