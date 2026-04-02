@@ -22,6 +22,7 @@ class ActionResponse(BaseModel):
 
 
 class DeathBroadcast(BaseModel):
+    player_id: str = Field("", max_length=64)
     player_name: str = Field(..., min_length=1, max_length=30)
     level: int = Field(1, ge=1)
     cause: str = Field("", max_length=200)
@@ -30,10 +31,16 @@ class DeathBroadcast(BaseModel):
 
 @router.post("/death/broadcast")
 async def broadcast_death(req: DeathBroadcast):
-    """Broadcast a permadeath announcement to all connected players."""
+    """Broadcast a permadeath announcement and invalidate the player's session."""
     from gateway.app import ws_hub
     if ws_hub:
         await ws_hub.broadcast_death(req.player_name, req.level, req.cause, req.location)
+
+    # Permadeath: kill the session — player must pay again for a new character
+    if req.player_id:
+        from gateway.session_store import invalidate_player_sessions
+        invalidate_player_sessions(req.player_id)
+
     return {"status": "broadcast"}
 
 
