@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from gateway.log import get_logger
 from gateway.matrix_bridge import MatrixBridge
+from gateway.rounds import GatewayRoundManager
 from gateway.ws import WebSocketHub
 
 logger = get_logger(__name__)
@@ -14,12 +15,17 @@ logger = get_logger(__name__)
 
 bridge: MatrixBridge | None = None
 ws_hub: WebSocketHub | None = None
+round_manager: GatewayRoundManager | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global bridge, ws_hub
+    global bridge, ws_hub, round_manager
     ws_hub = WebSocketHub()
+
+    # Round manager — batches actions per location
+    round_manager = GatewayRoundManager(ws_hub, window_seconds=5.0)
+
     # Matrix bridge connects on startup if env vars are set
     import os
     homeserver = os.getenv("MATRIX_HOMESERVER", "")
@@ -27,6 +33,7 @@ async def lifespan(app: FastAPI):
     if homeserver and token:
         bridge = MatrixBridge(homeserver, token, ws_hub)
         await bridge.connect()
+        round_manager.set_bridge(bridge)
     yield
     if bridge:
         await bridge.disconnect()

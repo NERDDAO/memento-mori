@@ -59,24 +59,28 @@ class EngineMatrixListener:
             logger.info("Joined room: %s", room.display_name or room.room_id)
 
     async def _on_action(self, room: MatrixRoom, event: RoomMessageText) -> None:
-        """Handle a player action message."""
+        """Handle incoming messages — single actions or batched round-actions."""
         content = event.source.get("content", {})
         rpg_meta = content.get("com.bonfires.rpg", {})
+        msg_type = rpg_meta.get("type", "")
 
-        if rpg_meta.get("type") != "player-action":
-            return
+        if msg_type == "round-actions":
+            # Batched round from gateway RoundManager
+            await self._handle_round(room, rpg_meta)
+        elif msg_type == "player-action":
+            # Legacy single action (direct send, no round manager)
+            await self._handle_single_action(room, rpg_meta, event.body)
 
+    async def _handle_single_action(self, room: MatrixRoom, rpg_meta: dict, body: str) -> None:
+        """Process a single player action (legacy path)."""
         player_id = rpg_meta.get("player_id", "unknown")
-        action_text = event.body
-        logger.info("Action from %s: %s", player_id, action_text)
+        logger.info("Single action from %s: %s", player_id, body)
 
-        # Run GameTurnFlow in a thread (sync CrewAI in async context)
         location_name = room.display_name or "Unknown"
         narrative, state_update = await asyncio.to_thread(
-            self._run_turn, player_id, location_name, action_text
+            self._run_turn, location_name, [{"player_id": player_id, "player_name": player_id, "action": body}]
         )
 
-        # Post narrative back to Matrix room
         if self.client and narrative:
             await self.client.room_send(
                 room.room_id,
@@ -92,16 +96,63 @@ class EngineMatrixListener:
                 },
             )
 
+    async def _handle_round(self, room: MatrixRoom, rpg_meta: dict) -> None:
+        """Process a batched round of actions from the RoundManager."""
+        actions = rpg_meta.get("actions", [])
+        location = rpg_meta.get("location", room.display_name or "Unknown")
+
+        player_names = [a.get("player_name", "unknown") for a in actions]
+        logger.info("Round at %s: %d actions from %s", location, len(actions), player_names)
+
+        narrative, state_update = await asyncio.to_thread(
+            self._run_turn, location, actions
+        )
+
+        if self.client and narrative:
+            # Broadcast narrative to all players (no specific player_id — it's shared)
+            await self.client.room_send(
+                room.room_id,
+                "m.room.message",
+                {
+                    "msgtype": "m.text",
+                    "body": narrative,
+                    "com.bonfires.rpg": {
+                        "type": "narrative",
+                        "player_id": "",  # shared narrative
+                        "state_update": state_update,
+                    },
+                },
+            )
+
     @staticmethod
-    def _run_turn(player_id: str, location_name: str, action: str) -> tuple[str, dict]:
-        """Run GameTurnFlow synchronously (called from thread). Returns (narrative, state_update)."""
+    def _run_turn(location_name: str, actions: list[dict]) -> tuple[str, dict]:
+        """Run GameTurnFlow for one or more player actions. Returns (narrative, state_update).
+
+        For multi-player rounds, all actions are combined into a single flow
+        so the narrative covers everyone's actions coherently.
+        """
         from memento.flows.game_turn import GameTurnFlow
         from memento.models.state_update import StateUpdate, EventSummary, CombatEvent, QuestSummary
 
+        if len(actions) == 1:
+            # Single player — standard flow
+            a = actions[0]
+            combined_action = a["action"]
+            player_name = a.get("player_name", a["player_id"])
+            player_uuid = a["player_id"]
+        else:
+            # Multi-player — combine into one turn description
+            combined_action = "\n".join(
+                f"{a.get('player_name', a['player_id'])}: {a['action']}" for a in actions
+            )
+            player_name = ", ".join(a.get("player_name", a["player_id"]) for a in actions)
+            player_uuid = actions[0]["player_id"]
+
         flow = GameTurnFlow()
-        flow.state.player_name = player_id
+        flow.state.player_name = player_name
+        flow.state.player_uuid = player_uuid
         flow.state.location_name = location_name
-        flow.state.action = action
+        flow.state.action = combined_action
         flow.kickoff()
 
         # Build structured event summary from flow state
@@ -121,9 +172,9 @@ class EngineMatrixListener:
                 combat=combat,
             )
 
-        # Query active quests for this player
+        # Query active quests for first player
         active_quests = None
-        raw_quests = GameTurnFlow.query_active_quests(player_id)
+        raw_quests = GameTurnFlow.query_active_quests(player_uuid)
         if raw_quests:
             active_quests = [
                 QuestSummary(**q) for q in raw_quests

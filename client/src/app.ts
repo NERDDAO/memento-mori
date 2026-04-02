@@ -198,6 +198,15 @@ function handleMessage(msg: any): void {
       narrative.showThinking();
       statusBar.setPhase('thinking');
       break;
+    case 'pending_action': {
+      // Another player acted in our location — show it like a group chat
+      const who = msg.player_name || 'Someone';
+      narrative.addBlock(`> ${who}: ${msg.action}`, 'pending-action');
+      break;
+    }
+    case 'system':
+      narrative.addBlock(msg.text || '', 'system');
+      break;
     case 'death_feed': {
       const skull = '\u2620';
       const deathMsg = `${skull} ${msg.player_name || 'Unknown'} (Level ${msg.level || '?'}) fell at ${msg.location || 'unknown'}. ${msg.cause || ''}`;

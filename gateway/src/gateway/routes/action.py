@@ -39,22 +39,32 @@ async def broadcast_death(req: DeathBroadcast):
 
 @router.post("/action", response_model=ActionResponse)
 async def submit_action(req: ActionRequest):
-    """Submit a player action. The engine processes it asynchronously via Matrix."""
+    """Submit a player action. Goes through the RoundManager for batching."""
     from gateway.rate_limit import action_limiter
     action_limiter.check(req.player_id)
 
-    from gateway.app import bridge, ws_hub
+    from gateway.app import round_manager
 
-    if bridge and bridge.connected:
-        room_id = await bridge.get_or_create_room(req.location)
-        await bridge.send_action(room_id, req.player_id, req.action)
+    if round_manager:
+        accepted = await round_manager.submit_action(
+            req.player_id,
+            req.player_id,  # player_name — will be resolved from KG later
+            req.location,
+            req.action,
+        )
+        status = "queued" if accepted else "duplicate"
+    else:
+        # Fallback: direct send (no round manager)
+        from gateway.app import bridge, ws_hub
+        if bridge and bridge.connected:
+            room_id = await bridge.get_or_create_room(req.location)
+            await bridge.send_action(room_id, req.player_id, req.action)
+        if ws_hub:
+            ws_hub.set_location(req.player_id, req.location)
+            await ws_hub.send_to_player(req.player_id, {
+                "type": "thinking",
+                "action": req.action,
+            })
+        status = "queued"
 
-    # Track player location and send "thinking" indicator to client
-    if ws_hub:
-        ws_hub.set_location(req.player_id, req.location)
-        await ws_hub.send_to_player(req.player_id, {
-            "type": "thinking",
-            "action": req.action,
-        })
-
-    return ActionResponse(status="queued")
+    return ActionResponse(status=status)
