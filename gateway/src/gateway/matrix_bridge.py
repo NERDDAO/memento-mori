@@ -9,6 +9,10 @@ from typing import Any
 import aiohttp
 from nio import AsyncClient, MatrixRoom, RoomMessageText
 
+from gateway.log import get_logger
+
+logger = get_logger(__name__)
+
 
 class MatrixBridge:
     """Async Matrix client that bridges messages between gateway and game engine.
@@ -39,12 +43,12 @@ class MatrixBridge:
             self.client.add_event_callback(self._on_message, RoomMessageText)
             self.connected = True
             asyncio.create_task(self._sync_loop())
-            print(f"[matrix] Connected as {self.client.user_id}")
+            logger.info("Connected as %s", self.client.user_id)
 
             # Pre-populate known rooms
             await self._discover_rooms()
         except Exception as e:
-            print(f"[matrix] Connection failed: {e}")
+            logger.error("Connection failed", exc_info=True)
             self.connected = False
 
     async def _discover_rooms(self) -> None:
@@ -57,7 +61,7 @@ class MatrixBridge:
                     headers={"Authorization": f"Bearer {self.token}"},
                 )
                 if resp.status != 200:
-                    print(f"[matrix] Room discovery failed: {resp.status}")
+                    logger.warning("Room discovery failed: HTTP %d", resp.status)
                     return
                 data = await resp.json()
                 rooms = data.get("joined_rooms", [])
@@ -77,9 +81,9 @@ class MatrixBridge:
                             if name:
                                 self.location_to_room[name] = room_id
                                 self.room_to_location[room_id] = name
-                                print(f"[matrix] Cached room: {name} -> {room_id}")
+                                logger.info("Cached room: %s -> %s", name, room_id)
         except Exception as e:
-            print(f"[matrix] Room discovery failed: {e}")
+            logger.warning("Room discovery failed", exc_info=True)
 
     async def disconnect(self) -> None:
         if self.client:
@@ -92,7 +96,7 @@ class MatrixBridge:
         try:
             await self.client.sync_forever(timeout=30000)
         except Exception as e:
-            print(f"[matrix] Sync error: {e}")
+            logger.error("Sync error", exc_info=True)
             self.connected = False
 
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText) -> None:
@@ -156,10 +160,10 @@ class MatrixBridge:
                         token = data.get("access_token", "")
                         if token:
                             self.player_tokens[player_id] = token
-                            print(f"[matrix] Registered player {username}")
+                            logger.info("Registered player %s", username)
                             return token
             except Exception as e:
-                print(f"[matrix] Registration failed: {e}")
+                logger.warning("Registration failed for %s", username, exc_info=True)
 
             # Try login if already registered
             try:
@@ -176,10 +180,10 @@ class MatrixBridge:
                         token = data.get("access_token", "")
                         if token:
                             self.player_tokens[player_id] = token
-                            print(f"[matrix] Logged in player {username}")
+                            logger.info("Logged in player %s", username)
                             return token
             except Exception as e:
-                print(f"[matrix] Login failed: {e}")
+                logger.warning("Login failed for %s", username, exc_info=True)
 
         return None
 
@@ -187,11 +191,11 @@ class MatrixBridge:
         """Send a player action to a Matrix room using the player's token."""
         token = self.player_tokens.get(player_id)
         if not token:
-            print(f"[matrix] No token for player {player_id}, registering...")
+            logger.info("No token for player %s, registering...", player_id)
             token = await self.register_player("player", player_id)
 
         if not token:
-            print(f"[matrix] Cannot send action — no player token")
+            logger.error("Cannot send action — no player token for %s", player_id)
             return
 
         # Invite player to the room (as narrator), then join as player
@@ -231,7 +235,7 @@ class MatrixBridge:
             )
             if resp.status != 200:
                 text = await resp.text()
-                print(f"[matrix] Send failed ({resp.status}): {text}")
+                logger.error("Send failed (HTTP %d): %s", resp.status, text)
 
     async def get_or_create_room(self, location_name: str, space_id: str = "") -> str:
         """Get or create a Matrix room for a location. Returns room_id."""
@@ -260,10 +264,10 @@ class MatrixBridge:
                     if room_id:
                         self.location_to_room[location_name] = room_id
                         self.room_to_location[room_id] = location_name
-                        print(f"[matrix] Resolved room {alias} -> {room_id}")
+                        logger.info("Resolved room %s -> %s", alias, room_id)
                         return room_id
         except Exception as e:
-            print(f"[matrix] Alias resolve failed: {e}")
+            logger.warning("Alias resolve failed for %s", alias, exc_info=True)
 
         # Create new room via nio
         try:
@@ -276,12 +280,12 @@ class MatrixBridge:
             )
             if hasattr(resp, "room_id") and resp.room_id:
                 room_id = resp.room_id
-                print(f"[matrix] Created room {alias} -> {room_id}")
+                logger.info("Created room %s -> %s", alias, room_id)
             else:
-                print(f"[matrix] Room creation returned: {resp}")
+                logger.warning("Room creation returned unexpected response: %s", resp)
                 room_id = f"!local-{location_name}"
         except Exception as e:
-            print(f"[matrix] Room creation failed: {e}")
+            logger.error("Room creation failed for %s", location_name, exc_info=True)
             room_id = f"!local-{location_name}"
 
         self.location_to_room[location_name] = room_id

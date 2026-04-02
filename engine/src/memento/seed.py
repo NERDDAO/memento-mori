@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 from memento.bonfires_client import get_client
+from memento.log import get_logger
+
+logger = get_logger(__name__)
 
 
 # The Threshold — the one predefined room every player starts in
@@ -61,7 +64,7 @@ def seed_threshold() -> dict:
     for entity in entities:
         if entity.get("name") == "The Threshold" and "Location" in entity.get("labels", []):
             uuid = entity.get("uuid", "")
-            print(f"[seed] The Threshold already exists: {uuid}")
+            logger.info("The Threshold already exists: %s", uuid)
             break
 
     # Create if not found
@@ -80,7 +83,7 @@ def seed_threshold() -> dict:
                 "room_map": json.dumps(THRESHOLD_MAP),
             },
         )
-        print(f"[seed] Created The Threshold: {uuid}")
+        logger.info("Created The Threshold: %s", uuid)
 
     THRESHOLD_MAP["id"] = uuid
 
@@ -126,11 +129,11 @@ def seed_threshold() -> dict:
         result = client.kg.search(name, num_results=3)
         for e in result.get("entities", result.get("nodes", [])):
             if e.get("name") == name:
-                print(f"[seed] Found existing: {name} ({e['uuid']})")
+                logger.info("Found existing: %s (%s)", name, e["uuid"])
                 return str(e["uuid"])
         time.sleep(1)
         new_uuid = client.kg.create_entity(name, labels, {"summary": summary})
-        print(f"[seed] Created: {name} ({new_uuid})")
+        logger.info("Created: %s (%s)", name, new_uuid)
         return str(new_uuid)
 
     npc_entries = []
@@ -147,7 +150,7 @@ def seed_threshold() -> dict:
                 "id": npc_uuid,
             })
         except Exception as e:
-            print(f"[seed] NPC failed: {npc['name']}: {e}")
+            logger.warning("NPC creation failed: %s", npc["name"], exc_info=True)
             npc_entries.append({
                 "x": npc["x"], "y": npc["y"],
                 "ch": npc["ch"], "name": npc["name"],
@@ -186,7 +189,7 @@ def seed_threshold() -> dict:
                 "id": item_uuid,
             })
         except Exception as e:
-            print(f"[seed] Item failed: {item['name']}: {e}")
+            logger.warning("Item creation failed: %s", item["name"], exc_info=True)
             item_entries.append({
                 "x": item["x"], "y": item["y"],
                 "ch": item["ch"], "name": item["name"],
@@ -220,7 +223,7 @@ def get_threshold_map() -> dict | None:
 if __name__ == "__main__":
     import json as _json
     result = seed_threshold()
-    print(f"\nResult: created={result['created']}, uuid={result['uuid']}")
-    print(f"NPCs: {len(result['map']['npcs'])}")
-    print(f"Items: {len(result['map']['items'])}")
-    print(f"Exits: {len(result['map']['exits'])}")
+    logger.info("Result: created=%s, uuid=%s", result["created"], result["uuid"])
+    logger.info("NPCs: %d", len(result["map"]["npcs"]))
+    logger.info("Items: %d", len(result["map"]["items"]))
+    logger.info("Exits: %d", len(result["map"]["exits"]))

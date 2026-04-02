@@ -4,6 +4,10 @@ import asyncio
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from gateway.log import get_logger
+
+logger = get_logger(__name__)
+
 router = APIRouter()
 
 
@@ -40,6 +44,7 @@ async def create_session(req: CreateSessionRequest):
             opening_narrative=result.get("opening_narrative", ""),
         )
     except Exception:
+        logger.error("Session creation via KG failed, using fallback", exc_info=True)
         import uuid
         player_id = str(uuid.uuid4())
 

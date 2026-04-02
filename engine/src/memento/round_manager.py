@@ -7,6 +7,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from memento.log import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class PlayerAction:
@@ -71,7 +75,7 @@ class RoundManager:
                 try:
                     await callback(location, round_.actions)
                 except Exception as e:
-                    print(f"[round-manager] Callback error: {e}")
+                    logger.error("Round close callback error", exc_info=True)
 
     @property
     def active_count(self) -> int:
