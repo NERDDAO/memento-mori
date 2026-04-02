@@ -19,6 +19,7 @@ import { createHeader, type WorldTime } from './ui/header';
 import { createDialog } from './ui/dialog';
 import { createWikiPanel } from './ui/wiki';
 import { createStatusBar } from './ui/status';
+import { hasProvider, connectWallet, formatAddress, getAddress } from './chain/wallet';
 import type { RoomMap } from './map/types';
 
 let gameState: GameState;
@@ -175,11 +176,11 @@ function handleMessage(msg: any): void {
 }
 
 // --- Character creation ---
-async function enterWorld(playerName: string): Promise<void> {
+async function enterWorld(playerName: string, walletAddress: string): Promise<void> {
   const overlay = document.getElementById('char-create-overlay')!;
   overlay.classList.add('hidden');
 
-  const session = await initSession(playerName);
+  const session = await initSession(playerName, walletAddress);
   gameState = createInitialState(playerName);
   gameState.location.name = session.currentLocation;
 
@@ -299,21 +300,46 @@ document.addEventListener('DOMContentLoaded', () => {
     (document.getElementById('char-name-input') as HTMLInputElement).focus();
   });
 
-  // Character creation
+  // Character creation — two-step wallet gate
+  const walletConnectBtn = document.getElementById('wallet-connect-btn')!;
+  const walletStep = document.getElementById('wallet-step')!;
+  const nameStep = document.getElementById('name-step')!;
+  const walletPrompt = document.getElementById('wallet-prompt')!;
+  const walletNoProvider = document.getElementById('wallet-no-provider')!;
+  const walletAddressEl = document.getElementById('wallet-address')!;
   const nameInput = document.getElementById('char-name-input') as HTMLInputElement;
   const enterBtn = document.getElementById('char-create-btn')!;
 
+  // Check for wallet provider on load
+  if (!hasProvider()) {
+    walletConnectBtn.classList.add('hidden');
+    walletNoProvider.classList.remove('hidden');
+  }
+
+  walletConnectBtn.addEventListener('click', async () => {
+    try {
+      walletPrompt.textContent = 'Connecting...';
+      const addr = await connectWallet();
+      walletStep.classList.add('hidden');
+      nameStep.classList.remove('hidden');
+      walletAddressEl.textContent = `\u2713 ${formatAddress(addr)}`;
+      nameInput.focus();
+    } catch {
+      walletPrompt.textContent = 'Connection rejected. Try again.';
+    }
+  });
+
   enterBtn.addEventListener('click', () => {
     const name = nameInput.value.trim() || 'Wanderer';
-    enterWorld(name);
+    const wallet = getAddress();
+    if (wallet) enterWorld(name, wallet);
   });
 
   nameInput.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Enter') {
       const name = nameInput.value.trim() || 'Wanderer';
-      enterWorld(name);
+      const wallet = getAddress();
+      if (wallet) enterWorld(name, wallet);
     }
   });
-
-  nameInput.focus();
 });
