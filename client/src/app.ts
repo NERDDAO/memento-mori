@@ -110,7 +110,7 @@ function getThresholdMap(): RoomMap {
 
 // --- Action handling ---
 async function handleAction(action: string): Promise<void> {
-  if (!action.trim()) return;
+  if (!action.trim() || action.length > 500) return;
   narrative.addBlock(`> ${action}`, 'player-action');
   await sendAction(action);
 }

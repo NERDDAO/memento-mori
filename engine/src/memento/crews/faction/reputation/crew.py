@@ -2,6 +2,7 @@
 
 from crewai import Agent, Crew, Task, Process, LLM
 from memento.config import get_model_for_crew
+from memento.sanitize import sanitize_for_prompt
 from memento.tools.kg import update_entity
 from memento.tools.mechanics import evaluate_disposition
 
@@ -9,6 +10,9 @@ from memento.tools.mechanics import evaluate_disposition
 def make_reputation_crew(player: str, faction: str, action: str) -> Crew:
     """Build a crew that assesses how a player action affects faction reputation."""
     model = get_model_for_crew("reputation")
+    player = sanitize_for_prompt(player, max_length=30)
+    faction = sanitize_for_prompt(faction, max_length=100)
+    action = sanitize_for_prompt(action, max_length=500)
 
     reputation_tracker = Agent(
         role="Faction Reputation Tracker",

@@ -2,12 +2,16 @@
 
 from crewai import Agent, Crew, Task, Process, LLM
 from memento.config import get_model_for_crew
+from memento.sanitize import sanitize_for_prompt
 from memento.tools.kg import search_world, get_entity, get_neighbors
 
 
 def make_context_crew(player_name: str, location_name: str, action: str) -> Crew:
     """Build a context gathering crew for the current scene."""
     model = get_model_for_crew("context")
+    player_name = sanitize_for_prompt(player_name, max_length=30)
+    location_name = sanitize_for_prompt(location_name, max_length=200)
+    action = sanitize_for_prompt(action, max_length=500)
 
     context_assembler = Agent(
         role="Scene Context Assembler",

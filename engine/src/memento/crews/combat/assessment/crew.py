@@ -2,6 +2,7 @@
 
 from crewai import Agent, Crew, Task, Process, LLM
 from memento.config import get_model_for_crew
+from memento.sanitize import sanitize_for_prompt
 from memento.tools.kg import search_world, get_entity
 
 
@@ -10,6 +11,10 @@ def make_combat_assessment_crew(
 ) -> Crew:
     """Build a combat assessment crew for the current encounter."""
     model = get_model_for_crew("combat_assessment")
+    action = sanitize_for_prompt(action, max_length=500)
+    attacker = sanitize_for_prompt(attacker, max_length=100)
+    target = sanitize_for_prompt(target, max_length=100)
+    location = sanitize_for_prompt(location, max_length=200)
 
     combat_assessor = Agent(
         role="Combat Assessor",
