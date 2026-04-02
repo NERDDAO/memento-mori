@@ -1,7 +1,7 @@
 // src/state/session.ts
 /** Session management — auth, WebSocket connection, x402 payment, player identity. */
 
-import { sendPayment, waitForTransaction } from '../chain/wallet';
+import { sendPayment, waitForTransaction, signMessage } from '../chain/wallet';
 
 // Use relative URLs so the client works behind any reverse proxy (Caddy, nginx)
 const GATEWAY_URL = '';
@@ -142,18 +142,30 @@ export async function fetchExistingPlayers(walletAddress: string): Promise<any[]
 }
 
 export async function resumeSession(playerId: string, walletAddress: string): Promise<Session> {
-  const body = JSON.stringify({ player_id: playerId, wallet_address: walletAddress });
+  // Resume uses wallet signature (not payment) to prove ownership
+  const signMsg = `Memento Mori: resume ${playerId} at ${Date.now()}`;
+  let sig = '';
+  try {
+    sig = await signMessage(signMsg);
+  } catch {
+    // Signature declined — can't resume
+    throw new Error('Wallet signature required to resume');
+  }
 
-  const makeRequest = (receiptHeader?: string) => {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (receiptHeader) headers['X-Payment-Receipt'] = receiptHeader;
-    return fetch(`${GATEWAY_URL}/api/session/resume`, { method: 'POST', headers, body });
-  };
+  const resp = await fetch(`${GATEWAY_URL}/api/session/resume`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      player_id: playerId,
+      wallet_address: walletAddress,
+      signature: sig,
+      sign_message: signMsg,
+    }),
+  });
 
-  let resp = await makeRequest();
-
-  if (resp.status === 402) {
-    resp = await handlePaymentRequired(resp, (receipt) => makeRequest(receipt));
+  if (resp.status === 401) {
+    const err = await resp.json();
+    throw new Error(err.message || 'Authentication failed');
   }
 
   const data = await resp.json();

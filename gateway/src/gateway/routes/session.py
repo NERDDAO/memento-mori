@@ -2,6 +2,7 @@
 
 import asyncio
 from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from gateway.log import get_logger
@@ -112,20 +113,32 @@ async def get_players(wallet: str = Query(..., min_length=42, max_length=42, pat
 class ResumeSessionRequest(BaseModel):
     player_id: str = Field(..., min_length=1, max_length=64)
     wallet_address: str = Field(..., min_length=42, max_length=42, pattern=r'^0x[a-fA-F0-9]{40}$')
+    signature: str = Field("", max_length=200)
+    sign_message: str = Field("", max_length=200)
 
 
 @router.post("/session/resume")
 async def resume_session(req: ResumeSessionRequest, request: Request):
-    """Resume an existing character session. Requires x402 payment when enabled."""
-    # x402 payment check
-    from gateway.x402 import check_payment_receipt, verify_payment_receipt, payment_required_response
-    tx_hash = check_payment_receipt(request, req.wallet_address)
-    if tx_hash is None:
-        return payment_required_response()
-    if tx_hash != "disabled":
-        verified = await verify_payment_receipt(tx_hash, req.wallet_address)
-        if not verified:
-            return payment_required_response()
+    """Resume an existing character session. Requires wallet signature (not payment).
+
+    Living characters can be resumed for free by proving wallet ownership.
+    Dead characters cannot be resumed — the client should show them as grayed out.
+    """
+    from gateway.x402 import X402_ENABLED
+    from gateway.session_store import verify_wallet_signature
+
+    # Verify wallet ownership via signature (when x402 is enabled)
+    if X402_ENABLED:
+        if not req.signature or not req.sign_message:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "signature_required", "message": "Sign a message to prove wallet ownership"},
+            )
+        if not verify_wallet_signature(req.wallet_address, req.sign_message, req.signature):
+            return JSONResponse(
+                status_code=401,
+                content={"error": "invalid_signature", "message": "Wallet signature verification failed"},
+            )
 
     try:
         from memento.session import SessionManager

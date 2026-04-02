@@ -46,6 +46,23 @@ export function formatAddress(addr: string): string {
 }
 
 /**
+ * Sign a message with the connected wallet (for session verification).
+ * Returns the signature hex string.
+ */
+export async function signMessage(message: string): Promise<string> {
+  if (!window.ethereum) throw new Error('No wallet provider');
+  const from = getAddress();
+  if (!from) throw new Error('Wallet not connected');
+
+  const signature = await window.ethereum.request({
+    method: 'personal_sign',
+    params: [message, from],
+  }) as string;
+
+  return signature;
+}
+
+/**
  * Send an ERC-20 transfer (for x402 payment).
  * Returns the transaction hash.
  */

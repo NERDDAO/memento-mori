@@ -134,6 +134,26 @@ def cache_payment_receipt(tx_hash: str, wallet: str) -> None:
         }
 
 
+def verify_wallet_signature(wallet_address: str, message: str, signature: str) -> bool:
+    """Verify that a message was signed by the claimed wallet address.
+
+    Uses eth_account's recover_message for personal_sign verification.
+    Falls back to accepting if the library isn't available (dev mode).
+    """
+    try:
+        from eth_account.messages import encode_defunct
+        from eth_account import Account
+        msg = encode_defunct(text=message)
+        recovered = Account.recover_message(msg, signature=signature)
+        return recovered.lower() == wallet_address.lower()
+    except ImportError:
+        logger.warning("eth_account not available, skipping signature verification")
+        return True
+    except Exception:
+        logger.warning("Signature verification failed", exc_info=True)
+        return False
+
+
 def is_receipt_cached(tx_hash: str) -> str | None:
     """Check if a receipt was already verified. Returns wallet address or None."""
     r = _get_redis()
