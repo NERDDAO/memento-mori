@@ -10,6 +10,8 @@ import { parseNarrative, renderSegments, setKnownEntities } from './renderer/tex
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
 import { initMapPanel, updateMap } from './panels/map';
+import { WorldMapRenderer } from './map/world-renderer';
+import type { WorldMap } from './map/types';
 import { renderCharacterPanel } from './panels/character';
 import { renderInventoryPanel } from './panels/inventory';
 import { renderExitsPanel } from './panels/exits';
@@ -349,13 +351,62 @@ document.addEventListener('DOMContentLoaded', () => {
   const actionInput = commandWin.body.querySelector('#action-input') as HTMLInputElement;
   initInput(actionInput, handleAction);
 
-  // 8. Map + Wiki — split map window body into canvas wrap + wiki panel
+  // 8. Map + Wiki — split map window body into canvas wrap + world map + wiki panel
   const mapCanvasWrap = document.createElement('div');
   mapCanvasWrap.className = 'map-canvas-wrap';
+  const worldMapWrap = document.createElement('div');
+  worldMapWrap.className = 'map-canvas-wrap';
+  worldMapWrap.style.display = 'none';
   wiki = createWikiPanel();
   mapWin.body.appendChild(mapCanvasWrap);
+  mapWin.body.appendChild(worldMapWrap);
   mapWin.body.appendChild(wiki.el);
   initMapPanel(mapCanvasWrap, handleAction);
+
+  // World map renderer
+  const worldRenderer = new WorldMapRenderer(worldMapWrap);
+  let worldMapData: WorldMap | null = null;
+  let showingWorldMap = false;
+
+  worldRenderer.setClickHandler((roomId) => {
+    if (roomId && wiki) {
+      const room = worldMapData?.rooms.find(r => r.id === roomId);
+      if (room) wiki.show(roomId, room.name);
+    }
+  });
+
+  async function fetchWorldMap(): Promise<void> {
+    try {
+      const resp = await fetch('http://localhost:8080/api/worldmap');
+      const data = await resp.json();
+      if (data.rooms && data.rooms.length > 0) {
+        worldMapData = {
+          rooms: data.rooms,
+          connections: data.connections,
+          currentRoom: gameState?.location?.name || '',
+        };
+      }
+    } catch { /* world map unavailable */ }
+  }
+
+  function toggleWorldMap(): void {
+    showingWorldMap = !showingWorldMap;
+    mapCanvasWrap.style.display = showingWorldMap ? 'none' : '';
+    worldMapWrap.style.display = showingWorldMap ? '' : 'none';
+    mapWin.setTitle(showingWorldMap ? 'World Map' : 'Map');
+    if (showingWorldMap && worldMapData) {
+      worldMapData.currentRoom = gameState?.location?.name || '';
+      worldRenderer.render(worldMapData);
+    }
+  }
+
+  // 'w' key toggles world map (when input not focused)
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'w' && document.activeElement?.tagName !== 'INPUT') {
+      if (!worldMapData) fetchWorldMap().then(() => toggleWorldMap());
+      else toggleWorldMap();
+    }
+  });
 
   // 9. Wire handlers
   setMessageHandler(handleMessage);
