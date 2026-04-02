@@ -1,8 +1,8 @@
 {
-  "extraPaths": [
-    "engine/src",
-    "gateway/src"
-  ],
+  "include": ["engine/src", "engine/tests", "gateway/src", "gateway/tests"],
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Linux",
+  "extraPaths": ["engine/src", "gateway/src"],
   "reportMissingImports": "warning",
   "reportAttributeAccessIssue": "warning"
 }
