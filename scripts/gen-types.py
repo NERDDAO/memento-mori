@@ -26,6 +26,9 @@ from memento.models.state_update import (
     InventoryItemUpdate,
     WorldTimeDisplay,
     RoomMapUpdate,
+    CombatEvent,
+    InventoryEvent,
+    EventSummary,
 )
 
 OUTPUT = Path(__file__).parent.parent / "client" / "src" / "types" / "schema.generated.ts"
@@ -85,6 +88,9 @@ def main():
         InventoryItemUpdate,
         WorldTimeDisplay,
         RoomMapUpdate,
+        CombatEvent,
+        InventoryEvent,
+        EventSummary,
         StateUpdate,
     ]
 

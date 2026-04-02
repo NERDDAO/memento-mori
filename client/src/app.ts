@@ -153,9 +153,34 @@ function handleMessage(msg: any): void {
         }
 
         renderAllPanels();
+
+        // Display event notifications
+        if (msg.state_update.events) {
+          const events = msg.state_update.events;
+          if (events.combat) {
+            const c = events.combat;
+            if (c.damage_dealt != null) {
+              narrative.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ''}`, 'event-combat');
+            }
+            if (c.xp_gained) {
+              narrative.addBlock(`[+${c.xp_gained} XP]`, 'event-xp');
+            }
+            if (c.target_dead) {
+              narrative.addBlock(`${c.target_name || 'Target'} has been slain.`, 'event-death');
+            }
+          }
+          if (events.inventory_changes) {
+            for (const inv of events.inventory_changes) {
+              const prefix = inv.event_type === 'DROP' ? '-' : '+';
+              narrative.addBlock(`[${prefix}${inv.item_name}]`, 'event-item');
+            }
+          }
+        }
       }
 
+      // Check for death via structured event or text fallback
       if (msg.state_update?.status === 'dead' ||
+          msg.state_update?.events?.combat?.target_dead ||
           (msg.text && msg.text.toLowerCase().includes('you have died'))) {
         showDeathScreen(msg.state_update?.cause || '');
       }
