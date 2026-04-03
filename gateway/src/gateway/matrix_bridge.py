@@ -104,7 +104,20 @@ class MatrixBridge:
         content = event.source.get("content", {})
         rpg_meta = content.get("com.bonfires.rpg", {})
 
-        if rpg_meta.get("type") == "narrative":
+        rpg_type = rpg_meta.get("type", "")
+
+        # Phase messages — forward to WebSocket
+        if rpg_type == "phase":
+            location = rpg_meta.get("location", self.room_to_location.get(room.room_id, ""))
+            if location:
+                await self.ws_hub.broadcast_to_location(location, {
+                    "type": "phase",
+                    "phase": rpg_meta.get("phase", "resolving"),
+                    "crew": rpg_meta.get("crew"),
+                })
+            return
+
+        if rpg_type == "narrative":
             location = self.room_to_location.get(room.room_id, "")
             state_update = rpg_meta.get("state_update", {})
             player_id = rpg_meta.get("player_id", "")
