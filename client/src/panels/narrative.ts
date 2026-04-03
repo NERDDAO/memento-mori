@@ -1,46 +1,182 @@
 // src/panels/narrative.ts
-import { parseNarrative, renderSegments } from '../renderer/text-renderer';
+/**
+ * Canvas-rendered narrative panel with virtual scrolling.
+ * Uses NarrativeStore for Pretext-measured block heights and
+ * renders monospace text via canvas-text.ts utilities.
+ */
+
+import { parseNarrative, type StyledSegment } from '../renderer/text-renderer';
 import { NarrativeStore } from '../renderer/line-cache';
 import { onRoundStateChange, type RoundState } from '../state/round-state';
+import { measureChar, MONO_FONT, ATTR_BOLD, ATTR_ITALIC, ATTR_UNDERLINE, type CharSize } from '../renderer/canvas-text';
+import { theme } from '../renderer/theme';
+
+// ── Types ────────────────────────────────────────────────────────
 
 export interface NarrativeController {
   addBlock(text: string, type: string): void;
   addHtml(html: string, type: string): void;
   showThinking(): void;
   removeThinking(): void;
+  canvas: HTMLCanvasElement;
 }
+
+interface HitRegion {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  entityId: string;
+  entityName: string;
+}
+
+/** A segment positioned for rendering on a specific line. */
+interface PlacedSegment {
+  text: string;
+  col: number;
+  row: number;      // row relative to block top
+  fg: string;
+  attrs?: number;
+  entityId?: string;
+  entityName?: string;
+}
+
+// ── Color mappings ──────────────────────────────────────────────
+
+const BLOCK_TYPE_COLORS: Record<string, string> = {
+  'narrative':      theme.colors.primary,
+  'player-action':  theme.colors.dim,
+  'system':         theme.colors.system,
+  'thinking':       theme.colors.system,
+  'event':          theme.colors.dim,
+  'event-combat':   theme.colors.damage,
+  'event-xp':      theme.colors.heal,
+  'event-death':    theme.colors.damage,
+  'event-item':     theme.colors.npc,
+  'ooc':            theme.colors.accent,
+  'divider':        theme.colors.dim,
+  'death-feed':     theme.colors.damage,
+};
+
+const ENTITY_TYPE_COLORS: Record<string, string> = {
+  'npc':      theme.colors.npc,
+  'item':     theme.colors.heal,
+  'location': theme.colors.location,
+  'exit':     theme.colors.location,
+};
+
+function segmentColor(seg: StyledSegment, blockColor: string): { fg: string; attrs?: number } {
+  switch (seg.style) {
+    case 'npc':      return { fg: theme.colors.npc };
+    case 'damage':   return { fg: theme.colors.damage, attrs: ATTR_BOLD };
+    case 'heal':     return { fg: theme.colors.heal, attrs: ATTR_BOLD };
+    case 'system':   return { fg: theme.colors.system };
+    case 'location': return { fg: theme.colors.location };
+    case 'italic':   return { fg: blockColor, attrs: ATTR_ITALIC };
+    case 'bold':     return { fg: blockColor, attrs: ATTR_BOLD };
+    case 'entity':
+      return {
+        fg: ENTITY_TYPE_COLORS[seg.entityType || ''] || theme.colors.npc,
+        attrs: ATTR_UNDERLINE,
+      };
+    case 'normal':
+    default:
+      return { fg: blockColor };
+  }
+}
+
+// ── Exported init ───────────────────────────────────────────────
 
 export function initNarrative(container: HTMLElement): NarrativeController {
   const store = new NarrativeStore(container.clientWidth);
   let userAtBottom = true;
   let renderScheduled = false;
   let thinkingBlockId: string | null = null;
+  let scrollOffset = 0; // pixels from top
+  let hitRegions: HitRegion[] = [];
 
-  // Create the virtual scroll container.
-  // The "spacer" div sets the total scrollable height.
-  // Visible blocks are positioned absolutely within it.
-  const spacer = document.createElement('div');
-  spacer.style.position = 'relative';
-  spacer.style.minHeight = '100%';
+  // Thinking animation state
+  let thinkingDots = 0;
+  let thinkingTimer: ReturnType<typeof setInterval> | null = null;
 
-  // Clear the container's initial "Connecting..." message
+  // Create canvas
   container.innerHTML = '';
-  container.appendChild(spacer);
+  const canvas = document.createElement('canvas');
+  canvas.style.display = 'block';
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+  canvas.style.cursor = 'default';
+  container.appendChild(canvas);
 
-  // Track scroll position to know if user is at bottom
-  container.addEventListener('scroll', () => {
-    const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 50;
-    userAtBottom = atBottom;
-    scheduleRender();
-  });
+  // Disable the scrollable overflow on the container since we handle scroll ourselves
+  container.style.overflowY = 'hidden';
 
-  // Resize observer for remeasurement
-  const resizeObserver = new ResizeObserver(() => {
+  const maybeCtx = canvas.getContext('2d');
+  if (!maybeCtx) throw new Error('Narrative: failed to get 2d context');
+  const ctx: CanvasRenderingContext2D = maybeCtx;
+
+  const charSize = measureChar(ctx, MONO_FONT);
+
+  // ── Caches ───────────────────────────────────────────────────
+  // Maps block id -> parsed segments so we don't re-parse each frame
+  const segmentCache = new Map<string, StyledSegment[]>();
+  // Maps block id -> placed segments at current column width
+  const layoutCache = new Map<string, { cols: number; placed: PlacedSegment[] }>();
+
+  // ── Sizing ──────────────────────────────────────────────────
+
+  let canvasW = 0;
+  let canvasH = 0;
+  let cols = 0;
+
+  function resize(): void {
+    const rect = container.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvasW = rect.width;
+    canvasH = rect.height;
+
+    canvas.width = Math.floor(canvasW * dpr);
+    canvas.height = Math.floor(canvasH * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    cols = Math.floor(canvasW / charSize.width);
+
+    // Remeasure store and repaint
     store.remeasure(container.clientWidth);
-    spacer.style.height = `${store.totalHeight}px`;
+    clampScroll();
     scheduleRender();
-  });
+  }
+
+  const resizeObserver = new ResizeObserver(() => resize());
   resizeObserver.observe(container);
+  resize();
+
+  // ── Scrolling ─────────────────────────────────────────────
+
+  function clampScroll(): void {
+    const maxScroll = Math.max(0, store.totalHeight - canvasH);
+    scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
+  }
+
+  function scrollToBottom(): void {
+    scrollOffset = Math.max(0, store.totalHeight - canvasH);
+  }
+
+  canvas.addEventListener('wheel', (e: WheelEvent) => {
+    e.preventDefault();
+    scrollOffset += e.deltaY;
+    clampScroll();
+
+    // Check if user is at bottom (within 30px tolerance)
+    const maxScroll = Math.max(0, store.totalHeight - canvasH);
+    userAtBottom = scrollOffset >= maxScroll - 30;
+
+    scheduleRender();
+  }, { passive: false });
+
+  // ── Render loop ───────────────────────────────────────────
 
   function scheduleRender(): void {
     if (renderScheduled) return;
@@ -51,39 +187,261 @@ export function initNarrative(container: HTMLElement): NarrativeController {
     });
   }
 
+  /**
+   * Word-wrap and lay out styled segments into placed segments for a block.
+   * Returns an array of PlacedSegments with col/row coordinates relative
+   * to the block's top-left.
+   */
+  function layoutBlock(blockId: string, blockText: string, blockType: string): PlacedSegment[] {
+    // Return cached layout if cols haven't changed (and not a thinking block)
+    const cached = layoutCache.get(blockId);
+    if (cached && cached.cols === cols && blockType !== 'thinking') {
+      return cached.placed;
+    }
+
+    const blockColor = BLOCK_TYPE_COLORS[blockType] || theme.colors.primary;
+    const padding = 2; // 2 chars of left padding
+    const maxCol = Math.max(cols - padding * 2, 10);
+
+    // Divider: draw a horizontal rule
+    if (blockType === 'divider') {
+      const rule = '\u2500'.repeat(Math.min(maxCol, cols - padding * 2));
+      return [{ text: rule, col: padding, row: 0, fg: theme.colors.dim }];
+    }
+
+    // Get or compute segments
+    let segments = segmentCache.get(blockId);
+    if (!segments) {
+      if (blockType === 'thinking') {
+        const dots = '.'.repeat(thinkingDots % 4);
+        segments = [{ text: `The world responds${dots}`, style: 'normal' as const }];
+      } else if (blockType === 'player-action' || blockType === 'system') {
+        segments = [{ text: blockText, style: 'normal' as const }];
+      } else {
+        segments = parseNarrative(blockText);
+      }
+      // Don't cache thinking blocks (they animate)
+      if (blockType !== 'thinking') {
+        segmentCache.set(blockId, segments);
+      }
+    }
+
+    const placed: PlacedSegment[] = [];
+    let col = padding;
+    let row = 0;
+
+    for (const seg of segments) {
+      const { fg, attrs } = segmentColor(seg, blockColor);
+      // Split segment text by newlines first
+      const lines = seg.text.split('\n');
+
+      for (let li = 0; li < lines.length; li++) {
+        if (li > 0) {
+          // Explicit newline: advance to next row
+          col = padding;
+          row++;
+        }
+
+        const words = lines[li].split(/( +)/); // preserve spaces as separate tokens
+        for (const word of words) {
+          if (!word) continue;
+
+          // If this word would overflow, wrap
+          if (col + word.length > padding + maxCol && col > padding) {
+            col = padding;
+            row++;
+          }
+
+          // If single word is longer than maxCol, break it
+          if (word.length > maxCol) {
+            let pos = 0;
+            while (pos < word.length) {
+              const chunk = word.slice(pos, pos + maxCol - (col - padding));
+              placed.push({
+                text: chunk,
+                col,
+                row,
+                fg,
+                attrs,
+                entityId: seg.entityId,
+                entityName: seg.style === 'entity' ? seg.text : undefined,
+              });
+              col += chunk.length;
+              pos += chunk.length;
+              if (pos < word.length) {
+                col = padding;
+                row++;
+              }
+            }
+          } else {
+            placed.push({
+              text: word,
+              col,
+              row,
+              fg,
+              attrs,
+              entityId: seg.entityId,
+              entityName: seg.style === 'entity' ? seg.text : undefined,
+            });
+            col += word.length;
+          }
+        }
+      }
+    }
+
+    // Cache the layout (skip thinking blocks since they animate)
+    if (blockType !== 'thinking') {
+      layoutCache.set(blockId, { cols, placed });
+    }
+
+    return placed;
+  }
+
   function renderVisible(): void {
-    const scrollTop = container.scrollTop;
-    const viewportHeight = container.clientHeight;
-    const { start, end } = store.getVisibleRange(scrollTop, viewportHeight);
+    // Clear canvas
+    ctx.clearRect(0, 0, canvasW, canvasH);
 
-    // Clear existing block elements (keep spacer itself)
-    const existingBlocks = spacer.querySelectorAll('.narrative-block');
-    existingBlocks.forEach(el => el.remove());
+    // Fill background
+    ctx.fillStyle = theme.colors.bg;
+    ctx.fillRect(0, 0, canvasW, canvasH);
 
-    // Render only visible blocks
+    if (store.length === 0) return;
+
+    const { start, end } = store.getVisibleRange(scrollOffset, canvasH);
+    hitRegions = [];
+
     for (let i = start; i < end; i++) {
       const block = store.getBlock(i);
       if (!block) continue;
 
-      const el = document.createElement('div');
-      el.className = `narrative-block ${block.type}`;
-      el.style.position = 'absolute';
-      el.style.top = `${block.y}px`;
-      el.style.left = '0';
-      el.style.right = '0';
-      el.innerHTML = block.html;
-      spacer.appendChild(el);
+      // Block's Y position on screen (pixels)
+      const blockScreenY = block.y - scrollOffset;
+
+      // Skip if entirely off-screen (safety check)
+      if (blockScreenY + block.height < 0 || blockScreenY > canvasH) continue;
+
+      const placed = layoutBlock(block.id, block.text, block.type);
+
+      for (const seg of placed) {
+        // Convert segment row to pixel Y, then to canvas row
+        const segPixelY = blockScreenY + seg.row * charSize.height;
+
+        // Skip segments that are off-screen
+        if (segPixelY + charSize.height < 0 || segPixelY > canvasH) continue;
+
+        // Draw using pixel-based positioning (not grid rows) for sub-row precision
+        drawTextAtPixel(ctx, seg.col, segPixelY, seg.text, seg.fg, charSize, seg.attrs);
+
+        // Register hit region for entity segments
+        if (seg.entityId) {
+          hitRegions.push({
+            x: seg.col * charSize.width,
+            y: segPixelY,
+            w: seg.text.length * charSize.width,
+            h: charSize.height,
+            entityId: seg.entityId,
+            entityName: seg.entityName || seg.text,
+          });
+        }
+      }
     }
   }
 
-  function addBlockInternal(text: string, html: string, type: string): string {
-    const block = store.add(text, html, type);
-    spacer.style.height = `${store.totalHeight}px`;
+  /**
+   * Draw text at a pixel Y position (not grid row).
+   * Similar to drawText but takes pixelY directly for smooth sub-row scrolling.
+   */
+  function drawTextAtPixel(
+    ctx: CanvasRenderingContext2D,
+    col: number,
+    pixelY: number,
+    text: string,
+    fg: string,
+    cs: CharSize,
+    attrs?: number,
+  ): void {
+    // Build font string
+    let font = MONO_FONT;
+    if (attrs) {
+      const parts: string[] = [];
+      if (attrs & ATTR_ITALIC) parts.push('italic');
+      if (attrs & ATTR_BOLD) parts.push('bold');
+      parts.push('13px monospace');
+      font = parts.join(' ');
+    }
+
+    ctx.font = font;
+    ctx.fillStyle = fg;
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+
+    const yOffset = (cs.height - 13) * 0.35;
+
+    for (let i = 0; i < text.length; i++) {
+      const px = (col + i) * cs.width;
+      ctx.fillText(text[i], px, pixelY + yOffset);
+    }
+
+    // Underline for entity links
+    if (attrs && (attrs & ATTR_UNDERLINE)) {
+      ctx.strokeStyle = fg;
+      ctx.lineWidth = 1;
+      const underY = pixelY + cs.height - 2;
+      const startX = col * cs.width;
+      ctx.beginPath();
+      ctx.moveTo(startX, underY);
+      ctx.lineTo(startX + text.length * cs.width, underY);
+      ctx.stroke();
+    }
+  }
+
+  // ── Click handling ────────────────────────────────────────
+
+  canvas.addEventListener('click', (e: MouseEvent) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    for (const region of hitRegions) {
+      if (mx >= region.x && mx < region.x + region.w &&
+          my >= region.y && my < region.y + region.h) {
+        canvas.dispatchEvent(new CustomEvent('narrative-entity-click', {
+          detail: { entityId: region.entityId, entityName: region.entityName },
+          bubbles: true,
+        }));
+        return;
+      }
+    }
+  });
+
+  // Cursor change on hover over entity regions
+  canvas.addEventListener('mousemove', (e: MouseEvent) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    let overEntity = false;
+    for (const region of hitRegions) {
+      if (mx >= region.x && mx < region.x + region.w &&
+          my >= region.y && my < region.y + region.h) {
+        overEntity = true;
+        break;
+      }
+    }
+    canvas.style.cursor = overEntity ? 'pointer' : 'default';
+  });
+
+  // ── Block management ──────────────────────────────────────
+
+  function addBlockInternal(text: string, type: string): string {
+    // Store still needs html field — pass empty string since we render via canvas
+    const block = store.add(text, '', type);
 
     // Auto-scroll to bottom if user was at bottom
     if (userAtBottom) {
       requestAnimationFrame(() => {
-        container.scrollTop = container.scrollHeight;
+        scrollToBottom();
+        scheduleRender();
       });
     }
 
@@ -91,49 +449,68 @@ export function initNarrative(container: HTMLElement): NarrativeController {
     return block.id;
   }
 
-  // Round phase dividers
+  // ── Thinking animation ────────────────────────────────────
+
+  function startThinkingAnimation(): void {
+    if (thinkingTimer) return;
+    thinkingDots = 0;
+    thinkingTimer = setInterval(() => {
+      thinkingDots = (thinkingDots + 1) % 4;
+      // Invalidate the thinking segment cache to re-render with new dot count
+      if (thinkingBlockId) segmentCache.delete(thinkingBlockId);
+      scheduleRender();
+    }, 500);
+  }
+
+  function stopThinkingAnimation(): void {
+    if (thinkingTimer) {
+      clearInterval(thinkingTimer);
+      thinkingTimer = null;
+    }
+  }
+
+  // ── Round phase dividers ──────────────────────────────────
+
   let lastPhase = '';
   onRoundStateChange((rs: RoundState) => {
     if (rs.phase === 'resolving' && lastPhase !== 'resolving') {
-      addBlockInternal('', '<hr class="round-divider">', 'divider');
+      addBlockInternal('', 'divider');
     }
     lastPhase = rs.phase;
   });
 
+  // ── Public interface ──────────────────────────────────────
+
   return {
     addBlock(text: string, type: string) {
-      let html: string;
-      if (type === 'thinking') {
-        html = 'The world responds';
-      } else if (type === 'player-action' || type === 'system') {
-        html = text.replace(/\n/g, '<br>')
-          .replace(/"([^"]+)"/g, '<span class="npc-name">"$1"</span>');
-      } else {
-        const segments = parseNarrative(text);
-        html = renderSegments(segments);
-      }
-      addBlockInternal(text, html, type);
+      addBlockInternal(text, type);
     },
 
     addHtml(html: string, type: string) {
-      // Extract plain text from HTML for Pretext measurement
+      // Extract plain text from HTML for measurement and canvas rendering
       const temp = document.createElement('div');
       temp.innerHTML = html;
       const text = temp.textContent || temp.innerText || html;
-      addBlockInternal(text, html, type);
+      addBlockInternal(text, type);
     },
 
     showThinking() {
-      thinkingBlockId = addBlockInternal('The world responds', 'The world responds', 'thinking');
+      thinkingBlockId = addBlockInternal('The world responds', 'thinking');
+      startThinkingAnimation();
     },
 
     removeThinking() {
+      stopThinkingAnimation();
       if (thinkingBlockId) {
+        segmentCache.delete(thinkingBlockId);
+        layoutCache.delete(thinkingBlockId);
         store.removeById(thinkingBlockId);
         thinkingBlockId = null;
-        spacer.style.height = `${store.totalHeight}px`;
+        clampScroll();
         scheduleRender();
       }
     },
+
+    canvas,
   };
 }

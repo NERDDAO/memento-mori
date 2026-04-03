@@ -7,7 +7,7 @@
 import { createInitialState, applyStateUpdate, type GameState } from './state/game-state';
 import { getSession, initSession, sendAction, setMessageHandler, setConnectionHandler, GATEWAY_URL } from './state/session';
 import { updateRoundState, type PhaseMessage } from './state/round-state';
-import { parseNarrative, renderSegments, setKnownEntities } from './renderer/text-renderer';
+import { setKnownEntities } from './renderer/text-renderer';
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
 import { initMapPanel, updateMap } from './panels/map';
@@ -147,9 +147,7 @@ function handleMessage(msg: any): void {
       narrative.removeThinking();
       const channel = msg.channel || 'narrative';
       const blockType = channel === 'events' ? 'event' : channel === 'ooc' ? 'ooc' : 'narrative';
-      const segments = parseNarrative(msg.text || '');
-      const html = renderSegments(segments);
-      narrative.addHtml(html, blockType);
+      narrative.addBlock(msg.text || '', blockType);
 
       if (msg.state_update && gameState) {
         applyStateUpdate(gameState, msg.state_update);
@@ -295,8 +293,7 @@ async function enterWorld(playerName: string, walletAddress: string): Promise<vo
   narrative.addBlock(`Welcome, ${playerName}. You find yourself at ${session.currentLocation}.`, 'system');
 
   if (session.openingNarrative) {
-    const segments = parseNarrative(session.openingNarrative);
-    narrative.addHtml(renderSegments(segments), 'narrative');
+    narrative.addBlock(session.openingNarrative, 'narrative');
   }
 
   updateRoundState({ type: 'phase', phase: 'ready', location: session.currentLocation });
@@ -385,7 +382,7 @@ document.addEventListener('DOMContentLoaded', () => {
   mount('tui-header', header.el);
 
   // 2. Create windows
-  narrativeWin = createWindow({ title: 'Narrative', id: 'narrative-win', className: 'resizable', scrollable: true });
+  narrativeWin = createWindow({ title: 'Narrative', id: 'narrative-win', className: 'resizable' });
   mapWin = createWindow({ title: 'Map', id: 'map-win' });
   characterWin = createWindow({ title: 'Character', id: 'character-win', className: 'sidebar-win resizable', canvas: true });
   inventoryWin = createWindow({ title: 'Inventory', id: 'inventory-win', className: 'sidebar-win resizable', canvas: true });
@@ -434,18 +431,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // 6. Narrative
   narrative = initNarrative(narrativeWin.body);
 
-  // 6b. Entity link clicks (delegated — works with virtual scroll)
-  narrativeWin.body.addEventListener('click', (e: MouseEvent) => {
-    const link = (e.target as HTMLElement).closest('.entity-link') as HTMLElement | null;
-    if (!link) return;
-    const name = link.dataset.entityName;
-    const id = link.dataset.entityId;
-    if (name) {
-      // Show in wiki panel
-      if (id) {
-        wiki.show(id, name);
+  // 6b. Entity clicks from canvas narrative panel
+  narrative.canvas.addEventListener('narrative-entity-click', (e: Event) => {
+    const { entityId, entityName } = (e as CustomEvent).detail;
+    if (entityName) {
+      if (entityId) {
+        wiki.show(entityId, entityName);
       } else {
-        wiki.showByName(name);
+        wiki.showByName(entityName);
       }
     }
   });
@@ -533,7 +526,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('death-restart-btn')!.addEventListener('click', () => {
     document.getElementById('death-overlay')!.classList.add('hidden');
     document.getElementById('char-create-overlay')!.classList.remove('hidden');
-    narrativeWin.body.innerHTML = '';
+    // Reinitialize narrative canvas for new character
+    narrative = initNarrative(narrativeWin.body);
+    narrative.canvas.addEventListener('narrative-entity-click', (e: Event) => {
+      const { entityId, entityName } = (e as CustomEvent).detail;
+      if (entityName) {
+        if (entityId) wiki.show(entityId, entityName);
+        else wiki.showByName(entityName);
+      }
+    });
     (document.getElementById('char-name-input') as HTMLInputElement).focus();
   });
 
