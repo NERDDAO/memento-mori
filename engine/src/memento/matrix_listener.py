@@ -52,11 +52,38 @@ class EngineMatrixListener:
         except Exception as e:
             logger.warning("Could not list rooms: %s", e)
 
+        # Reconcile NPC agents for known locations
+        await asyncio.to_thread(self._reconcile_npcs)
+
         # Auto-join on invite
         self.client.add_event_callback(self._on_invite, InviteMemberEvent)
         self.client.add_event_callback(self._on_action, RoomMessageText)
         logger.info("Listening for player actions...")
         await self.client.sync_forever(timeout=30000)
+
+    @staticmethod
+    def _reconcile_npcs() -> None:
+        """Spawn Bonfires agents for any NPCs that don't have them yet."""
+        try:
+            from memento.agent_controller import get_agent_controller
+            controller = get_agent_controller()
+
+            # Get known locations from the KG
+            from memento.bonfires_client import get_client
+            client = get_client()
+            result = client.kg.search("Location", num_results=20)
+            locations = [
+                e.get("name", "")
+                for e in result.get("entities", result.get("nodes", []))
+                if "Location" in e.get("labels", []) and e.get("name")
+            ]
+
+            for loc in locations:
+                controller.reconcile_location(loc)
+
+            logger.info("NPC reconciliation complete: %d agents active", len(controller.list_alive()))
+        except Exception:
+            logger.warning("NPC reconciliation failed (non-fatal)", exc_info=True)
 
     async def _on_invite(self, room: MatrixRoom, event: InviteMemberEvent) -> None:
         """Auto-join rooms when invited."""

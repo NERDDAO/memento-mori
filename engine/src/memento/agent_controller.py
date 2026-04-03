@@ -220,6 +220,138 @@ class AgentController:
 
         return True
 
+    def reconcile_location(self, location_name: str) -> list[NPCAgent]:
+        """Ensure all NPCs at a location have Bonfires agents.
+
+        Queries the KG for NPCs at this location, checks which already have
+        agents (locally tracked or via API), and spawns missing ones.
+
+        Returns list of newly spawned agents.
+        """
+        spawned: list[NPCAgent] = []
+
+        # Find NPCs at this location from KG
+        try:
+            client = get_client()
+            result = client.kg.search(f"NPC LOCATED_IN {location_name}", num_results=20)
+            entities = result.get("entities", result.get("nodes", []))
+        except Exception:
+            logger.warning("reconcile_location: KG search failed for %s", location_name, exc_info=True)
+            return spawned
+
+        # Filter to NPCs
+        npcs = [e for e in entities if "NPC" in e.get("labels", [])]
+        if not npcs:
+            logger.info("reconcile_location: no NPCs found at %s", location_name)
+            return spawned
+
+        # Check which already have agents
+        existing_agents: set[str] = set()
+        try:
+            all_agents = client.agents.list()
+            for a in all_agents:
+                existing_agents.add(a.get("name", "").lower())
+                existing_agents.add(a.get("username", "").lower())
+        except Exception:
+            logger.warning("reconcile_location: agent list failed", exc_info=True)
+
+        for npc in npcs:
+            npc_name = npc.get("name", "")
+            npc_uuid = npc.get("uuid", "")
+            username = self._name_to_username(npc_name)
+
+            if not npc_name or not npc_uuid:
+                continue
+
+            # Already tracked locally?
+            if npc_name in self._agents:
+                continue
+
+            # Already has a Bonfires agent?
+            if npc_name.lower() in existing_agents or username in existing_agents:
+                # Track it locally but don't re-create
+                agent_id = self._find_agent_id(npc_name)
+                if agent_id:
+                    self._agents[npc_name] = NPCAgent(
+                        npc_name=npc_name,
+                        npc_uuid=npc_uuid,
+                        agent_id=agent_id,
+                        location_name=location_name,
+                    )
+                continue
+
+            # Spawn a new agent from KG data
+            summary = npc.get("summary", "")
+            labels = npc.get("labels", [])
+            agent = self._spawn_from_kg(
+                npc_name=npc_name,
+                npc_uuid=npc_uuid,
+                summary=summary,
+                labels=labels,
+                location_name=location_name,
+            )
+            if agent:
+                spawned.append(agent)
+
+        logger.info(
+            "reconcile_location: %s — %d NPCs found, %d agents spawned",
+            location_name, len(npcs), len(spawned),
+        )
+        return spawned
+
+    def _spawn_from_kg(
+        self,
+        *,
+        npc_name: str,
+        npc_uuid: str,
+        summary: str,
+        labels: list[str],
+        location_name: str,
+    ) -> NPCAgent | None:
+        """Spawn a Bonfires agent from existing KG entity data (no crew output)."""
+        username = self._name_to_username(npc_name)
+
+        context = NPC_SYSTEM_PROMPT_TEMPLATE.format(
+            name=npc_name,
+            summary=summary or "A mysterious figure.",
+            concept=f"Labels: {', '.join(labels)}\n{summary}",
+            mechanics="(Stats unknown — call mm_get_state to check)",
+            location=location_name,
+        )
+
+        try:
+            client = get_client()
+            result = client.agents.create(
+                name=npc_name,
+                username=username,
+                context=context,
+                platform=self.platform,
+                deployment_config=self._build_deployment_config(),
+                enabled_mcp_tools=["memento-engine"],
+                agent_features={
+                    "maxToolIterations": 3,
+                    "maxParallelToolCalls": 1,
+                },
+                agent_env_vars={
+                    "MEMENTO_GATEWAY_URL": self.gateway_url,
+                    "ENGINE_API_TOKEN": self.engine_api_token,
+                },
+            )
+            agent_id = result.get("_id", result.get("id", ""))
+            logger.info("Reconciled NPC agent: %s (%s) → agent %s", npc_name, npc_uuid, agent_id)
+        except Exception:
+            logger.error("Failed to spawn agent for NPC %s", npc_name, exc_info=True)
+            return None
+
+        npc_agent = NPCAgent(
+            npc_name=npc_name,
+            npc_uuid=npc_uuid,
+            agent_id=agent_id,
+            location_name=location_name,
+        )
+        self._agents[npc_name] = npc_agent
+        return npc_agent
+
     def get_agent(self, npc_name: str) -> NPCAgent | None:
         """Look up a tracked NPC agent by name."""
         return self._agents.get(npc_name)
