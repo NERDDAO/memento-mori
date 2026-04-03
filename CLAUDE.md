@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **memento-mori** (2142 symbols, 5301 relationships, 172 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **chatroom-improvements** (2215 symbols, 5650 relationships, 179 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -17,7 +17,7 @@ This project is indexed by GitNexus as **memento-mori** (2142 symbols, 5301 rela
 
 1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
 2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/memento-mori/process/{processName}` — trace the full execution flow step by step
+3. `READ gitnexus://repo/chatroom-improvements/process/{processName}` — trace the full execution flow step by step
 4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
 
 ## When Refactoring
@@ -56,10 +56,10 @@ This project is indexed by GitNexus as **memento-mori** (2142 symbols, 5301 rela
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/memento-mori/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/memento-mori/clusters` | All functional areas |
-| `gitnexus://repo/memento-mori/processes` | All execution flows |
-| `gitnexus://repo/memento-mori/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/chatroom-improvements/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/chatroom-improvements/clusters` | All functional areas |
+| `gitnexus://repo/chatroom-improvements/processes` | All execution flows |
+| `gitnexus://repo/chatroom-improvements/process/{name}` | Step-by-step execution trace |
 
 ## Self-Check Before Finishing
 

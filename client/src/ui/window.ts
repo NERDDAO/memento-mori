@@ -1,13 +1,17 @@
+import { TerminalPanel } from './terminal-panel';
+
 export interface WindowOptions {
   title: string;
   id?: string;
   className?: string;
   scrollable?: boolean;
+  canvas?: boolean;
 }
 
 export interface Window {
   el: HTMLElement;
   body: HTMLElement;
+  panel?: TerminalPanel;
   setTitle(title: string): void;
   show(): void;
   hide(): void;
@@ -31,9 +35,16 @@ export function createWindow(opts: WindowOptions): Window {
   el.appendChild(titleBar);
   el.appendChild(body);
 
+  // Create canvas-backed panel when requested
+  let panel: TerminalPanel | undefined;
+  if (opts.canvas) {
+    panel = new TerminalPanel({ container: body });
+  }
+
   return {
     el,
     body,
+    panel,
     setTitle(title: string) {
       titleBar.textContent = `\u2500 ${title} \u2500`;
     },
