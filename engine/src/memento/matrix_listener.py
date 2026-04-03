@@ -139,44 +139,14 @@ class EngineMatrixListener:
                             "type": "narrative",
                             "location": location_name,
                             "state_update": state_update,
-                            "channel": "narrative",
                         },
                     },
                 )
 
         elif msg_type == "player-action":
-            # Legacy single action (backwards compatibility)
-            player_id = rpg_meta.get("player_id", "unknown")
-            action_text = event.body
-            logger.info("Action from %s: %s", player_id, action_text)
-
-            # TODO(step-3.6): Detect examine/look actions targeting a specific entity
-            # and trigger make_entity_art_crew() for that entity. The ASCII art crew
-            # infrastructure is in place (crews/ascii_art/crew.py); the missing piece
-            # is parsing the action text to extract the target entity name/id and
-            # matching it against KG entities at this location.
-
-            location_name = room.display_name or "Unknown"
-            narrative, state_update = await asyncio.to_thread(
-                self._run_turn, player_id, location_name, action_text,
-                self.client, room.room_id, asyncio.get_event_loop()
-            )
-
-            if self.client and narrative:
-                await self.client.room_send(
-                    room.room_id,
-                    "m.room.message",
-                    {
-                        "msgtype": "m.text",
-                        "body": narrative,
-                        "com.bonfires.rpg": {
-                            "type": "narrative",
-                            "player_id": player_id,
-                            "state_update": state_update,
-                            "channel": "narrative",
-                        },
-                    },
-                )
+            # Individual player messages are for NPC agents to see — not for engine processing.
+            # The engine only processes batches (player-action-batch).
+            logger.debug("Ignoring individual player-action (engine uses batches): %s", event.body[:80])
 
     @staticmethod
     def _run_turn(player_id: str, location_name: str, action: str,

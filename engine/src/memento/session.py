@@ -130,7 +130,7 @@ class SessionManager:
         user_uuid = client.kg.create_entity(
             f"User:{wallet_address[:10]}",
             ["User"],
-            {"wallet": wallet_address, "summary": f"Player account {wallet_address[:10]}..."},
+            {"wallet": wallet_address, "userId": wallet_address, "summary": f"Player account {wallet_address[:10]}..."},
         )
         logger.info("Created User entity %s for wallet %s", user_uuid, wallet_address[:10])
         return user_uuid

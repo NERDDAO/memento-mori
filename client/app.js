@@ -19,7 +19,8 @@ function createInitialState(playerName) {
       description: "",
       exits: [],
       npcs: [],
-      items: []
+      items: [],
+      players: []
     },
     inventory: [],
     quests: [],
@@ -174,6 +175,91 @@ async function sendAction(action) {
       location: session.currentLocation
     })
   });
+}
+
+// src/state/round-state.ts
+var listeners = [];
+var countdownTimer = null;
+var safetyTimer = null;
+var SAFETY_TIMEOUT_MS = 120000;
+var state = {
+  phase: "ready"
+};
+function getRoundState() {
+  return state;
+}
+function onRoundStateChange(listener) {
+  listeners.push(listener);
+  return () => {
+    const idx = listeners.indexOf(listener);
+    if (idx >= 0)
+      listeners.splice(idx, 1);
+  };
+}
+function notify() {
+  for (const fn of listeners)
+    fn(state);
+}
+function stopCountdown() {
+  if (countdownTimer) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
+  state.secondsLeft = undefined;
+  state.deadline = undefined;
+}
+function startCountdown(deadline) {
+  stopCountdown();
+  state.deadline = deadline;
+  state.secondsLeft = Math.ceil((deadline - Date.now()) / 1000);
+  countdownTimer = setInterval(() => {
+    if (!state.deadline) {
+      stopCountdown();
+      return;
+    }
+    const left = Math.ceil((state.deadline - Date.now()) / 1000);
+    state.secondsLeft = Math.max(0, left);
+    notify();
+  }, 1000);
+}
+function clearSafetyTimer() {
+  if (safetyTimer) {
+    clearTimeout(safetyTimer);
+    safetyTimer = null;
+  }
+}
+function startSafetyTimer() {
+  clearSafetyTimer();
+  safetyTimer = setTimeout(() => {
+    safetyTimer = null;
+    if (state.phase === "resolving" || state.phase === "npc_response") {
+      console.warn(`[round-state] safety timeout — forcing ready (was ${state.phase})`);
+      state.phase = "ready";
+      state.crew = undefined;
+      stopCountdown();
+      notify();
+    }
+  }, SAFETY_TIMEOUT_MS);
+}
+function updateRoundState(msg) {
+  state.phase = msg.phase;
+  state.crew = msg.crew;
+  if (msg.location)
+    state.location = msg.location;
+  if (msg.action_count != null)
+    state.actionCount = msg.action_count;
+  if (msg.phase === "collecting" && msg.deadline) {
+    startCountdown(msg.deadline);
+  } else if (msg.phase !== "collecting") {
+    stopCountdown();
+    state.actionCount = undefined;
+  }
+  if (msg.phase === "resolving" || msg.phase === "npc_response") {
+    startSafetyTimer();
+  } else {
+    clearSafetyTimer();
+  }
+  notify();
 }
 
 // src/renderer/text-renderer.ts
@@ -3133,6 +3219,13 @@ function initNarrative(container) {
     scheduleRender();
     return block.id;
   }
+  let lastPhase = "";
+  onRoundStateChange((rs) => {
+    if (rs.phase === "resolving" && lastPhase !== "resolving") {
+      addBlockInternal("", '<hr class="round-divider">', "divider");
+    }
+    lastPhase = rs.phase;
+  });
   return {
     addBlock(text, type) {
       let html;
@@ -3166,12 +3259,164 @@ function initNarrative(container) {
   };
 }
 
+// src/ui/mention-dropdown.ts
+function createMentionDropdown() {
+  const el = document.createElement("div");
+  el.className = "mention-dropdown";
+  el.style.display = "none";
+  document.body.appendChild(el);
+  let items = [];
+  let filtered = [];
+  let selectedIndex = 0;
+  let selectCallback = null;
+  function render() {
+    el.innerHTML = filtered.map((s, i) => {
+      const icon = s.type === "npc" ? "◆" : "@";
+      const cls = i === selectedIndex ? "mention-item selected" : "mention-item";
+      const typeCls = s.type === "npc" ? "mention-npc" : "mention-player";
+      return `<div class="${cls} ${typeCls}" data-index="${i}"><span class="mention-icon">${icon}</span>${s.name}</div>`;
+    }).join("");
+    el.querySelectorAll(".mention-item").forEach((row) => {
+      row.addEventListener("click", () => {
+        const idx = parseInt(row.dataset.index || "0", 10);
+        if (filtered[idx] && selectCallback)
+          selectCallback(filtered[idx].name);
+        dropdown.hide();
+      });
+    });
+  }
+  const dropdown = {
+    el,
+    onSelect: null,
+    show(suggestions, anchor) {
+      items = suggestions;
+      filtered = [...items];
+      selectedIndex = 0;
+      selectCallback = this.onSelect;
+      const rect = anchor.getBoundingClientRect();
+      el.style.position = "fixed";
+      el.style.bottom = `${window.innerHeight - rect.top + 4}px`;
+      el.style.left = `${rect.left}px`;
+      el.style.display = "";
+      render();
+    },
+    hide() {
+      el.style.display = "none";
+      items = [];
+      filtered = [];
+    },
+    isVisible() {
+      return el.style.display !== "none";
+    },
+    filter(query) {
+      const q = query.toLowerCase();
+      filtered = q ? items.filter((s) => s.name.toLowerCase().startsWith(q)) : [...items];
+      selectedIndex = 0;
+      render();
+      el.style.display = filtered.length > 0 ? "" : "none";
+    },
+    handleKey(e) {
+      if (!this.isVisible())
+        return false;
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selectedIndex = Math.max(0, selectedIndex - 1);
+        render();
+        return true;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selectedIndex = Math.min(filtered.length - 1, selectedIndex + 1);
+        render();
+        return true;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        if (filtered[selectedIndex] && selectCallback) {
+          e.preventDefault();
+          selectCallback(filtered[selectedIndex].name);
+          this.hide();
+          return true;
+        }
+      }
+      if (e.key === "Escape") {
+        this.hide();
+        return true;
+      }
+      return false;
+    }
+  };
+  return dropdown;
+}
+
 // src/panels/input.ts
-function initInput(inputEl, onSubmit) {
+function initInput(inputEl, onSubmit, getContext) {
   const history = [];
   let historyIndex = -1;
+  let locked = false;
+  const defaultPlaceholder = inputEl.placeholder || "What do you do?";
+  function setLocked(isLocked) {
+    locked = isLocked;
+    inputEl.disabled = isLocked;
+    inputEl.classList.toggle("input-locked", isLocked);
+  }
+  onRoundStateChange((rs) => {
+    switch (rs.phase) {
+      case "ready":
+        setLocked(false);
+        inputEl.placeholder = defaultPlaceholder;
+        break;
+      case "collecting": {
+        setLocked(false);
+        const timer = rs.secondsLeft != null ? `${rs.secondsLeft}s left to act...` : "Round open...";
+        inputEl.placeholder = timer;
+        break;
+      }
+      case "resolving":
+        setLocked(true);
+        inputEl.placeholder = "Resolving...";
+        break;
+      case "npc_response":
+        setLocked(true);
+        inputEl.placeholder = "NPCs responding...";
+        break;
+    }
+  });
+  const dropdown = createMentionDropdown();
+  let mentionActive = false;
+  let mentionStart = -1;
+  function getMentionSuggestions() {
+    if (!getContext)
+      return [];
+    const ctx = getContext();
+    const suggestions = [];
+    for (const npc of ctx.npcs) {
+      const name = typeof npc === "string" ? npc : npc.name;
+      suggestions.push({ name, type: "npc" });
+    }
+    for (const p of ctx.players) {
+      const name = typeof p === "string" ? p : p.name;
+      suggestions.push({ name, type: "player" });
+    }
+    return suggestions;
+  }
+  dropdown.onSelect = (name) => {
+    const before = inputEl.value.slice(0, mentionStart);
+    const after = inputEl.value.slice(inputEl.selectionStart || inputEl.value.length);
+    inputEl.value = `${before}@${name} ${after}`;
+    inputEl.focus();
+    mentionActive = false;
+    mentionStart = -1;
+  };
   inputEl.addEventListener("keydown", (e) => {
+    if (locked)
+      return;
+    if (mentionActive && dropdown.handleKey(e))
+      return;
     if (e.key === "Enter") {
+      if (mentionActive) {
+        dropdown.hide();
+        mentionActive = false;
+      }
       const action = inputEl.value.trim();
       if (action) {
         history.unshift(action);
@@ -3179,13 +3424,13 @@ function initInput(inputEl, onSubmit) {
         onSubmit(action);
         inputEl.value = "";
       }
-    } else if (e.key === "ArrowUp") {
+    } else if (e.key === "ArrowUp" && !mentionActive) {
       e.preventDefault();
       if (historyIndex < history.length - 1) {
         historyIndex++;
         inputEl.value = history[historyIndex];
       }
-    } else if (e.key === "ArrowDown") {
+    } else if (e.key === "ArrowDown" && !mentionActive) {
       e.preventDefault();
       if (historyIndex > 0) {
         historyIndex--;
@@ -3193,6 +3438,33 @@ function initInput(inputEl, onSubmit) {
       } else {
         historyIndex = -1;
         inputEl.value = "";
+      }
+    } else if (e.key === "Escape" && mentionActive) {
+      dropdown.hide();
+      mentionActive = false;
+    }
+  });
+  inputEl.addEventListener("input", () => {
+    const val = inputEl.value;
+    const cursor = inputEl.selectionStart || val.length;
+    if (!mentionActive) {
+      if (cursor > 0 && val[cursor - 1] === "@") {
+        const charBefore = cursor > 1 ? val[cursor - 2] : " ";
+        if (charBefore === " " || charBefore === undefined || cursor === 1) {
+          mentionActive = true;
+          mentionStart = cursor - 1;
+          const suggestions = getMentionSuggestions();
+          dropdown.show(suggestions, inputEl);
+          dropdown.filter("");
+        }
+      }
+    } else {
+      const query = val.slice(mentionStart + 1, cursor);
+      if (query.includes(" ") || cursor <= mentionStart) {
+        dropdown.hide();
+        mentionActive = false;
+      } else {
+        dropdown.filter(query);
       }
     }
   });
@@ -3622,10 +3894,10 @@ async function fetchEntityData(id, name) {
 function initMapPanel(mapContainer, _onAction) {
   renderer = new MapRenderer(mapContainer);
 }
-function updateMap(state, onAction) {
-  if (!state.roomMap || !renderer)
+function updateMap(state2, onAction) {
+  if (!state2.roomMap || !renderer)
     return;
-  const map = state.roomMap;
+  const map = state2.roomMap;
   mapRef.current = map;
   if (!controller) {
     controller = new PlayerController(map, (type, entity) => {
@@ -3664,7 +3936,7 @@ function updateMap(state, onAction) {
           }
         });
       } else {
-        showPlayerCard(state);
+        showPlayerCard(state2);
       }
     });
     cleanupInput?.();
@@ -3672,22 +3944,22 @@ function updateMap(state, onAction) {
   } else {
     controller.loadMap(map);
   }
-  showPlayerCard(state);
+  showPlayerCard(state2);
   renderer.render(map, controller.x, controller.y);
 }
-function showPlayerCard(state) {
+function showPlayerCard(state2) {
   if (!renderer)
     return;
   const card = {
     type: "player",
-    name: state.player.name,
+    name: state2.player.name,
     labels: ["Player"],
-    summary: state.location.name,
-    health: state.player.health,
-    maxHealth: state.player.maxHealth,
-    level: state.player.level,
-    xp: state.player.xp,
-    xpThreshold: state.player.xpThreshold
+    summary: state2.location.name,
+    health: state2.player.health,
+    maxHealth: state2.player.maxHealth,
+    level: state2.player.level,
+    xp: state2.player.xp,
+    xpThreshold: state2.player.xpThreshold
   };
   renderer.setCard(card);
 }
@@ -3928,8 +4200,8 @@ function renderSkills(skills) {
   });
   return `<div class="skills-section">${lines.join("")}</div>`;
 }
-function renderCharacterPanel(body, state) {
-  const p = state.player;
+function renderCharacterPanel(body, state2) {
+  const p = state2.player;
   const hpPct = p.maxHealth > 0 ? Math.round(p.health / p.maxHealth * 100) : 0;
   const xpPct = p.xpThreshold > 0 ? Math.round(p.xp / p.xpThreshold * 100) : 0;
   const hpFill = Math.round(hpPct / 10);
@@ -3953,12 +4225,12 @@ var RARITY_COLORS = {
   epic: "#a335ee",
   legendary: "#ff8000"
 };
-function renderInventoryPanel(body, state) {
-  if (state.inventory.length === 0) {
+function renderInventoryPanel(body, state2) {
+  if (state2.inventory.length === 0) {
     body.innerHTML = '<div class="empty-msg">Empty</div>';
     return;
   }
-  body.innerHTML = state.inventory.map((item) => {
+  body.innerHTML = state2.inventory.map((item) => {
     const color = RARITY_COLORS[item.rarity] || RARITY_COLORS.common;
     const equip = item.equipped ? '<span class="item-equip">E</span>' : "";
     return `<div class="item-row"><span class="item-bullet">·</span> <span style="color:${color}">${item.name}</span>${equip}</div>`;
@@ -3966,12 +4238,12 @@ function renderInventoryPanel(body, state) {
 }
 
 // src/panels/exits.ts
-function renderExitsPanel(body, state, onAction) {
-  if (state.location.exits.length === 0) {
+function renderExitsPanel(body, state2, onAction) {
+  if (state2.location.exits.length === 0) {
     body.innerHTML = '<div class="empty-msg">None</div>';
     return;
   }
-  body.innerHTML = state.location.exits.map((e) => {
+  body.innerHTML = state2.location.exits.map((e) => {
     const dir = typeof e === "string" ? e : e.direction;
     const dest = typeof e === "string" ? "" : e.name;
     const label = dir.charAt(0).toUpperCase() + dir.slice(1);
@@ -3983,18 +4255,35 @@ function renderExitsPanel(body, state, onAction) {
 }
 
 // src/panels/present.ts
-function renderPresentPanel(body, state, onAction) {
-  const npcs = state.location.npcs || [];
-  const items = state.location.items || [];
-  if (npcs.length === 0 && items.length === 0) {
+var currentBody = null;
+onRoundStateChange((rs) => {
+  if (!currentBody)
+    return;
+  const rows = currentBody.querySelectorAll(".npc-row");
+  rows.forEach((row) => {
+    row.classList.toggle("npc-thinking", rs.phase === "npc_response");
+  });
+});
+function renderPresentPanel(body, state2, onAction) {
+  currentBody = body;
+  const npcs = state2.location.npcs || [];
+  const items = state2.location.items || [];
+  const players = state2.location.players || [];
+  if (npcs.length === 0 && items.length === 0 && players.length === 0) {
     body.innerHTML = '<div class="empty-msg">Nothing here</div>';
     return;
   }
+  const rs = getRoundState();
+  const thinkingClass = rs.phase === "npc_response" ? " npc-thinking" : "";
   let html = "";
   for (const npc of npcs) {
     const name = typeof npc === "string" ? npc : npc.name;
     const role = typeof npc === "string" ? "" : npc.role || "";
-    html += `<div class="npc-row" data-action="talk to ${name}" style="cursor:pointer"><span class="npc-diamond">◆</span><span class="npc">${name}</span>${role ? `<span class="npc-role">— ${role}</span>` : ""}</div>`;
+    html += `<div class="npc-row${thinkingClass}" data-action="talk to ${name}" style="cursor:pointer"><span class="npc-diamond">◆</span><span class="npc">${name}</span>${role ? `<span class="npc-role">— ${role}</span>` : ""}</div>`;
+  }
+  for (const p of players) {
+    const name = typeof p === "string" ? p : p.name;
+    html += `<div class="player-row"><span class="player-at">@</span><span class="player-name">${name}</span></div>`;
   }
   for (const item of items) {
     const name = typeof item === "string" ? item : item.name;
@@ -4676,7 +4965,6 @@ function chunk(arr, size) {
 }
 
 // src/ui/status.ts
-var CLEAR_DELAY = 4000;
 function createStatusBar() {
   const el = document.createElement("div");
   el.className = "status-bar";
@@ -4688,46 +4976,40 @@ function createStatusBar() {
   const phaseEl = el.querySelector(".status-phase");
   const chainEl = el.querySelector(".status-chain");
   const tickEl = el.querySelector(".status-tick");
-  let clearTimer = null;
-  function scheduleClear() {
-    if (clearTimer)
-      clearTimeout(clearTimer);
-    clearTimer = setTimeout(() => {
-      phaseEl.textContent = "✓ Synced";
-      phaseEl.className = "status-phase synced";
-    }, CLEAR_DELAY);
+  function renderPhase(rs) {
+    switch (rs.phase) {
+      case "ready":
+        phaseEl.textContent = rs.location ? `✓ Ready · ${rs.location}` : "✓ Ready";
+        phaseEl.className = "status-phase ready";
+        break;
+      case "collecting": {
+        const count = rs.actionCount ?? 0;
+        const timer = rs.secondsLeft != null ? ` (${rs.secondsLeft}s)` : "";
+        phaseEl.textContent = `⟳ Collecting · ${count} action${count !== 1 ? "s" : ""}${timer}`;
+        phaseEl.className = "status-phase collecting";
+        break;
+      }
+      case "resolving": {
+        const crewLabel = rs.crew ? rs.crew.charAt(0).toUpperCase() + rs.crew.slice(1).replace("_", "-") : "";
+        phaseEl.textContent = crewLabel ? `⟳ Resolving · ${crewLabel}` : "⟳ Resolving";
+        phaseEl.className = "status-phase resolving";
+        break;
+      }
+      case "npc_response":
+        phaseEl.textContent = "⟳ NPCs Responding";
+        phaseEl.className = "status-phase npc-response";
+        break;
+    }
   }
+  onRoundStateChange(renderPhase);
   return {
     el,
-    setPhase(phase) {
-      const icons = {
-        processing: "⟳ Processing turn...",
-        extracting: "⟳ Extracting episode...",
-        fetching: "⟳ Fetching episode...",
-        pushing: "⟳ Pushing onchain...",
-        synced: "✓ Synced",
-        thinking: "⟳ The world responds...",
-        error: "✗ Sync error"
-      };
-      phaseEl.textContent = icons[phase] || phase;
-      phaseEl.className = `status-phase ${phase}`;
-      if (phase === "synced") {} else {
-        scheduleClear();
-      }
-    },
     setChain(connected) {
       chainEl.textContent = connected ? "◆ Redstone: synced" : "◇ Redstone: offline";
       chainEl.className = `status-chain ${connected ? "connected" : ""}`;
     },
     setTick(tick) {
       tickEl.textContent = `☽ Tick ${tick}`;
-    },
-    clear() {
-      phaseEl.textContent = "✓ Ready";
-      phaseEl.className = "status-phase";
-      chainEl.textContent = "◇ Redstone: offline";
-      chainEl.className = "status-chain";
-      tickEl.textContent = "☽ Tick 0";
     }
   };
 }
@@ -4874,7 +5156,6 @@ function handleMessage(msg) {
   switch (msg.type) {
     case "narrative": {
       narrative.removeThinking();
-      statusBar.setPhase("synced");
       const segments = parseNarrative(msg.text || "");
       const html = renderSegments(segments);
       narrative.addHtml(html, "narrative");
@@ -4916,24 +5197,50 @@ function handleMessage(msg) {
       }
       break;
     }
-    case "thinking":
-      narrative.showThinking();
-      statusBar.setPhase("thinking");
-      break;
     case "death_feed": {
       const skull = "☠";
       const deathMsg = `${skull} ${msg.player_name || "Unknown"} (Level ${msg.level || "?"}) fell at ${msg.location || "unknown"}. ${msg.cause || ""}`;
       narrative.addBlock(deathMsg, "death-feed");
       break;
     }
+    case "phase":
+      updateRoundState(msg);
+      break;
     case "status":
-      if (msg.phase)
-        statusBar.setPhase(msg.phase);
       if (msg.tick != null)
         statusBar.setTick(msg.tick);
       if (msg.chain != null)
         statusBar.setChain(msg.chain);
       break;
+    case "player_joined": {
+      if (gameState) {
+        const exists = gameState.location.players.some((p) => p.id === msg.player_id);
+        if (!exists) {
+          gameState.location.players.push({ name: msg.player_name, id: msg.player_id });
+          renderPresentPanel(presentWin.body, gameState, handleAction);
+          narrative.addBlock(`${msg.player_name} arrived.`, "system");
+        }
+      }
+      break;
+    }
+    case "player_left": {
+      if (gameState) {
+        gameState.location.players = gameState.location.players.filter((p) => p.id !== msg.player_id);
+        renderPresentPanel(presentWin.body, gameState, handleAction);
+        narrative.addBlock(`${msg.player_name} departed.`, "system");
+      }
+      break;
+    }
+    case "presence": {
+      if (gameState) {
+        gameState.location.players = (msg.players || []).map((p) => ({
+          name: p.player_name,
+          id: p.player_id
+        }));
+        renderPresentPanel(presentWin.body, gameState, handleAction);
+      }
+      break;
+    }
     default:
       console.log("Unknown message:", msg);
   }
@@ -4990,6 +5297,68 @@ async function enterWorld(playerName, walletAddress) {
     const segments = parseNarrative(session2.openingNarrative);
     narrative.addHtml(renderSegments(segments), "narrative");
   }
+  updateRoundState({ type: "phase", phase: "ready", location: session2.currentLocation });
+  document.getElementById("action-input").focus();
+}
+function showCharacterPicker(characters, walletAddress) {
+  const walletStepEl = document.getElementById("wallet-step");
+  const pickerDiv = document.createElement("div");
+  pickerDiv.id = "char-picker";
+  pickerDiv.innerHTML = `
+    <div class="picker-title">Your Characters</div>
+    ${characters.map((c) => `
+      <div class="picker-card" data-player-id="${c.player_id}">
+        <span class="picker-name">${c.player_name}</span>
+        <span class="picker-info">${c.archetype || "Unknown"} · HP ${c.health}</span>
+      </div>
+    `).join("")}
+    <div class="picker-card picker-new">
+      <span class="picker-name">+ New Character</span>
+    </div>
+  `;
+  walletStepEl.after(pickerDiv);
+  pickerDiv.addEventListener("click", (e) => {
+    const card = e.target.closest(".picker-card");
+    if (!card)
+      return;
+    if (card.classList.contains("picker-new")) {
+      pickerDiv.remove();
+      const archStep = document.getElementById("archetype-step");
+      if (archStep) {
+        archStep.classList.remove("hidden");
+        loadArchetypes();
+      } else {
+        document.getElementById("name-step").classList.remove("hidden");
+      }
+    } else {
+      const playerId = card.dataset.playerId;
+      const playerName = card.querySelector(".picker-name").textContent || "Wanderer";
+      pickerDiv.remove();
+      enterWorldExisting(playerId, playerName, walletAddress);
+    }
+  });
+}
+async function enterWorldExisting(playerId, playerName, walletAddress) {
+  const overlay = document.getElementById("char-create-overlay");
+  overlay.classList.add("hidden");
+  await fetch(`${GATEWAY_URL}/api/session/join`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ player_id: playerId })
+  });
+  const session2 = getSession();
+  session2.playerId = playerId;
+  session2.playerName = playerName;
+  session2.walletAddress = walletAddress;
+  session2.currentLocation = "The Threshold";
+  gameState = createInitialState(playerName);
+  if (!gameState.roomMap) {
+    applyStateUpdate(gameState, { room_map: getThresholdMap() });
+  }
+  registerMapEntities(gameState.roomMap);
+  renderAllPanels();
+  narrative.addBlock(`Welcome back, ${playerName}.`, "system");
+  updateRoundState({ type: "phase", phase: "ready", location: session2.currentLocation });
   document.getElementById("action-input").focus();
 }
 function mount(mountId, el) {
@@ -5048,7 +5417,10 @@ document.addEventListener("DOMContentLoaded", () => {
     <input type="text" id="action-input" placeholder="What do you do?" autocomplete="off" spellcheck="false" />
   `;
   const actionInput = commandWin.body.querySelector("#action-input");
-  initInput(actionInput, handleAction);
+  initInput(actionInput, handleAction, () => ({
+    npcs: gameState?.location?.npcs || [],
+    players: gameState?.location?.players || []
+  }));
   const mapCanvasWrap = document.createElement("div");
   mapCanvasWrap.className = "map-canvas-wrap";
   const worldMapWrap = document.createElement("div");
@@ -5133,6 +5505,18 @@ document.addEventListener("DOMContentLoaded", () => {
       const addr = await connectWallet();
       walletStep.classList.add("hidden");
       walletAddressEl.textContent = `✓ ${formatAddress(addr)}`;
+      try {
+        const charResp = await fetch(`${GATEWAY_URL}/api/session/characters`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: addr })
+        });
+        const charData = await charResp.json();
+        if (charData.characters && charData.characters.length > 0) {
+          showCharacterPicker(charData.characters, addr);
+          return;
+        }
+      } catch {}
       if (archetypeStep) {
         archetypeStep.classList.remove("hidden");
         loadArchetypes();
