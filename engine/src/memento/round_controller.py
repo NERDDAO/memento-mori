@@ -458,7 +458,8 @@ class RoundController:
                     },
                 }
                 coro = self.matrix_client.room_send(self.room_id, "m.room.message", content)
-                asyncio.run_coroutine_threadsafe(coro, self.loop)
+                future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+                future.add_done_callback(lambda f: f.exception() and logger.debug("Art post failed", exc_info=f.exception()))
         except Exception:
             logger.warning("Art generation failed for %s", self.location, exc_info=True)
 

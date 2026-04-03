@@ -3,32 +3,7 @@ import type { GameState } from '../state/game-state';
 import type { TerminalPanel } from '../ui/terminal-panel';
 import type { CharCell } from '../renderer/canvas-text';
 import { theme } from '../renderer/theme';
-
-function textRow(text: string, fg: string, cols: number, attrs?: number): CharCell[] {
-  const row: CharCell[] = [];
-  for (let i = 0; i < cols; i++) {
-    row.push({ char: i < text.length ? text[i] : ' ', fg, attrs });
-  }
-  return row;
-}
-
-function coloredRow(segments: Array<{ text: string; fg: string; attrs?: number }>, cols: number): CharCell[] {
-  const row: CharCell[] = [];
-  for (const seg of segments) {
-    for (const ch of seg.text) {
-      row.push({ char: ch, fg: seg.fg, attrs: seg.attrs });
-    }
-  }
-  // Pad to cols
-  while (row.length < cols) {
-    row.push({ char: ' ', fg: theme.colors.primary });
-  }
-  return row;
-}
-
-function emptyRow(cols: number): CharCell[] {
-  return Array(cols).fill({ char: ' ', fg: theme.colors.primary });
-}
+import { textRow, coloredRow, emptyRow } from './panel-utils';
 
 function barRow(
   label: string,

@@ -2,6 +2,7 @@
 import type { TerminalPanel } from '../ui/terminal-panel';
 import type { CharCell } from '../renderer/canvas-text';
 import { theme } from '../renderer/theme';
+import { textRow, coloredRow, emptyRow } from './panel-utils';
 
 export interface QuestEntry {
   name: string;
@@ -12,30 +13,6 @@ export interface QuestEntry {
   completed: boolean;
 }
 
-function coloredRow(segments: Array<{ text: string; fg: string; attrs?: number }>, cols: number): CharCell[] {
-  const row: CharCell[] = [];
-  for (const seg of segments) {
-    for (const ch of seg.text) {
-      row.push({ char: ch, fg: seg.fg, attrs: seg.attrs });
-    }
-  }
-  while (row.length < cols) {
-    row.push({ char: ' ', fg: theme.colors.primary });
-  }
-  return row;
-}
-
-function textRow(text: string, fg: string, cols: number): CharCell[] {
-  const row: CharCell[] = [];
-  for (let i = 0; i < cols; i++) {
-    row.push({ char: i < text.length ? text[i] : ' ', fg });
-  }
-  return row;
-}
-
-function emptyRow(cols: number): CharCell[] {
-  return Array(cols).fill({ char: ' ', fg: theme.colors.primary });
-}
 
 export function renderQuestLogPanel(panel: TerminalPanel, quests: QuestEntry[]): void {
   const cols = panel.cols;

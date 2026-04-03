@@ -3,27 +3,8 @@ import type { GameState } from '../state/game-state';
 import type { TerminalPanel } from '../ui/terminal-panel';
 import type { CharCell } from '../renderer/canvas-text';
 import { theme } from '../renderer/theme';
+import { textRow, coloredRow } from './panel-utils';
 
-function coloredRow(segments: Array<{ text: string; fg: string; attrs?: number }>, cols: number): CharCell[] {
-  const row: CharCell[] = [];
-  for (const seg of segments) {
-    for (const ch of seg.text) {
-      row.push({ char: ch, fg: seg.fg, attrs: seg.attrs });
-    }
-  }
-  while (row.length < cols) {
-    row.push({ char: ' ', fg: theme.colors.primary });
-  }
-  return row;
-}
-
-function textRow(text: string, fg: string, cols: number): CharCell[] {
-  const row: CharCell[] = [];
-  for (let i = 0; i < cols; i++) {
-    row.push({ char: i < text.length ? text[i] : ' ', fg });
-  }
-  return row;
-}
 
 export function renderExitsPanel(
   panel: TerminalPanel, state: GameState, onAction: (action: string) => void,

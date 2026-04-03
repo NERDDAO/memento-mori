@@ -8,7 +8,7 @@
 import { parseNarrative, type StyledSegment } from '../renderer/text-renderer';
 import { NarrativeStore } from '../renderer/line-cache';
 import { onRoundStateChange, type RoundState } from '../state/round-state';
-import { measureChar, MONO_FONT, ATTR_BOLD, ATTR_ITALIC, ATTR_UNDERLINE, type CharSize } from '../renderer/canvas-text';
+import { measureChar, fontForAttrs, MONO_FONT, ATTR_BOLD, ATTR_ITALIC, ATTR_UNDERLINE, type CharSize } from '../renderer/canvas-text';
 import { theme } from '../renderer/theme';
 
 // ── Types ────────────────────────────────────────────────────────
@@ -56,6 +56,7 @@ const BLOCK_TYPE_COLORS: Record<string, string> = {
   'ooc':            theme.colors.accent,
   'divider':        theme.colors.dim,
   'death-feed':     theme.colors.damage,
+  'scene-art':      theme.colors.dim,
 };
 
 const ENTITY_TYPE_COLORS: Record<string, string> = {
@@ -360,17 +361,7 @@ export function initNarrative(container: HTMLElement): NarrativeController {
     cs: CharSize,
     attrs?: number,
   ): void {
-    // Build font string
-    let font = MONO_FONT;
-    if (attrs) {
-      const parts: string[] = [];
-      if (attrs & ATTR_ITALIC) parts.push('italic');
-      if (attrs & ATTR_BOLD) parts.push('bold');
-      parts.push('13px monospace');
-      font = parts.join(' ');
-    }
-
-    ctx.font = font;
+    ctx.font = fontForAttrs(MONO_FONT, attrs);
     ctx.fillStyle = fg;
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';

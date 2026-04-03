@@ -44,7 +44,7 @@ export const DIM_FONT  = '11px monospace';
 // ── Helpers ──────────────────────────────────────────────────────
 
 /** Build a CSS font string from the base font and an attrs bitmask. */
-function fontForAttrs(baseFont: string, attrs?: number): string {
+export function fontForAttrs(baseFont: string, attrs?: number): string {
   if (!attrs) return baseFont;
   // Extract size+family from baseFont (e.g. "13px monospace")
   const sizeMatch = baseFont.match(/(\d+px\s+.+)$/);
