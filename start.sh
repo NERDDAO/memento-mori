@@ -7,12 +7,17 @@ cd "$(dirname "$0")"
 
 echo "=== Memento Mori ==="
 
-# Load env
-if [ -f .env ]; then
-    export $(grep -v '^#' .env | grep -v '^\s*$' | xargs)
-    echo "Loaded .env"
+# Load env (--dev uses .env.dev for local Bonfires stack)
+ENV_FILE=".env"
+if [ "$1" = "--dev" ]; then
+    ENV_FILE=".env.dev"
+    shift
+fi
+if [ -f "$ENV_FILE" ]; then
+    export $(grep -v '^#' "$ENV_FILE" | grep -v '^\s*$' | xargs)
+    echo "Loaded $ENV_FILE"
 else
-    echo "Warning: no .env file found"
+    echo "Warning: $ENV_FILE not found"
 fi
 
 # Seed world if requested
@@ -27,8 +32,9 @@ echo "Building client..."
 (cd client && bun build src/app.ts --outdir . 2>&1) || echo "Client build skipped"
 
 # Start gateway (serves client + API)
-echo "Starting gateway on :8080..."
-(cd gateway && uvicorn gateway.app:app --host 0.0.0.0 --port 8080) &
+GATEWAY_PORT="${GATEWAY_PORT:-8081}"
+echo "Starting gateway on :$GATEWAY_PORT..."
+(cd gateway && uvicorn gateway.app:app --host 0.0.0.0 --port "$GATEWAY_PORT") &
 GATEWAY_PID=$!
 
 # Start engine listener (if Matrix env vars set)
@@ -43,7 +49,7 @@ fi
 
 echo "Gateway PID: $GATEWAY_PID"
 echo ""
-echo "Open http://localhost:8080"
+echo "Open http://localhost:$GATEWAY_PORT"
 echo "Press Ctrl+C to stop"
 
 wait

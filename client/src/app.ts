@@ -5,7 +5,7 @@
  */
 
 import { createInitialState, applyStateUpdate, type GameState } from './state/game-state';
-import { getSession, initSession, sendAction, setMessageHandler, setConnectionHandler } from './state/session';
+import { getSession, initSession, sendAction, setMessageHandler, setConnectionHandler, GATEWAY_URL } from './state/session';
 import { parseNarrative, renderSegments, setKnownEntities } from './renderer/text-renderer';
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
@@ -221,7 +221,7 @@ async function loadArchetypes(): Promise<void> {
   const container = document.getElementById('archetype-cards');
   if (!container) return;
   try {
-    const resp = await fetch('http://localhost:8080/api/archetypes');
+    const resp = await fetch(`${GATEWAY_URL}/api/archetypes`);
     const archetypes = await resp.json();
     container.innerHTML = archetypes.map((a: any) => `
       <div class="archetype-card" data-archetype="${a.name}">
@@ -377,7 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function fetchWorldMap(): Promise<void> {
     try {
-      const resp = await fetch('http://localhost:8080/api/worldmap');
+      const resp = await fetch(`${GATEWAY_URL}/api/worldmap`);
       const data = await resp.json();
       if (data.rooms && data.rooms.length > 0) {
         worldMapData = {

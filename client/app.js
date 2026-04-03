@@ -1,13 +1,18 @@
+// src/types/schema.generated.ts
+var SCHEMA_VERSION = 1;
+
 // src/state/game-state.ts
 function createInitialState(playerName) {
   return {
     player: {
       name: playerName,
+      archetype: "",
       level: 1,
       health: 100,
       maxHealth: 100,
       xp: 0,
-      xpThreshold: 100
+      xpThreshold: 100,
+      skills: {}
     },
     location: {
       name: "Unknown",
@@ -17,10 +22,15 @@ function createInitialState(playerName) {
       items: []
     },
     inventory: [],
+    quests: [],
+    factions: [],
     roomMap: null
   };
 }
 function applyStateUpdate(state, update) {
+  if (update.schema_version && update.schema_version > SCHEMA_VERSION) {
+    console.warn(`Server schema version ${update.schema_version} > client ${SCHEMA_VERSION}. Please refresh.`);
+  }
   if (update.location)
     state.location.name = update.location;
   if (update.health != null)
@@ -44,6 +54,8 @@ function applyStateUpdate(state, update) {
       equipped: i.equipped || false
     }));
   }
+  if (update.skills)
+    state.player.skills = update.skills;
   if (update.room_map) {
     state.roomMap = update.room_map;
     const rm = update.room_map;
@@ -69,15 +81,34 @@ function applyStateUpdate(state, update) {
       }));
     }
   }
+  if (update.active_quests) {
+    state.quests = update.active_quests.map((q) => ({
+      name: q.name || "",
+      description: q.description || "",
+      currentStage: q.current_stage || 0,
+      totalStages: q.total_stages || 0,
+      giver: q.giver || "",
+      completed: q.completed || false
+    }));
+  }
+  if (update.factions) {
+    state.factions = update.factions.map((f) => ({
+      name: f.name || "",
+      reputation: f.reputation || 0,
+      disposition: f.disposition || "neutral"
+    }));
+  }
 }
 
 // src/state/session.ts
-var GATEWAY_URL = "http://localhost:8080";
-var WS_URL = "ws://localhost:8080/ws";
+var GATEWAY_PORT = window.location.port || "8081";
+var GATEWAY_URL = `${window.location.protocol}//${window.location.hostname}:${GATEWAY_PORT}`;
+var WS_URL = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:${GATEWAY_PORT}/ws`;
 var session = {
   playerId: "",
   sessionId: "",
   playerName: "",
+  walletAddress: "",
   currentLocation: "",
   connected: false,
   openingNarrative: ""
@@ -94,20 +125,22 @@ function getSession() {
 function setMessageHandler(handler) {
   onMessage = handler;
 }
-async function initSession(playerName) {
+async function initSession(playerName, walletAddress, archetype = "") {
   const resp = await fetch(`${GATEWAY_URL}/api/session/create`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ player_name: playerName })
+    body: JSON.stringify({ player_name: playerName, wallet_address: walletAddress, archetype })
   });
   const data = await resp.json();
   session.playerId = data.player_id;
   session.sessionId = data.session_id;
   session.playerName = playerName;
+  session.walletAddress = walletAddress;
   session.currentLocation = data.location;
   session.openingNarrative = data.opening_narrative || "";
   localStorage.setItem("mm_player_id", session.playerId);
   localStorage.setItem("mm_player_name", playerName);
+  localStorage.setItem("mm_wallet", walletAddress);
   connectWebSocket();
   return session;
 }
@@ -3659,17 +3692,256 @@ function showPlayerCard(state) {
   renderer.setCard(card);
 }
 
+// src/map/world-renderer.ts
+var NODE_RADIUS = 18;
+var LABEL_FONT = "11px monospace";
+var NODE_FONT = "13px monospace";
+var PADDING = 40;
+var COLORS2 = {
+  bg: "#0a0a0f",
+  nodeBg: "#16161f",
+  nodeBorder: "#2a2a38",
+  currentBg: "#1a1a35",
+  currentBorder: "#8b5cf6",
+  connection: "#2a2a38",
+  connectionActive: "#3a3a50",
+  text: "#c8c8d0",
+  textDim: "#6a6a78",
+  current: "#8b5cf6",
+  discovered: "#50c878",
+  undiscovered: "#3a3a48"
+};
+var DIR_OFFSETS = {
+  north: { dx: 0, dy: -1 },
+  south: { dx: 0, dy: 1 },
+  east: { dx: 1, dy: 0 },
+  west: { dx: -1, dy: 0 },
+  northeast: { dx: 0.7, dy: -0.7 },
+  northwest: { dx: -0.7, dy: -0.7 },
+  southeast: { dx: 0.7, dy: 0.7 },
+  southwest: { dx: -0.7, dy: 0.7 },
+  up: { dx: 0.3, dy: -1 },
+  down: { dx: -0.3, dy: 1 }
+};
+
+class WorldMapRenderer {
+  canvas;
+  ctx;
+  dpr;
+  onClick = null;
+  lastMap = null;
+  nodePositions = new Map;
+  constructor(container) {
+    this.dpr = Math.min(devicePixelRatio, 2);
+    this.canvas = document.createElement("canvas");
+    this.canvas.style.display = "block";
+    this.canvas.style.background = COLORS2.bg;
+    this.canvas.style.cursor = "pointer";
+    this.ctx = this.canvas.getContext("2d");
+    container.appendChild(this.canvas);
+    this.canvas.addEventListener("click", (e) => this.handleClick(e));
+  }
+  setClickHandler(handler) {
+    this.onClick = handler;
+  }
+  render(map) {
+    this.lastMap = map;
+    this.layoutNodes(map);
+    const { width, height } = this.computeBounds();
+    this.canvas.width = width * this.dpr;
+    this.canvas.height = height * this.dpr;
+    this.canvas.style.width = `${width}px`;
+    this.canvas.style.height = `${height}px`;
+    const ctx = this.ctx;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.fillStyle = COLORS2.bg;
+    ctx.fillRect(0, 0, width, height);
+    for (const conn of map.connections) {
+      const from = this.nodePositions.get(conn.from);
+      const to = this.nodePositions.get(conn.to);
+      if (!from || !to)
+        continue;
+      const isActive = conn.from === map.currentRoom || conn.to === map.currentRoom;
+      ctx.strokeStyle = isActive ? COLORS2.connectionActive : COLORS2.connection;
+      ctx.lineWidth = isActive ? 2 : 1;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+      if (conn.direction) {
+        const mx = (from.x + to.x) / 2;
+        const my = (from.y + to.y) / 2;
+        ctx.font = "9px monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = COLORS2.textDim;
+        ctx.fillText(conn.direction[0].toUpperCase(), mx, my);
+      }
+    }
+    for (const room of map.rooms) {
+      const pos = this.nodePositions.get(room.id);
+      if (!pos)
+        continue;
+      const isCurrent = room.id === map.currentRoom;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, NODE_RADIUS, 0, Math.PI * 2);
+      ctx.fillStyle = isCurrent ? COLORS2.currentBg : COLORS2.nodeBg;
+      ctx.fill();
+      ctx.strokeStyle = isCurrent ? COLORS2.currentBorder : COLORS2.nodeBorder;
+      ctx.lineWidth = isCurrent ? 2.5 : 1;
+      ctx.stroke();
+      ctx.font = NODE_FONT;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = isCurrent ? COLORS2.current : COLORS2.discovered;
+      ctx.fillText(isCurrent ? "@" : "●", pos.x, pos.y);
+      ctx.font = LABEL_FONT;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = isCurrent ? COLORS2.text : COLORS2.textDim;
+      const label = room.name.length > 16 ? room.name.slice(0, 14) + ".." : room.name;
+      ctx.fillText(label, pos.x, pos.y + NODE_RADIUS + 4);
+    }
+  }
+  layoutNodes(map) {
+    this.nodePositions.clear();
+    if (map.rooms.length === 0)
+      return;
+    const hasCoords = map.rooms.some((r) => r.x !== 0 || r.y !== 0);
+    if (hasCoords) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const r of map.rooms) {
+        minX = Math.min(minX, r.x);
+        minY = Math.min(minY, r.y);
+        maxX = Math.max(maxX, r.x);
+        maxY = Math.max(maxY, r.y);
+      }
+      const rangeX = maxX - minX || 1;
+      const rangeY = maxY - minY || 1;
+      const areaW = 400;
+      const areaH = 300;
+      for (const r of map.rooms) {
+        this.nodePositions.set(r.id, {
+          x: PADDING + (r.x - minX) / rangeX * areaW,
+          y: PADDING + (r.y - minY) / rangeY * areaH
+        });
+      }
+    } else {
+      this.autoLayout(map);
+    }
+  }
+  autoLayout(map) {
+    const spacing = 100;
+    const placed = new Set;
+    const startId = map.currentRoom || map.rooms[0]?.id;
+    if (!startId)
+      return;
+    const centerX = 220;
+    const centerY = 180;
+    this.nodePositions.set(startId, { x: centerX, y: centerY });
+    placed.add(startId);
+    const queue = [startId];
+    while (queue.length > 0) {
+      const nodeId = queue.shift();
+      const nodePos = this.nodePositions.get(nodeId);
+      for (const conn of map.connections) {
+        let neighborId = "";
+        let direction = conn.direction;
+        if (conn.from === nodeId && !placed.has(conn.to)) {
+          neighborId = conn.to;
+        } else if (conn.to === nodeId && !placed.has(conn.from)) {
+          neighborId = conn.from;
+          const reverseDir = {
+            north: "south",
+            south: "north",
+            east: "west",
+            west: "east",
+            northeast: "southwest",
+            northwest: "southeast",
+            southeast: "northwest",
+            southwest: "northeast"
+          };
+          direction = reverseDir[direction] || direction;
+        }
+        if (!neighborId)
+          continue;
+        const offset = DIR_OFFSETS[direction] || { dx: 0, dy: -1 };
+        const nx = nodePos.x + offset.dx * spacing;
+        const ny = nodePos.y + offset.dy * spacing;
+        let finalX = nx, finalY = ny;
+        for (const pos of this.nodePositions.values()) {
+          const dist = Math.hypot(finalX - pos.x, finalY - pos.y);
+          if (dist < NODE_RADIUS * 3) {
+            finalX += (Math.random() - 0.5) * 40;
+            finalY += (Math.random() - 0.5) * 40;
+          }
+        }
+        this.nodePositions.set(neighborId, { x: finalX, y: finalY });
+        placed.add(neighborId);
+        queue.push(neighborId);
+      }
+    }
+    let orphanX = PADDING;
+    for (const room of map.rooms) {
+      if (!placed.has(room.id)) {
+        this.nodePositions.set(room.id, { x: orphanX, y: centerY + spacing });
+        orphanX += spacing;
+        placed.add(room.id);
+      }
+    }
+  }
+  computeBounds() {
+    let maxX = 200, maxY = 200;
+    for (const pos of this.nodePositions.values()) {
+      maxX = Math.max(maxX, pos.x + PADDING + NODE_RADIUS);
+      maxY = Math.max(maxY, pos.y + PADDING + NODE_RADIUS + 20);
+    }
+    return { width: Math.ceil(maxX), height: Math.ceil(maxY) };
+  }
+  handleClick(e) {
+    if (!this.lastMap || !this.onClick)
+      return;
+    const rect = this.canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    for (const room of this.lastMap.rooms) {
+      const pos = this.nodePositions.get(room.id);
+      if (!pos)
+        continue;
+      const dist = Math.hypot(mx - pos.x, my - pos.y);
+      if (dist <= NODE_RADIUS + 4) {
+        this.onClick(room.id);
+        return;
+      }
+    }
+  }
+}
+
 // src/panels/character.ts
+function renderSkills(skills) {
+  const entries = Object.entries(skills).filter(([, v]) => v > 0);
+  if (entries.length === 0)
+    return "";
+  const lines = entries.map(([name, level]) => {
+    const dots = "●".repeat(level) + "○".repeat(Math.max(0, 5 - level));
+    return `<div class="skill-row"><span class="skill-name">${name}</span> <span class="skill-dots">${dots}</span></div>`;
+  });
+  return `<div class="skills-section">${lines.join("")}</div>`;
+}
 function renderCharacterPanel(body, state) {
   const p = state.player;
   const hpPct = p.maxHealth > 0 ? Math.round(p.health / p.maxHealth * 100) : 0;
   const xpPct = p.xpThreshold > 0 ? Math.round(p.xp / p.xpThreshold * 100) : 0;
   const hpFill = Math.round(hpPct / 10);
   const xpFill = Math.round(xpPct / 10);
+  const archLabel = p.archetype ? `<div class="archetype-label">${p.archetype}</div>` : "";
+  const skillsHtml = renderSkills(p.skills);
   body.innerHTML = `
+    ${archLabel}
     <div><span class="stat-label">HP</span> <span class="bar-fill-hp">${"█".repeat(hpFill)}</span><span class="bar-empty">${"░".repeat(10 - hpFill)}</span> <span style="color:var(--text-dim)">${p.health}/${p.maxHealth}</span></div>
     <div><span class="stat-label">XP</span> <span class="bar-fill-xp">${"█".repeat(xpFill)}</span><span class="bar-empty">${"░".repeat(10 - xpFill)}</span> <span style="color:var(--text-dim)">${p.xp}/${p.xpThreshold}</span></div>
     <div><span class="stat-label">Lv</span> ${p.level}</div>
+    ${skillsHtml}
   `;
 }
 
@@ -3732,6 +4004,69 @@ function renderPresentPanel(body, state, onAction) {
   body.querySelectorAll("[data-action]").forEach((el) => {
     el.addEventListener("click", () => onAction(el.dataset.action));
   });
+}
+
+// src/panels/questlog.ts
+function renderQuestLogPanel(body, quests) {
+  if (!quests || quests.length === 0) {
+    body.innerHTML = '<div class="empty-msg">No active quests</div>';
+    return;
+  }
+  const html = quests.map((q) => {
+    const progress = q.totalStages > 0 ? Math.round(q.currentStage / q.totalStages * 10) : 0;
+    const progressBar = "█".repeat(progress) + "░".repeat(10 - progress);
+    const statusLabel = q.completed ? '<span class="quest-done">[DONE]</span>' : "";
+    return `
+      <div class="quest-entry${q.completed ? " completed" : ""}">
+        <div class="quest-name">${q.name} ${statusLabel}</div>
+        ${q.giver ? `<div class="quest-giver">from ${q.giver}</div>` : ""}
+        <div class="quest-progress">
+          <span class="bar-fill-xp">${progressBar}</span>
+          <span class="quest-stage">${q.currentStage}/${q.totalStages}</span>
+        </div>
+        ${q.description ? `<div class="quest-desc">${q.description.slice(0, 120)}${q.description.length > 120 ? "..." : ""}</div>` : ""}
+      </div>
+    `;
+  }).join("");
+  body.innerHTML = html;
+}
+
+// src/panels/factions.ts
+function dispositionColor(disposition) {
+  switch (disposition) {
+    case "hostile":
+      return "faction-hostile";
+    case "unfriendly":
+      return "faction-hostile";
+    case "friendly":
+      return "faction-friendly";
+    case "allied":
+      return "faction-friendly";
+    default:
+      return "faction-neutral";
+  }
+}
+function renderFactionsPanel(body, factions) {
+  if (!factions || factions.length === 0) {
+    body.innerHTML = '<div class="empty-msg">No known factions</div>';
+    return;
+  }
+  const html = factions.map((f) => {
+    const normalized = Math.round((f.reputation + 1) * 5);
+    const clamped = Math.max(0, Math.min(10, normalized));
+    const colorClass = dispositionColor(f.disposition);
+    const bar = "█".repeat(clamped) + "░".repeat(10 - clamped);
+    return `
+      <div class="faction-entry">
+        <div class="faction-name">${f.name}</div>
+        <div class="faction-bar">
+          <span class="${colorClass}">${bar}</span>
+          <span class="faction-disposition">${f.disposition}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+  body.innerHTML = html;
 }
 
 // src/ui/window.ts
@@ -3982,6 +4317,74 @@ function createDialog() {
 var GATEWAY = "";
 var SUMMARY_MAX = 150;
 var ITEMS_PER_PAGE = 8;
+var LABEL_TABLE_MAP = {
+  Character: ["Characters", "Deaths"],
+  Player: ["Characters", "Deaths"],
+  Item: ["Items"],
+  Weapon: ["Items"],
+  Armor: ["Items"],
+  Consumable: ["Items"],
+  Location: ["Locations"],
+  Room: ["Locations"],
+  Region: ["Locations"]
+};
+function tablesForLabels(labels) {
+  for (const label of labels) {
+    if (label in LABEL_TABLE_MAP)
+      return LABEL_TABLE_MAP[label];
+  }
+  return [];
+}
+async function fetchChainData(table, entityId) {
+  try {
+    const resp = await fetch(`${GATEWAY}/api/chain/${table}/${entityId}`);
+    if (resp.status === 200)
+      return resp.json();
+    return null;
+  } catch {
+    return null;
+  }
+}
+function formatTimestamp(ts) {
+  if (!ts)
+    return "Unknown";
+  return new Date(ts * 1000).toLocaleDateString();
+}
+function formatAddr(addr) {
+  if (!addr || addr.length < 10 || addr === "0x0000000000000000000000000000000000000000")
+    return "None";
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+function renderCharacterChain(data, deaths) {
+  let html = '<div class="wiki-page-heading">ONCHAIN RECORD</div>';
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Status</span> ${data.alive ? "Alive" : "Dead"}</div>`;
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Level</span> ${data.level ?? "?"}</div>`;
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Wallet</span> ${formatAddr(String(data.wallet || ""))}</div>`;
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Created</span> ${formatTimestamp(Number(data.createdAt || 0))}</div>`;
+  if (deaths && Array.isArray(deaths) && deaths.length > 0) {
+    html += '<div class="wiki-page-heading" style="margin-top:8px">DEATHS</div>';
+    for (const d of deaths) {
+      html += `<div class="wiki-chain-death">`;
+      html += `<div>☠ ${esc(String(d.cause || "Unknown"))}</div>`;
+      html += `<div class="wiki-fact">${esc(String(d.location || ""))} · Lv${d.level} · Tick ${d.tick}</div>`;
+      html += `</div>`;
+    }
+  }
+  return html;
+}
+function renderItemChain(data) {
+  let html = '<div class="wiki-page-heading">ONCHAIN RECORD</div>';
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Rarity</span> ${esc(String(data.rarity || "Common"))}</div>`;
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Owner</span> ${formatAddr(String(data.ownerId || ""))}</div>`;
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Location</span> ${formatAddr(String(data.locationId || ""))}</div>`;
+  return html;
+}
+function renderLocationChain(data) {
+  let html = '<div class="wiki-page-heading">ONCHAIN RECORD</div>';
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Region</span> ${esc(String(data.region || "Unknown"))}</div>`;
+  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Discovered by</span> ${formatAddr(String(data.discoveredBy || ""))}</div>`;
+  return html;
+}
 function createWikiPanel() {
   const el = document.createElement("div");
   el.className = "wiki-panel";
@@ -3991,6 +4394,8 @@ function createWikiPanel() {
   let currentId = "";
   let pages = [];
   let pageIdx = 0;
+  let activeTab = "lore";
+  let currentLabels = [];
   async function fetchEntity(id) {
     if (cache.has(id))
       return cache.get(id);
@@ -4094,6 +4499,9 @@ function createWikiPanel() {
     const page = pages[pageIdx];
     const total = pages.length;
     let html = "";
+    const hasTabs = tablesForLabels(currentLabels).length > 0;
+    if (hasTabs)
+      html = renderTabBar() + html;
     if (navStack.length > 1) {
       const prev = navStack[navStack.length - 2];
       html += `<div class="wiki-back" data-id="${esc(prev.id)}" data-name="${esc(prev.name)}">← ${esc(prev.name)}</div>`;
@@ -4107,6 +4515,8 @@ function createWikiPanel() {
       html += "</div>";
     }
     el.innerHTML = html;
+    if (hasTabs)
+      wireTabClicks();
     const prevBtn = el.querySelector(".wiki-prev");
     const nextBtn = el.querySelector(".wiki-next");
     if (prevBtn && pageIdx > 0) {
@@ -4156,6 +4566,52 @@ function createWikiPanel() {
       <div class="wiki-summary wiki-empty">No knowledge graph data available</div>
     `;
   }
+  function renderTabBar() {
+    return `<div class="wiki-tabs">
+      <span class="wiki-tab ${activeTab === "lore" ? "active" : ""}" data-tab="lore">Lore</span>
+      <span class="wiki-tab ${activeTab === "chain" ? "active" : ""}" data-tab="chain">Chain</span>
+    </div>`;
+  }
+  function wireTabClicks() {
+    el.querySelectorAll(".wiki-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const t = tab.dataset.tab;
+        if (t === activeTab)
+          return;
+        activeTab = t;
+        if (t === "lore")
+          renderPage();
+        else
+          renderChainTab(currentId, currentLabels);
+      });
+    });
+  }
+  async function renderChainTab(entityId, labels) {
+    const tables = tablesForLabels(labels);
+    if (!tables.length) {
+      el.innerHTML = '<div class="wiki-empty">No onchain data for this entity type</div>';
+      return;
+    }
+    el.innerHTML = '<div class="wiki-loading">Loading chain data…</div>';
+    let html = renderTabBar();
+    if (tables.includes("Characters")) {
+      const charData = await fetchChainData("Characters", entityId);
+      const deathData = await fetchChainData("Deaths", entityId);
+      if (charData) {
+        html += renderCharacterChain(charData.data, deathData ? Array.isArray(deathData.data) ? deathData.data : [deathData.data] : null);
+      } else {
+        html += '<div class="wiki-empty">No onchain data</div>';
+      }
+    } else if (tables.includes("Items")) {
+      const itemData = await fetchChainData("Items", entityId);
+      html += itemData ? renderItemChain(itemData.data) : '<div class="wiki-empty">No onchain data</div>';
+    } else if (tables.includes("Locations")) {
+      const locData = await fetchChainData("Locations", entityId);
+      html += locData ? renderLocationChain(locData.data) : '<div class="wiki-empty">No onchain data</div>';
+    }
+    el.innerHTML = html;
+    wireTabClicks();
+  }
   async function show(entityId, entityName) {
     if (entityId === currentId)
       return;
@@ -4163,6 +4619,9 @@ function createWikiPanel() {
     navStack.push({ id: entityId, name: entityName });
     el.innerHTML = '<div class="wiki-loading">Loading…</div>';
     const data = await fetchEntity(entityId);
+    activeTab = "lore";
+    if (data)
+      currentLabels = data.entity.labels;
     if (data) {
       pages = buildPages(data);
       pageIdx = 0;
@@ -4174,6 +4633,9 @@ function createWikiPanel() {
   async function showByName(name) {
     el.innerHTML = '<div class="wiki-loading">Loading…</div>';
     const data = await fetchByName(name);
+    activeTab = "lore";
+    if (data)
+      currentLabels = data.entity.labels;
     if (data) {
       currentId = data.entity.id;
       navStack.push({ id: data.entity.id, name: data.entity.name });
@@ -4193,6 +4655,8 @@ function createWikiPanel() {
       navStack.length = 0;
       pages = [];
       pageIdx = 0;
+      activeTab = "lore";
+      currentLabels = [];
       el.innerHTML = '<div class="wiki-empty">Click an entity to browse</div>';
     }
   };
@@ -4268,6 +4732,36 @@ function createStatusBar() {
   };
 }
 
+// src/chain/wallet.ts
+var connectedAddress = null;
+function hasProvider() {
+  return typeof window.ethereum !== "undefined";
+}
+async function connectWallet() {
+  if (!window.ethereum) {
+    throw new Error("No wallet provider found");
+  }
+  const accounts = await window.ethereum.request({
+    method: "eth_requestAccounts"
+  });
+  if (!accounts.length) {
+    throw new Error("No accounts returned");
+  }
+  connectedAddress = accounts[0];
+  localStorage.setItem("mm_wallet", connectedAddress);
+  return connectedAddress;
+}
+function getAddress() {
+  if (connectedAddress)
+    return connectedAddress;
+  return localStorage.getItem("mm_wallet");
+}
+function formatAddress(addr) {
+  if (addr.length < 10)
+    return addr;
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
 // src/app.ts
 var gameState;
 var narrative;
@@ -4281,6 +4775,8 @@ var characterWin;
 var inventoryWin;
 var exitsWin;
 var presentWin;
+var questWin;
+var factionWin;
 var commandWin;
 function registerMapEntities(map) {
   if (!map)
@@ -4304,6 +4800,8 @@ function renderAllPanels() {
   exitsWin.setTitle(gameState.location.name || "Exits");
   renderExitsPanel(exitsWin.body, gameState, handleAction);
   renderPresentPanel(presentWin.body, gameState, handleAction);
+  renderQuestLogPanel(questWin.body, gameState.quests);
+  renderFactionsPanel(factionWin.body, gameState.factions);
   updateMap(gameState, handleAction);
   if (wiki && gameState.roomMap) {
     wiki.show(gameState.roomMap.id, gameState.roomMap.name);
@@ -4355,7 +4853,7 @@ function getThresholdMap() {
   };
 }
 async function handleAction(action) {
-  if (!action.trim())
+  if (!action.trim() || action.length > 500)
     return;
   narrative.addBlock(`> ${action}`, "player-action");
   await sendAction(action);
@@ -4391,8 +4889,29 @@ function handleMessage(msg) {
           statusBar.setTick(msg.state_update.world_time.tick || 0);
         }
         renderAllPanels();
+        if (msg.state_update.events) {
+          const events = msg.state_update.events;
+          if (events.combat) {
+            const c = events.combat;
+            if (c.damage_dealt != null) {
+              narrative.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ""}`, "event-combat");
+            }
+            if (c.xp_gained) {
+              narrative.addBlock(`[+${c.xp_gained} XP]`, "event-xp");
+            }
+            if (c.target_dead) {
+              narrative.addBlock(`${c.target_name || "Target"} has been slain.`, "event-death");
+            }
+          }
+          if (events.inventory_changes) {
+            for (const inv of events.inventory_changes) {
+              const prefix = inv.event_type === "DROP" ? "-" : "+";
+              narrative.addBlock(`[${prefix}${inv.item_name}]`, "event-item");
+            }
+          }
+        }
       }
-      if (msg.state_update?.status === "dead" || msg.text && msg.text.toLowerCase().includes("you have died")) {
+      if (msg.state_update?.status === "dead" || msg.state_update?.events?.combat?.target_dead || msg.text && msg.text.toLowerCase().includes("you have died")) {
         showDeathScreen(msg.state_update?.cause || "");
       }
       break;
@@ -4401,6 +4920,12 @@ function handleMessage(msg) {
       narrative.showThinking();
       statusBar.setPhase("thinking");
       break;
+    case "death_feed": {
+      const skull = "☠";
+      const deathMsg = `${skull} ${msg.player_name || "Unknown"} (Level ${msg.level || "?"}) fell at ${msg.location || "unknown"}. ${msg.cause || ""}`;
+      narrative.addBlock(deathMsg, "death-feed");
+      break;
+    }
     case "status":
       if (msg.phase)
         statusBar.setPhase(msg.phase);
@@ -4413,12 +4938,48 @@ function handleMessage(msg) {
       console.log("Unknown message:", msg);
   }
 }
-async function enterWorld(playerName) {
+var selectedArchetype = "";
+async function loadArchetypes() {
+  const container = document.getElementById("archetype-cards");
+  if (!container)
+    return;
+  try {
+    const resp = await fetch(`${GATEWAY_URL}/api/archetypes`);
+    const archetypes = await resp.json();
+    container.innerHTML = archetypes.map((a) => `
+      <div class="archetype-card" data-archetype="${a.name}">
+        <div class="archetype-name">${a.name}</div>
+        <div class="archetype-desc">${a.description}</div>
+        <div class="archetype-stats">HP: ${a.stats.health || 100} | Skills: ${Object.keys(a.skills).join(", ")}</div>
+        <div class="archetype-items">${a.starting_items.join(", ")}</div>
+      </div>
+    `).join("");
+    container.addEventListener("click", (e) => {
+      const card = e.target.closest(".archetype-card");
+      if (!card)
+        return;
+      container.querySelectorAll(".archetype-card").forEach((c) => c.classList.remove("selected"));
+      card.classList.add("selected");
+      selectedArchetype = card.dataset.archetype || "";
+    });
+  } catch {
+    container.innerHTML = '<div style="color:var(--text-dim)">Archetypes unavailable</div>';
+  }
+}
+async function enterWorld(playerName, walletAddress) {
   const overlay = document.getElementById("char-create-overlay");
   overlay.classList.add("hidden");
-  const session2 = await initSession(playerName);
+  const session2 = await initSession(playerName, walletAddress, selectedArchetype);
   gameState = createInitialState(playerName);
   gameState.location.name = session2.currentLocation;
+  if (session2.archetype)
+    gameState.player.archetype = session2.archetype;
+  if (session2.health)
+    gameState.player.health = session2.health;
+  if (session2.max_health)
+    gameState.player.maxHealth = session2.max_health;
+  if (session2.skills)
+    gameState.player.skills = session2.skills;
   if (!gameState.roomMap) {
     applyStateUpdate(gameState, { room_map: getThresholdMap() });
   }
@@ -4446,6 +5007,8 @@ document.addEventListener("DOMContentLoaded", () => {
   inventoryWin = createWindow({ title: "Inventory", id: "inventory-win", className: "sidebar-win resizable" });
   exitsWin = createWindow({ title: "Exits", id: "exits-win", className: "sidebar-win resizable" });
   presentWin = createWindow({ title: "Present", id: "present-win", className: "sidebar-win resizable" });
+  questWin = createWindow({ title: "Quests", id: "quest-win", className: "sidebar-win resizable" });
+  factionWin = createWindow({ title: "Factions", id: "faction-win", className: "sidebar-win resizable" });
   commandWin = createWindow({ title: "Command", id: "command-win" });
   mount("narrative-mount", narrativeWin.el);
   mount("map-mount", mapWin.el);
@@ -4453,6 +5016,8 @@ document.addEventListener("DOMContentLoaded", () => {
   mount("inventory-mount", inventoryWin.el);
   mount("exits-mount", exitsWin.el);
   mount("present-mount", presentWin.el);
+  mount("quest-mount", questWin.el);
+  mount("faction-mount", factionWin.el);
   mount("command-mount", commandWin.el);
   statusBar = createStatusBar();
   mount("status-mount", statusBar.el);
@@ -4486,10 +5051,55 @@ document.addEventListener("DOMContentLoaded", () => {
   initInput(actionInput, handleAction);
   const mapCanvasWrap = document.createElement("div");
   mapCanvasWrap.className = "map-canvas-wrap";
+  const worldMapWrap = document.createElement("div");
+  worldMapWrap.className = "map-canvas-wrap";
+  worldMapWrap.style.display = "none";
   wiki = createWikiPanel();
   mapWin.body.appendChild(mapCanvasWrap);
+  mapWin.body.appendChild(worldMapWrap);
   mapWin.body.appendChild(wiki.el);
   initMapPanel(mapCanvasWrap, handleAction);
+  const worldRenderer = new WorldMapRenderer(worldMapWrap);
+  let worldMapData = null;
+  let showingWorldMap = false;
+  worldRenderer.setClickHandler((roomId) => {
+    if (roomId && wiki) {
+      const room = worldMapData?.rooms.find((r) => r.id === roomId);
+      if (room)
+        wiki.show(roomId, room.name);
+    }
+  });
+  async function fetchWorldMap() {
+    try {
+      const resp = await fetch(`${GATEWAY_URL}/api/worldmap`);
+      const data = await resp.json();
+      if (data.rooms && data.rooms.length > 0) {
+        worldMapData = {
+          rooms: data.rooms,
+          connections: data.connections,
+          currentRoom: gameState?.location?.name || ""
+        };
+      }
+    } catch {}
+  }
+  function toggleWorldMap() {
+    showingWorldMap = !showingWorldMap;
+    mapCanvasWrap.style.display = showingWorldMap ? "none" : "";
+    worldMapWrap.style.display = showingWorldMap ? "" : "none";
+    mapWin.setTitle(showingWorldMap ? "World Map" : "Map");
+    if (showingWorldMap && worldMapData) {
+      worldMapData.currentRoom = gameState?.location?.name || "";
+      worldRenderer.render(worldMapData);
+    }
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "w" && document.activeElement?.tagName !== "INPUT") {
+      if (!worldMapData)
+        fetchWorldMap().then(() => toggleWorldMap());
+      else
+        toggleWorldMap();
+    }
+  });
   setMessageHandler(handleMessage);
   setConnectionHandler((connected) => {
     if (connected) {
@@ -4504,17 +5114,57 @@ document.addEventListener("DOMContentLoaded", () => {
     narrativeWin.body.innerHTML = "";
     document.getElementById("char-name-input").focus();
   });
+  const walletConnectBtn = document.getElementById("wallet-connect-btn");
+  const walletStep = document.getElementById("wallet-step");
+  const nameStep = document.getElementById("name-step");
+  const walletPrompt = document.getElementById("wallet-prompt");
+  const walletNoProvider = document.getElementById("wallet-no-provider");
+  const walletAddressEl = document.getElementById("wallet-address");
   const nameInput = document.getElementById("char-name-input");
   const enterBtn = document.getElementById("char-create-btn");
+  if (!hasProvider()) {
+    walletConnectBtn.classList.add("hidden");
+    walletNoProvider.classList.remove("hidden");
+  }
+  const archetypeStep = document.getElementById("archetype-step");
+  walletConnectBtn.addEventListener("click", async () => {
+    try {
+      walletPrompt.textContent = "Connecting...";
+      const addr = await connectWallet();
+      walletStep.classList.add("hidden");
+      walletAddressEl.textContent = `✓ ${formatAddress(addr)}`;
+      if (archetypeStep) {
+        archetypeStep.classList.remove("hidden");
+        loadArchetypes();
+      } else {
+        nameStep.classList.remove("hidden");
+        nameInput.focus();
+      }
+    } catch {
+      walletPrompt.textContent = "Connection rejected. Try again.";
+    }
+  });
+  const archetypeNextBtn = document.getElementById("archetype-next-btn");
+  if (archetypeNextBtn) {
+    archetypeNextBtn.addEventListener("click", () => {
+      if (archetypeStep)
+        archetypeStep.classList.add("hidden");
+      nameStep.classList.remove("hidden");
+      nameInput.focus();
+    });
+  }
   enterBtn.addEventListener("click", () => {
     const name = nameInput.value.trim() || "Wanderer";
-    enterWorld(name);
+    const wallet = getAddress();
+    if (wallet)
+      enterWorld(name, wallet);
   });
   nameInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       const name = nameInput.value.trim() || "Wanderer";
-      enterWorld(name);
+      const wallet = getAddress();
+      if (wallet)
+        enterWorld(name, wallet);
     }
   });
-  nameInput.focus();
 });

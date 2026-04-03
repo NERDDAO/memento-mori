@@ -1,8 +1,9 @@
 // src/state/session.ts
 /** Session management — auth, WebSocket connection, player identity. */
 
-const GATEWAY_URL = 'http://localhost:8080';
-const WS_URL = 'ws://localhost:8080/ws';
+const GATEWAY_PORT = window.location.port || '8081';
+export const GATEWAY_URL = `${window.location.protocol}//${window.location.hostname}:${GATEWAY_PORT}`;
+const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:${GATEWAY_PORT}/ws`;
 
 export interface Session {
   playerId: string;
