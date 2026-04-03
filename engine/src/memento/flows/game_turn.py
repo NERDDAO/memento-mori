@@ -159,88 +159,9 @@ class GameTurnFlow(Flow[TurnState]):
         world_time = advance_time(1)
         self.state.world_time = world_time.to_display()
 
-        # Chain: fetch latest Graphiti episode and push onchain
-        from memento.tools import chain as _chain
-        if _chain.is_enabled():
-            self._sync_episode_to_chain()
+        # Episodes are handled by EpisodicMemoryFlow (IPFS pin only, no per-episode chain write)
 
         return narrative
-
-    def _sync_episode_to_chain(self) -> None:
-        """Poll for the latest Graphiti episode and push to Redstone."""
-        import time
-        import logging
-        from memento.bonfires_client import get_client
-        from memento.tools import chain as _chain
-
-        logger = logging.getLogger(__name__)
-        try:
-            client = get_client()
-            # Poll for up to 10 seconds (Graphiti extraction usually <2s)
-            latest = None
-            episodes = {}
-            for attempt in range(5):
-                time.sleep(2)
-                try:
-                    episodes = client.kg.search("", num_results=1)
-                    ep_list = episodes.get("episodes", [])
-                    if ep_list:
-                        latest = ep_list[0]
-                        break
-                except Exception:
-                    continue
-
-            if not latest:
-                logger.warning("Episode sync: no episode found after polling")
-                return
-
-            # Extract structured data
-            ep_uuid = latest.get("uuid", "")
-            ep_name = latest.get("name", "")
-            content = latest.get("content", {})
-            ep_summary = (
-                content.get("content", "") if isinstance(content, dict) else str(content)
-            )
-
-            # Get entities and edges from search context
-            entities = episodes.get("entities", [])
-            edges = episodes.get("edges", [])
-
-            entity_list = [
-                {"uuid": e.get("uuid", ""), "name": e.get("name", ""), "labels": e.get("labels", [])}
-                for e in entities[:20]
-            ]
-            edge_list = [
-                {
-                    "source": e.get("source_node_name", e.get("source_name", "")),
-                    "target": e.get("target_node_name", e.get("target_name", "")),
-                    "relationship": e.get("name", e.get("relationship", "")),
-                    "fact": e.get("fact", ""),
-                }
-                for e in edges[:20]
-            ]
-
-            tick = 0
-            if isinstance(self.state.world_time, dict):
-                tick = self.state.world_time.get("tick", 0)
-
-            from memento.tools.ipfs import pin_json
-            episode_data = {
-                "version": 1,
-                "episodeId": ep_uuid,
-                "tick": tick,
-                "name": ep_name,
-                "summary": ep_summary,
-                "entities": entity_list,
-                "edges": edge_list,
-            }
-            cid, content_hash = pin_json(episode_data)
-            if cid and content_hash:
-                _chain.record_episode(ep_uuid, content_hash, tick)
-            logger.info(f"Episode synced to chain: {ep_name}")
-
-        except Exception as e:
-            logger.warning(f"Episode chain sync failed: {e}")
 
     def _persist_quest(self, quest_flow) -> None:
         """Persist quest data to KG and link to player."""

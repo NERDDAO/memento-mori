@@ -4,9 +4,9 @@ export default defineWorld({
   namespace: "memento",
   enums: {
     EntityType: ["Character", "NPC", "Item", "Location", "Region", "Quest", "Faction"],
-    EventType: ["CombatOutcome", "QuestComplete", "NPCDeath", "Discovery", "FactionChange", "Death", "GameEvent"],
   },
   tables: {
+    // --- Onchain (permanent, composable) ---
     Characters: {
       schema: {
         id: "bytes32",
@@ -41,44 +41,19 @@ export default defineWorld({
       },
       key: ["id"],
     },
-    Locations: {
+
+    // --- Epoch commitments (state root + IPFS pointer) ---
+    Epochs: {
       schema: {
         id: "bytes32",
-        discoveredBy: "address",
-        discoveredAt: "uint256",
-        name: "string",
-        region: "string",
-      },
-      key: ["id"],
-    },
-    WorldEvents: {
-      schema: {
-        id: "bytes32",
-        eventType: "EventType",
+        stateRoot: "bytes32",
+        ipfsCid: "string",
         tick: "uint256",
         timestamp: "uint256",
-        actors: "string",
-        location: "string",
-        summary: "string",
+        entityCount: "uint32",
+        metadata: "string",
       },
       key: ["id"],
-    },
-    Episodes: {
-      schema: {
-        id: "bytes32",
-        tick: "uint256",
-        timestamp: "uint256",
-        contentHash: "bytes32",
-      },
-      key: ["id"],
-    },
-    Reputation: {
-      schema: {
-        wallet: "address",
-        factionId: "bytes32",
-        standing: "int32",
-      },
-      key: ["wallet", "factionId"],
     },
   },
 });

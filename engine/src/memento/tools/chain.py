@@ -10,8 +10,6 @@ from __future__ import annotations
 import json
 import logging
 import threading
-import uuid as _uuid
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +118,7 @@ def _get_abi() -> list[dict]:
 
 # ── Public API ──
 
-def register_character(uuid: str, name: str, wallet: str, level: int = 1) -> None:
+def register_character(uuid: str, name: str, wallet: str) -> None:
     """Register a character onchain."""
     _send_tx(
         "registerCharacter",
@@ -131,7 +129,7 @@ def register_character(uuid: str, name: str, wallet: str, level: int = 1) -> Non
     )
 
 
-def record_death(character_uuid: str, cause: str, location: str, level: int, tick: int) -> None:
+def record_death(character_uuid: str, cause: str, location: str, tick: int) -> None:
     """Record a permanent death onchain."""
     _send_tx(
         "killCharacter",
@@ -154,44 +152,6 @@ def register_item(uuid: str, name: str, rarity: str, owner_uuid: str, location_u
     )
 
 
-def register_location(uuid: str, name: str, region: str, discoverer_wallet: str = "") -> None:
-    """Register a location onchain."""
-    _send_tx(
-        "registerLocation",
-        _uuid_to_bytes32(uuid),
-        name,
-        region,
-        discoverer_wallet or "0x0000000000000000000000000000000000000000",
-    )
-
-
-def record_event(event_type: str, actors: list[str], location: str, summary: str, tick: int) -> None:
-    """Record a world event onchain."""
-    event_type_map = {
-        "combat_outcome": 0, "quest_complete": 1, "npc_death": 2,
-        "discovery": 3, "faction_change": 4, "death": 5, "game_event": 6,
-    }
-    _send_tx(
-        "recordEvent",
-        _uuid_to_bytes32(_uuid.uuid4().hex),
-        event_type_map.get(event_type, 6),  # default to GameEvent
-        ",".join(actors),
-        location,
-        summary[:500],  # truncate to avoid gas issues
-        tick,
-    )
-
-
-def record_episode(uuid: str, content_hash: bytes, tick: int) -> None:
-    """Record an episode content hash onchain."""
-    _send_tx(
-        "recordEpisode",
-        _uuid_to_bytes32(uuid),
-        content_hash,
-        tick,
-    )
-
-
 def transfer_item(item_uuid: str, new_owner_uuid: str) -> None:
     """Transfer item ownership onchain."""
     _send_tx(
@@ -207,16 +167,6 @@ def drop_item(item_uuid: str, location_uuid: str) -> None:
         "dropItem",
         _uuid_to_bytes32(item_uuid),
         _uuid_to_bytes32(location_uuid),
-    )
-
-
-def update_reputation(wallet: str, faction_uuid: str, delta: int) -> None:
-    """Update faction reputation onchain."""
-    _send_tx(
-        "updateReputation",
-        wallet,
-        _uuid_to_bytes32(faction_uuid),
-        delta,
     )
 
 

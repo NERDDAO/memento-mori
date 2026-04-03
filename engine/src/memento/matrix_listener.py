@@ -90,6 +90,22 @@ class EngineMatrixListener:
         if self.client and event.state_key == self.client.user_id:
             await self.client.join(room.room_id)
             logger.info("Joined room: %s", room.display_name or room.room_id)
+            # Reconcile NPCs in the newly joined room
+            location = room.display_name or ""
+            if location:
+                await asyncio.to_thread(self._reconcile_single_location, location)
+
+    @staticmethod
+    def _reconcile_single_location(location_name: str) -> None:
+        """Reconcile NPCs at a single location (non-fatal)."""
+        try:
+            from memento.agent_controller import get_agent_controller
+            controller = get_agent_controller()
+            spawned = controller.reconcile_location(location_name)
+            if spawned:
+                logger.info("Reconciled %d NPC agents at %s", len(spawned), location_name)
+        except Exception:
+            logger.debug("Reconcile failed for %s", location_name, exc_info=True)
 
     async def _on_action(self, room: MatrixRoom, event: RoomMessageText) -> None:
         """Handle player action messages — single or batch."""
@@ -103,6 +119,9 @@ class EngineMatrixListener:
             actions = rpg_meta.get("actions", [])
             location_name = rpg_meta.get("location", room.display_name or "Unknown")
             logger.info("Batch turn at %s: %d actions", location_name, len(actions))
+
+            # Reconcile NPCs at this location (lazy — only spawns missing ones)
+            await asyncio.to_thread(self._reconcile_single_location, location_name)
 
             narrative, state_update = await asyncio.to_thread(
                 self._run_batch_turn, location_name, actions

@@ -10,11 +10,12 @@ logger = logging.getLogger(__name__)
 MUD_INDEXER_URL = os.getenv("MUD_INDEXER_URL", "http://localhost:3001")
 
 ALLOWED_TABLES = frozenset({
-    "Characters", "Deaths", "Items", "Locations",
-    "WorldEvents", "Episodes", "Reputation",
+    "Characters", "Deaths", "Items",
 })
 
 # Label → MUD table mapping for canonical verification
+# Only entity types with onchain tables are mapped here.
+# Unmapped types (Location, Region, etc.) pass through from KG directly.
 LABEL_TABLE_MAP: dict[str, str] = {
     "Character": "Characters",
     "Player": "Characters",
@@ -22,9 +23,6 @@ LABEL_TABLE_MAP: dict[str, str] = {
     "Weapon": "Items",
     "Armor": "Items",
     "Consumable": "Items",
-    "Location": "Locations",
-    "Room": "Locations",
-    "Region": "Locations",
 }
 
 

@@ -37,14 +37,9 @@ def test_register_character_noop_when_disabled():
     """When chain is disabled, register_character is a silent no-op."""
     from memento.tools.chain import register_character
     # Should not raise even with chain disabled
-    register_character("test-uuid", "TestHero", "", 1)
+    register_character("test-uuid", "TestHero", "")
 
 
 def test_record_death_noop_when_disabled():
     from memento.tools.chain import record_death
-    record_death("test-uuid", "dragon fire", "The Threshold", 1, 42)
-
-
-def test_record_episode_noop_when_disabled():
-    from memento.tools.chain import record_episode
-    record_episode("ep-uuid", b"\x00" * 32, 1)
+    record_death("test-uuid", "dragon fire", "The Threshold", 42)

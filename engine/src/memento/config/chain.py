@@ -11,3 +11,7 @@ CHAIN_ENABLED = bool(MUD_WORLD_ADDRESS and ENGINE_PRIVATE_KEY)
 
 PINATA_JWT = os.getenv("PINATA_JWT", "")
 IPFS_ENABLED = bool(PINATA_JWT)
+
+# Epoch config — commits happen at session boundaries by default
+EPOCH_ENABLED = os.getenv("EPOCH_ENABLED", "true").lower() in ("true", "1", "yes")
+EPOCH_INTERVAL_TICKS = int(os.getenv("EPOCH_INTERVAL_TICKS", "0"))  # 0 = session boundaries only

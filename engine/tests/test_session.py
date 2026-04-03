@@ -54,7 +54,7 @@ def test_create_player_with_wallet():
                         result = sm.create_player("Kael", wallet_address="0xabc123")
 
     assert result["player_id"] == "player-uuid-123"
-    mock_chain.assert_called_once_with("player-uuid-123", "Kael", "0xabc123", 1)
+    mock_chain.assert_called_once_with("player-uuid-123", "Kael", "0xabc123")
 
 
 def test_handle_death():

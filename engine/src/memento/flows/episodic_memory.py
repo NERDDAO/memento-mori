@@ -35,9 +35,8 @@ class EpisodicMemoryFlow(Flow[MemoryState]):
 
     @listen(consolidate)
     def pin_and_record(self, episode_summary):
-        """Pin episode content to IPFS and write hash onchain."""
+        """Pin episode content to IPFS for archival. Chain commits happen at epoch boundaries."""
         from memento.tools.ipfs import pin_json
-        from memento.tools.chain import record_episode, is_enabled
 
         episode_id = _uuid.uuid4().hex
 
@@ -51,12 +50,11 @@ class EpisodicMemoryFlow(Flow[MemoryState]):
             "edges": "",
         }
 
-        cid, content_hash = pin_json(episode_data)
+        cid, _content_hash = pin_json(episode_data)
 
-        if cid and content_hash and is_enabled():
-            record_episode(episode_id, content_hash, self.state.tick)
-            logger.info(f"Episode recorded: {episode_id} -> IPFS {cid}")
-        elif not cid:
+        if cid:
+            logger.info(f"Episode pinned to IPFS: {episode_id} -> {cid}")
+        else:
             logger.warning(f"Episode {episode_id} not pinned — IPFS upload failed or disabled")
 
     @listen(consolidate)
