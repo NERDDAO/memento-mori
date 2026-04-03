@@ -200,6 +200,26 @@ function handleMessage(msg: any): void {
       narrative.addBlock(deathMsg, 'death-feed');
       break;
     }
+    case 'scene_art': {
+      // Render scene art as a narrative block
+      const artText = (msg.lines || []).join('\n');
+      if (artText) {
+        narrative.addBlock(artText, 'scene-art');
+      }
+      break;
+    }
+    case 'entity_art': {
+      // Cache on the entity in game state
+      if (msg.entity_id && gameState) {
+        const npc = gameState.location.npcs.find(n => n.id === msg.entity_id);
+        const item = gameState.location.items.find(i => i.id === msg.entity_id);
+        const entity = npc || item;
+        if (entity) {
+          entity.ascii_art = (msg.lines || []).join('\n');
+        }
+      }
+      break;
+    }
     case 'phase':
       updateRoundState(msg as PhaseMessage);
       break;

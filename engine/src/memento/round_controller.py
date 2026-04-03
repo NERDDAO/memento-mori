@@ -363,6 +363,15 @@ class RoundController:
             )
             self.narrative = ""
 
+        # 5b. Fire-and-forget scene art
+        if self.narrative:
+            import threading
+            threading.Thread(
+                target=self.request_art,
+                args=(self.context[:500],),
+                daemon=True,
+            ).start()
+
         # 6. Post-turn bookkeeping (memory, time advance)
         if self.narrative:
             self.post_turn()
@@ -405,6 +414,53 @@ class RoundController:
             subsystem_warnings=self.subsystem_warnings,
         )
         return state_update.model_dump(exclude_none=True)
+
+    # ------------------------------------------------------------------
+    # ASCII art generation (fire-and-forget)
+    # ------------------------------------------------------------------
+
+    def request_art(self, description: str) -> None:
+        """Fire-and-forget: generate scene art if not cached."""
+        try:
+            from memento.bonfires_client import get_client
+            client = get_client()
+            # Check KG for cached art
+            from memento.tools.kg import _resolve_entity_uuid
+            loc_uuid = _resolve_entity_uuid(self.location)
+            if loc_uuid:
+                entity = client.kg.get_entity(loc_uuid)
+                if entity and entity.get("properties", {}).get("ascii_art"):
+                    return  # Already cached
+
+            # Generate in background
+            from memento.crews.ascii_art.crew import make_scene_art_crew
+            crew = make_scene_art_crew(self.location, description, "dark fantasy")
+            result = crew.kickoff()
+            art_text = result.raw.strip()
+
+            # Cache in KG
+            if loc_uuid and art_text:
+                client.kg.update_entity(loc_uuid, {"ascii_art": art_text})
+
+            # Post to Matrix
+            if art_text and self.matrix_client and self.room_id and self.loop:
+                lines = art_text.split('\n')
+                content = {
+                    "msgtype": "m.text",
+                    "body": art_text,
+                    "com.bonfires.rpg": {
+                        "type": "scene_art",
+                        "location": self.location,
+                        "lines": lines,
+                        "width": max(len(l) for l in lines) if lines else 0,
+                        "height": len(lines),
+                        "channel": "narrative",
+                    },
+                }
+                coro = self.matrix_client.room_send(self.room_id, "m.room.message", content)
+                asyncio.run_coroutine_threadsafe(coro, self.loop)
+        except Exception:
+            logger.warning("Art generation failed for %s", self.location, exc_info=True)
 
     # ------------------------------------------------------------------
     # Quest persistence (ported from GameTurnFlow)

@@ -14,6 +14,7 @@ export interface LocationEntity {
   name: string;
   id: string;
   role?: string;
+  ascii_art?: string;  // cached ASCII art
 }
 
 export interface GameState {
@@ -94,8 +95,29 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
   if (update.level != null) state.player.level = update.level;
   if (update.xp != null) state.player.xp = update.xp;
   if (update.exits) state.location.exits = update.exits;
-  if (update.npcs) state.location.npcs = update.npcs;
-  if (update.items) state.location.items = update.items;
+  if (update.npcs) {
+    state.location.npcs = (update.npcs as any[]).map((n: any) => {
+      // Preserve cached ascii_art from previous state if not in update
+      const existing = state.location.npcs.find(e => e.id === n.id);
+      return {
+        name: n.name || '',
+        id: n.id || '',
+        role: n.role || '',
+        ascii_art: n.ascii_art || existing?.ascii_art,
+      };
+    });
+  }
+  if (update.items) {
+    state.location.items = (update.items as any[]).map((i: any) => {
+      const existing = state.location.items.find(e => e.id === i.id);
+      return {
+        name: i.name || '',
+        id: i.id || '',
+        role: i.role || '',
+        ascii_art: i.ascii_art || existing?.ascii_art,
+      };
+    });
+  }
   if (update.inventory) {
     state.inventory = update.inventory.map((i: any) => ({
       name: i.name || '?',
@@ -116,17 +138,25 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
       }));
     }
     if (rm.npcs) {
-      state.location.npcs = rm.npcs.map((n: any) => ({
-        name: n.name || '',
-        id: n.id || '',
-        role: n.role || '',
-      }));
+      state.location.npcs = rm.npcs.map((n: any) => {
+        const existing = state.location.npcs.find(e => e.id === n.id);
+        return {
+          name: n.name || '',
+          id: n.id || '',
+          role: n.role || '',
+          ascii_art: existing?.ascii_art,
+        };
+      });
     }
     if (rm.items) {
-      state.location.items = rm.items.map((i: any) => ({
-        name: i.name || '',
-        id: i.id || '',
-      }));
+      state.location.items = rm.items.map((i: any) => {
+        const existing = state.location.items.find(e => e.id === i.id);
+        return {
+          name: i.name || '',
+          id: i.id || '',
+          ascii_art: existing?.ascii_art,
+        };
+      });
     }
   }
   if (update.active_quests) {

@@ -118,6 +118,24 @@ class MatrixBridge:
                 })
             return
 
+        # Scene / entity art — forward to WebSocket clients
+        if rpg_type in ("scene_art", "entity_art"):
+            location = rpg_meta.get("location", self.room_to_location.get(room.room_id, ""))
+            msg = {
+                "type": rpg_type,
+                "lines": rpg_meta.get("lines", []),
+                "width": rpg_meta.get("width", 0),
+                "height": rpg_meta.get("height", 0),
+                "location": location,
+                "channel": "narrative",
+            }
+            if rpg_type == "entity_art":
+                msg["entity_id"] = rpg_meta.get("entity_id", "")
+                msg["entity_name"] = rpg_meta.get("entity_name", "")
+            if location:
+                await self.ws_hub.broadcast_to_location(location, msg)
+            return
+
         if rpg_type == "narrative":
             location = self.room_to_location.get(room.room_id, "")
             state_update = rpg_meta.get("state_update", {})

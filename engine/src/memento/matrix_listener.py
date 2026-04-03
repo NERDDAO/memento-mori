@@ -150,6 +150,12 @@ class EngineMatrixListener:
             action_text = event.body
             logger.info("Action from %s: %s", player_id, action_text)
 
+            # TODO(step-3.6): Detect examine/look actions targeting a specific entity
+            # and trigger make_entity_art_crew() for that entity. The ASCII art crew
+            # infrastructure is in place (crews/ascii_art/crew.py); the missing piece
+            # is parsing the action text to extract the target entity name/id and
+            # matching it against KG entities at this location.
+
             location_name = room.display_name or "Unknown"
             narrative, state_update = await asyncio.to_thread(
                 self._run_turn, player_id, location_name, action_text,
