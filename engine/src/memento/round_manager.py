@@ -35,6 +35,7 @@ class RoundManager:
         self.window = window_seconds
         self.active_rounds: dict[str, Round] = {}  # location -> Round
         self._callbacks: list[Any] = []
+        self._action_callbacks: list[Any] = []
 
     def on_round_close(self, callback: Any) -> None:
         """Register a callback for when a round closes.
@@ -42,6 +43,13 @@ class RoundManager:
         Callback signature: async def callback(location: str, actions: list[PlayerAction])
         """
         self._callbacks.append(callback)
+
+    def on_action(self, callback: Any) -> None:
+        """Register a callback fired on every submitted action.
+
+        Callback signature: async def callback(location: str, action_count: int, deadline: float)
+        """
+        self._action_callbacks.append(callback)
 
     async def submit_action(
         self, player_id: str, player_name: str, location: str, action: str
@@ -64,6 +72,12 @@ class RoundManager:
                     action=action,
                 )
             )
+            # Notify listeners of new action
+            for cb in self._action_callbacks:
+                try:
+                    await cb(location, len(round_.actions), round_.deadline)
+                except Exception:
+                    logger.error("Action callback error", exc_info=True)
 
     async def _close_after_window(self, location: str) -> None:
         """Wait for the window, then close the round and dispatch."""
