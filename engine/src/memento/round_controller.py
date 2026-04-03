@@ -52,6 +52,35 @@ def _record_narration(location: str) -> None:
     _last_narration[location] = time.monotonic()
 
 
+def query_active_quests(player_uuid: str) -> list[dict]:
+    """Query KG for player's active quests. Returns list of quest summaries."""
+    if not player_uuid:
+        return []
+    try:
+        from memento.bonfires_client import get_client
+        client = get_client()
+
+        result = client.kg.search(f"quest player {player_uuid}", num_results=10)
+        entities = result.get("entities", result.get("nodes", []))
+
+        quests = []
+        for entity in entities:
+            labels = entity.get("labels", [])
+            if "Quest" in labels:
+                quests.append({
+                    "name": entity.get("name", "Unknown Quest"),
+                    "description": entity.get("summary", ""),
+                    "giver": entity.get("giver", ""),
+                    "current_stage": 0,
+                    "total_stages": 3,
+                    "completed": False,
+                })
+        return quests
+    except Exception:
+        logger.warning("Failed to query active quests", exc_info=True)
+        return []
+
+
 class RoundController:
     """Explicit stoplight controller that replaces GameTurnFlow's auto-chaining.
 
@@ -363,13 +392,9 @@ class RoundController:
 
         # Query active quests for primary player
         active_quests = None
-        try:
-            from memento.flows.game_turn import GameTurnFlow
-            raw_quests = GameTurnFlow.query_active_quests(self.player_name)
-            if raw_quests:
-                active_quests = [QuestSummary(**q) for q in raw_quests]
-        except Exception:
-            logger.debug("Quest query failed", exc_info=True)
+        raw_quests = query_active_quests(self.player_name)
+        if raw_quests:
+            active_quests = [QuestSummary(**q) for q in raw_quests]
 
         state_update = StateUpdate(
             location=self.location,
