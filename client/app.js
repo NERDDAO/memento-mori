@@ -44,10 +44,28 @@ function applyStateUpdate(state, update) {
     state.player.xp = update.xp;
   if (update.exits)
     state.location.exits = update.exits;
-  if (update.npcs)
-    state.location.npcs = update.npcs;
-  if (update.items)
-    state.location.items = update.items;
+  if (update.npcs) {
+    state.location.npcs = update.npcs.map((n) => {
+      const existing = state.location.npcs.find((e) => e.id === n.id);
+      return {
+        name: n.name || "",
+        id: n.id || "",
+        role: n.role || "",
+        ascii_art: n.ascii_art || existing?.ascii_art
+      };
+    });
+  }
+  if (update.items) {
+    state.location.items = update.items.map((i) => {
+      const existing = state.location.items.find((e) => e.id === i.id);
+      return {
+        name: i.name || "",
+        id: i.id || "",
+        role: i.role || "",
+        ascii_art: i.ascii_art || existing?.ascii_art
+      };
+    });
+  }
   if (update.inventory) {
     state.inventory = update.inventory.map((i) => ({
       name: i.name || "?",
@@ -69,17 +87,25 @@ function applyStateUpdate(state, update) {
       }));
     }
     if (rm.npcs) {
-      state.location.npcs = rm.npcs.map((n) => ({
-        name: n.name || "",
-        id: n.id || "",
-        role: n.role || ""
-      }));
+      state.location.npcs = rm.npcs.map((n) => {
+        const existing = state.location.npcs.find((e) => e.id === n.id);
+        return {
+          name: n.name || "",
+          id: n.id || "",
+          role: n.role || "",
+          ascii_art: existing?.ascii_art
+        };
+      });
     }
     if (rm.items) {
-      state.location.items = rm.items.map((i) => ({
-        name: i.name || "",
-        id: i.id || ""
-      }));
+      state.location.items = rm.items.map((i) => {
+        const existing = state.location.items.find((e) => e.id === i.id);
+        return {
+          name: i.name || "",
+          id: i.id || "",
+          ascii_art: existing?.ascii_art
+        };
+      });
     }
   }
   if (update.active_quests) {
@@ -342,19 +368,6 @@ function highlightEntities(text) {
     segments.push({ text: text.slice(lastIdx), style: "normal" });
   }
   return segments.length ? segments : [{ text, style: "normal" }];
-}
-function renderSegments(segments) {
-  return segments.map((seg) => {
-    if (seg.style === "entity" && seg.entityId) {
-      const typeClass = seg.entityType ? `entity-${seg.entityType}` : "";
-      return `<span class="entity-link ${typeClass}" data-entity-id="${escapeHtml(seg.entityId)}" data-entity-name="${escapeHtml(seg.text)}">${escapeHtml(seg.text)}</span>`;
-    }
-    const cls = seg.style === "normal" ? "" : seg.style;
-    return cls ? `<span class="${cls}">${escapeHtml(seg.text)}</span>` : escapeHtml(seg.text);
-  }).join("");
-}
-function escapeHtml(text) {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 // node_modules/@chenglou/pretext/dist/bidi.js
@@ -3157,28 +3170,169 @@ class NarrativeStore {
   }
 }
 
+// src/renderer/canvas-text.ts
+var ATTR_BOLD = 1;
+var ATTR_ITALIC = 2;
+var ATTR_UNDERLINE = 4;
+var MONO_FONT = "13px monospace";
+function fontForAttrs(baseFont, attrs) {
+  if (!attrs)
+    return baseFont;
+  const sizeMatch = baseFont.match(/(\d+px\s+.+)$/);
+  const sizeAndFamily = sizeMatch ? sizeMatch[1] : baseFont;
+  const parts = [];
+  if (attrs & ATTR_ITALIC)
+    parts.push("italic");
+  if (attrs & ATTR_BOLD)
+    parts.push("bold");
+  parts.push(sizeAndFamily);
+  return parts.join(" ");
+}
+function measureChar(ctx, font) {
+  ctx.font = font;
+  const metrics = ctx.measureText("M");
+  const width = metrics.width;
+  const ascent = metrics.actualBoundingBoxAscent ?? 0;
+  const descent = metrics.actualBoundingBoxDescent ?? 0;
+  const measured = ascent + descent;
+  const height = measured > 0 ? Math.ceil(measured * 1.38) : 18;
+  return { width, height };
+}
+function fillCell(ctx, col, row, cell, charSize) {
+  const px = col * charSize.width;
+  const py = row * charSize.height;
+  if (cell.bg) {
+    ctx.fillStyle = cell.bg;
+    ctx.fillRect(px, py, charSize.width, charSize.height);
+  }
+  if (cell.char && cell.char !== " ") {
+    ctx.font = fontForAttrs(MONO_FONT, cell.attrs);
+    ctx.fillStyle = cell.fg;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    const fontSize = parseInt(ctx.font.replace(/^[^\d]*/, "")) || 13;
+    const yOffset = (charSize.height - fontSize) * 0.35;
+    ctx.fillText(cell.char, px, py + yOffset);
+  }
+  if (cell.attrs && cell.attrs & ATTR_UNDERLINE) {
+    ctx.strokeStyle = cell.fg;
+    ctx.lineWidth = 1;
+    const underY = py + charSize.height - 2;
+    ctx.beginPath();
+    ctx.moveTo(px, underY);
+    ctx.lineTo(px + charSize.width, underY);
+    ctx.stroke();
+  }
+}
+
 // src/panels/narrative.ts
+var BLOCK_TYPE_COLORS = {
+  narrative: theme.colors.primary,
+  "player-action": theme.colors.dim,
+  system: theme.colors.system,
+  thinking: theme.colors.system,
+  event: theme.colors.dim,
+  "event-combat": theme.colors.damage,
+  "event-xp": theme.colors.heal,
+  "event-death": theme.colors.damage,
+  "event-item": theme.colors.npc,
+  ooc: theme.colors.accent,
+  divider: theme.colors.dim,
+  "death-feed": theme.colors.damage,
+  "scene-art": theme.colors.dim
+};
+var ENTITY_TYPE_COLORS = {
+  npc: theme.colors.npc,
+  item: theme.colors.heal,
+  location: theme.colors.location,
+  exit: theme.colors.location
+};
+function segmentColor(seg, blockColor) {
+  switch (seg.style) {
+    case "npc":
+      return { fg: theme.colors.npc };
+    case "damage":
+      return { fg: theme.colors.damage, attrs: ATTR_BOLD };
+    case "heal":
+      return { fg: theme.colors.heal, attrs: ATTR_BOLD };
+    case "system":
+      return { fg: theme.colors.system };
+    case "location":
+      return { fg: theme.colors.location };
+    case "italic":
+      return { fg: blockColor, attrs: ATTR_ITALIC };
+    case "bold":
+      return { fg: blockColor, attrs: ATTR_BOLD };
+    case "entity":
+      return {
+        fg: ENTITY_TYPE_COLORS[seg.entityType || ""] || theme.colors.npc,
+        attrs: ATTR_UNDERLINE
+      };
+    case "normal":
+    default:
+      return { fg: blockColor };
+  }
+}
 function initNarrative(container) {
   const store = new NarrativeStore(container.clientWidth);
   let userAtBottom = true;
   let renderScheduled = false;
   let thinkingBlockId = null;
-  const spacer = document.createElement("div");
-  spacer.style.position = "relative";
-  spacer.style.minHeight = "100%";
+  let scrollOffset = 0;
+  let hitRegions = [];
+  let thinkingDots = 0;
+  let thinkingTimer = null;
   container.innerHTML = "";
-  container.appendChild(spacer);
-  container.addEventListener("scroll", () => {
-    const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 50;
-    userAtBottom = atBottom;
-    scheduleRender();
-  });
-  const resizeObserver = new ResizeObserver(() => {
+  const canvas = document.createElement("canvas");
+  canvas.style.display = "block";
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+  canvas.style.cursor = "default";
+  container.appendChild(canvas);
+  container.style.overflowY = "hidden";
+  const maybeCtx = canvas.getContext("2d");
+  if (!maybeCtx)
+    throw new Error("Narrative: failed to get 2d context");
+  const ctx = maybeCtx;
+  const charSize = measureChar(ctx, MONO_FONT);
+  const segmentCache = new Map;
+  const layoutCache = new Map;
+  let canvasW = 0;
+  let canvasH = 0;
+  let cols = 0;
+  function resize() {
+    const rect = container.getBoundingClientRect();
+    if (!rect.width || !rect.height)
+      return;
+    const dpr = window.devicePixelRatio || 1;
+    canvasW = rect.width;
+    canvasH = rect.height;
+    canvas.width = Math.floor(canvasW * dpr);
+    canvas.height = Math.floor(canvasH * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cols = Math.floor(canvasW / charSize.width);
     store.remeasure(container.clientWidth);
-    spacer.style.height = `${store.totalHeight}px`;
+    clampScroll();
     scheduleRender();
-  });
+  }
+  const resizeObserver = new ResizeObserver(() => resize());
   resizeObserver.observe(container);
+  resize();
+  function clampScroll() {
+    const maxScroll = Math.max(0, store.totalHeight - canvasH);
+    scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
+  }
+  function scrollToBottom() {
+    scrollOffset = Math.max(0, store.totalHeight - canvasH);
+  }
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    scrollOffset += e.deltaY;
+    clampScroll();
+    const maxScroll = Math.max(0, store.totalHeight - canvasH);
+    userAtBottom = scrollOffset >= maxScroll - 30;
+    scheduleRender();
+  }, { passive: false });
   function scheduleRender() {
     if (renderScheduled)
       return;
@@ -3188,74 +3342,235 @@ function initNarrative(container) {
       renderVisible();
     });
   }
+  function layoutBlock(blockId, blockText, blockType) {
+    const cached = layoutCache.get(blockId);
+    if (cached && cached.cols === cols && blockType !== "thinking") {
+      return cached.placed;
+    }
+    const blockColor = BLOCK_TYPE_COLORS[blockType] || theme.colors.primary;
+    const padding = 2;
+    const maxCol = Math.max(cols - padding * 2, 10);
+    if (blockType === "divider") {
+      const rule = "─".repeat(Math.min(maxCol, cols - padding * 2));
+      return [{ text: rule, col: padding, row: 0, fg: theme.colors.dim }];
+    }
+    let segments = segmentCache.get(blockId);
+    if (!segments) {
+      if (blockType === "thinking") {
+        const dots = ".".repeat(thinkingDots % 4);
+        segments = [{ text: `The world responds${dots}`, style: "normal" }];
+      } else if (blockType === "player-action" || blockType === "system") {
+        segments = [{ text: blockText, style: "normal" }];
+      } else {
+        segments = parseNarrative(blockText);
+      }
+      if (blockType !== "thinking") {
+        segmentCache.set(blockId, segments);
+      }
+    }
+    const placed = [];
+    let col = padding;
+    let row = 0;
+    for (const seg of segments) {
+      const { fg, attrs } = segmentColor(seg, blockColor);
+      const lines = seg.text.split(`
+`);
+      for (let li = 0;li < lines.length; li++) {
+        if (li > 0) {
+          col = padding;
+          row++;
+        }
+        const words = lines[li].split(/( +)/);
+        for (const word of words) {
+          if (!word)
+            continue;
+          if (col + word.length > padding + maxCol && col > padding) {
+            col = padding;
+            row++;
+          }
+          if (word.length > maxCol) {
+            let pos = 0;
+            while (pos < word.length) {
+              const chunk = word.slice(pos, pos + maxCol - (col - padding));
+              placed.push({
+                text: chunk,
+                col,
+                row,
+                fg,
+                attrs,
+                entityId: seg.entityId,
+                entityName: seg.style === "entity" ? seg.text : undefined
+              });
+              col += chunk.length;
+              pos += chunk.length;
+              if (pos < word.length) {
+                col = padding;
+                row++;
+              }
+            }
+          } else {
+            placed.push({
+              text: word,
+              col,
+              row,
+              fg,
+              attrs,
+              entityId: seg.entityId,
+              entityName: seg.style === "entity" ? seg.text : undefined
+            });
+            col += word.length;
+          }
+        }
+      }
+    }
+    if (blockType !== "thinking") {
+      layoutCache.set(blockId, { cols, placed });
+    }
+    return placed;
+  }
   function renderVisible() {
-    const scrollTop = container.scrollTop;
-    const viewportHeight = container.clientHeight;
-    const { start, end } = store.getVisibleRange(scrollTop, viewportHeight);
-    const existingBlocks = spacer.querySelectorAll(".narrative-block");
-    existingBlocks.forEach((el) => el.remove());
+    ctx.clearRect(0, 0, canvasW, canvasH);
+    ctx.fillStyle = theme.colors.bg;
+    ctx.fillRect(0, 0, canvasW, canvasH);
+    if (store.length === 0)
+      return;
+    const { start, end } = store.getVisibleRange(scrollOffset, canvasH);
+    hitRegions = [];
     for (let i = start;i < end; i++) {
       const block = store.getBlock(i);
       if (!block)
         continue;
-      const el = document.createElement("div");
-      el.className = `narrative-block ${block.type}`;
-      el.style.position = "absolute";
-      el.style.top = `${block.y}px`;
-      el.style.left = "0";
-      el.style.right = "0";
-      el.innerHTML = block.html;
-      spacer.appendChild(el);
+      const blockScreenY = block.y - scrollOffset;
+      if (blockScreenY + block.height < 0 || blockScreenY > canvasH)
+        continue;
+      const placed = layoutBlock(block.id, block.text, block.type);
+      for (const seg of placed) {
+        const segPixelY = blockScreenY + seg.row * charSize.height;
+        if (segPixelY + charSize.height < 0 || segPixelY > canvasH)
+          continue;
+        drawTextAtPixel(ctx, seg.col, segPixelY, seg.text, seg.fg, charSize, seg.attrs);
+        if (seg.entityId) {
+          hitRegions.push({
+            x: seg.col * charSize.width,
+            y: segPixelY,
+            w: seg.text.length * charSize.width,
+            h: charSize.height,
+            entityId: seg.entityId,
+            entityName: seg.entityName || seg.text
+          });
+        }
+      }
     }
   }
-  function addBlockInternal(text, html, type) {
-    const block = store.add(text, html, type);
-    spacer.style.height = `${store.totalHeight}px`;
+  function drawTextAtPixel(ctx2, col, pixelY, text, fg, cs, attrs) {
+    ctx2.font = fontForAttrs(MONO_FONT, attrs);
+    ctx2.fillStyle = fg;
+    ctx2.textBaseline = "top";
+    ctx2.textAlign = "left";
+    const yOffset = (cs.height - 13) * 0.35;
+    for (let i = 0;i < text.length; i++) {
+      const px = (col + i) * cs.width;
+      ctx2.fillText(text[i], px, pixelY + yOffset);
+    }
+    if (attrs && attrs & ATTR_UNDERLINE) {
+      ctx2.strokeStyle = fg;
+      ctx2.lineWidth = 1;
+      const underY = pixelY + cs.height - 2;
+      const startX = col * cs.width;
+      ctx2.beginPath();
+      ctx2.moveTo(startX, underY);
+      ctx2.lineTo(startX + text.length * cs.width, underY);
+      ctx2.stroke();
+    }
+  }
+  canvas.addEventListener("click", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    for (const region of hitRegions) {
+      if (mx >= region.x && mx < region.x + region.w && my >= region.y && my < region.y + region.h) {
+        canvas.dispatchEvent(new CustomEvent("narrative-entity-click", {
+          detail: { entityId: region.entityId, entityName: region.entityName },
+          bubbles: true
+        }));
+        return;
+      }
+    }
+  });
+  canvas.addEventListener("mousemove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    let overEntity = false;
+    for (const region of hitRegions) {
+      if (mx >= region.x && mx < region.x + region.w && my >= region.y && my < region.y + region.h) {
+        overEntity = true;
+        break;
+      }
+    }
+    canvas.style.cursor = overEntity ? "pointer" : "default";
+  });
+  function addBlockInternal(text, type) {
+    const block = store.add(text, "", type);
     if (userAtBottom) {
       requestAnimationFrame(() => {
-        container.scrollTop = container.scrollHeight;
+        scrollToBottom();
+        scheduleRender();
       });
     }
     scheduleRender();
     return block.id;
   }
+  function startThinkingAnimation() {
+    if (thinkingTimer)
+      return;
+    thinkingDots = 0;
+    thinkingTimer = setInterval(() => {
+      thinkingDots = (thinkingDots + 1) % 4;
+      if (thinkingBlockId)
+        segmentCache.delete(thinkingBlockId);
+      scheduleRender();
+    }, 500);
+  }
+  function stopThinkingAnimation() {
+    if (thinkingTimer) {
+      clearInterval(thinkingTimer);
+      thinkingTimer = null;
+    }
+  }
   let lastPhase = "";
   onRoundStateChange((rs) => {
     if (rs.phase === "resolving" && lastPhase !== "resolving") {
-      addBlockInternal("", '<hr class="round-divider">', "divider");
+      addBlockInternal("", "divider");
     }
     lastPhase = rs.phase;
   });
   return {
     addBlock(text, type) {
-      let html;
-      if (type === "thinking") {
-        html = "The world responds";
-      } else if (type === "player-action" || type === "system") {
-        html = text.replace(/\n/g, "<br>").replace(/"([^"]+)"/g, '<span class="npc-name">"$1"</span>');
-      } else {
-        const segments = parseNarrative(text);
-        html = renderSegments(segments);
-      }
-      addBlockInternal(text, html, type);
+      addBlockInternal(text, type);
     },
     addHtml(html, type) {
       const temp = document.createElement("div");
       temp.innerHTML = html;
       const text = temp.textContent || temp.innerText || html;
-      addBlockInternal(text, html, type);
+      addBlockInternal(text, type);
     },
     showThinking() {
-      thinkingBlockId = addBlockInternal("The world responds", "The world responds", "thinking");
+      thinkingBlockId = addBlockInternal("The world responds", "thinking");
+      startThinkingAnimation();
     },
     removeThinking() {
+      stopThinkingAnimation();
       if (thinkingBlockId) {
+        segmentCache.delete(thinkingBlockId);
+        layoutCache.delete(thinkingBlockId);
         store.removeById(thinkingBlockId);
         thinkingBlockId = null;
-        spacer.style.height = `${store.totalHeight}px`;
+        clampScroll();
         scheduleRender();
       }
-    }
+    },
+    canvas
   };
 }
 
@@ -4189,32 +4504,71 @@ class WorldMapRenderer {
   }
 }
 
-// src/panels/character.ts
-function renderSkills(skills) {
-  const entries = Object.entries(skills).filter(([, v]) => v > 0);
-  if (entries.length === 0)
-    return "";
-  const lines = entries.map(([name, level]) => {
-    const dots = "●".repeat(level) + "○".repeat(Math.max(0, 5 - level));
-    return `<div class="skill-row"><span class="skill-name">${name}</span> <span class="skill-dots">${dots}</span></div>`;
-  });
-  return `<div class="skills-section">${lines.join("")}</div>`;
+// src/panels/panel-utils.ts
+function textRow(text, fg, cols, attrs) {
+  const row = [];
+  for (let i = 0;i < cols; i++) {
+    row.push({ char: i < text.length ? text[i] : " ", fg, attrs });
+  }
+  return row;
 }
-function renderCharacterPanel(body, state2) {
+function coloredRow(segments, cols) {
+  const row = [];
+  for (const seg of segments) {
+    for (const ch of seg.text) {
+      row.push({ char: ch, fg: seg.fg, attrs: seg.attrs });
+    }
+  }
+  while (row.length < cols) {
+    row.push({ char: " ", fg: theme.colors.primary });
+  }
+  return row;
+}
+function emptyRow(cols) {
+  return Array.from({ length: cols }, () => ({ char: " ", fg: theme.colors.primary }));
+}
+
+// src/panels/character.ts
+function barRow(label, value, max, barLen, fullColor, emptyColor, cols) {
+  const pct = max > 0 ? Math.min(value / max, 1) : 0;
+  const filled = Math.round(pct * barLen);
+  const empty = barLen - filled;
+  const valText = ` ${value}/${max}`;
+  const segments = [
+    { text: label + " ", fg: theme.colors.dim },
+    { text: "█".repeat(filled), fg: fullColor },
+    { text: "░".repeat(empty), fg: emptyColor },
+    { text: valText, fg: theme.colors.primary }
+  ];
+  return coloredRow(segments, cols);
+}
+function renderCharacterPanel(panel, state2) {
   const p = state2.player;
-  const hpPct = p.maxHealth > 0 ? Math.round(p.health / p.maxHealth * 100) : 0;
-  const xpPct = p.xpThreshold > 0 ? Math.round(p.xp / p.xpThreshold * 100) : 0;
-  const hpFill = Math.round(hpPct / 10);
-  const xpFill = Math.round(xpPct / 10);
-  const archLabel = p.archetype ? `<div class="archetype-label">${p.archetype}</div>` : "";
-  const skillsHtml = renderSkills(p.skills);
-  body.innerHTML = `
-    ${archLabel}
-    <div><span class="stat-label">HP</span> <span class="bar-fill-hp">${"█".repeat(hpFill)}</span><span class="bar-empty">${"░".repeat(10 - hpFill)}</span> <span style="color:var(--text-dim)">${p.health}/${p.maxHealth}</span></div>
-    <div><span class="stat-label">XP</span> <span class="bar-fill-xp">${"█".repeat(xpFill)}</span><span class="bar-empty">${"░".repeat(10 - xpFill)}</span> <span style="color:var(--text-dim)">${p.xp}/${p.xpThreshold}</span></div>
-    <div><span class="stat-label">Lv</span> ${p.level}</div>
-    ${skillsHtml}
-  `;
+  const cols = panel.cols;
+  const cells = [];
+  if (p.archetype) {
+    cells.push(textRow(p.archetype, theme.colors.accent, cols));
+    cells.push(emptyRow(cols));
+  }
+  const hpColor = p.health / p.maxHealth > 0.3 ? theme.colors.heal : theme.colors.damage;
+  cells.push(barRow("HP", p.health, p.maxHealth, 10, hpColor, theme.colors.dim, cols));
+  cells.push(barRow("XP", p.xp, p.xpThreshold, 10, theme.colors.accent, theme.colors.dim, cols));
+  cells.push(coloredRow([
+    { text: "Lv ", fg: theme.colors.dim },
+    { text: String(p.level), fg: theme.colors.primary }
+  ], cols));
+  const skillEntries = Object.entries(p.skills).filter(([, v]) => v > 0);
+  if (skillEntries.length > 0) {
+    cells.push(emptyRow(cols));
+    for (const [name, level] of skillEntries) {
+      const dots = "●".repeat(level) + "○".repeat(Math.max(0, 5 - level));
+      cells.push(coloredRow([
+        { text: name + " ", fg: theme.colors.primary },
+        { text: dots, fg: theme.colors.accent }
+      ], cols));
+    }
+  }
+  panel.paint(cells);
 }
 
 // src/panels/inventory.ts
@@ -4225,137 +4579,293 @@ var RARITY_COLORS = {
   epic: "#a335ee",
   legendary: "#ff8000"
 };
-function renderInventoryPanel(body, state2) {
+function renderInventoryPanel(panel, state2) {
+  const cols = panel.cols;
+  const cells = [];
   if (state2.inventory.length === 0) {
-    body.innerHTML = '<div class="empty-msg">Empty</div>';
+    cells.push(textRow("Empty", theme.colors.dim, cols));
+    panel.paint(cells);
     return;
   }
-  body.innerHTML = state2.inventory.map((item) => {
+  for (const item of state2.inventory) {
     const color = RARITY_COLORS[item.rarity] || RARITY_COLORS.common;
-    const equip = item.equipped ? '<span class="item-equip">E</span>' : "";
-    return `<div class="item-row"><span class="item-bullet">·</span> <span style="color:${color}">${item.name}</span>${equip}</div>`;
-  }).join("");
+    const segments = [
+      { text: "· ", fg: theme.colors.dim },
+      { text: item.name, fg: color }
+    ];
+    if (item.equipped) {
+      segments.push({ text: " [E]", fg: theme.colors.heal });
+    }
+    cells.push(coloredRow(segments, cols));
+  }
+  panel.paint(cells);
 }
 
 // src/panels/exits.ts
-function renderExitsPanel(body, state2, onAction) {
+function renderExitsPanel(panel, state2, onAction) {
+  const cols = panel.cols;
+  const cells = [];
+  panel.clearHitRegions();
   if (state2.location.exits.length === 0) {
-    body.innerHTML = '<div class="empty-msg">None</div>';
+    cells.push(textRow("None", theme.colors.dim, cols));
+    panel.paint(cells);
     return;
   }
-  body.innerHTML = state2.location.exits.map((e) => {
+  for (const e of state2.location.exits) {
     const dir = typeof e === "string" ? e : e.direction;
     const dest = typeof e === "string" ? "" : e.name;
     const label = dir.charAt(0).toUpperCase() + dir.slice(1);
-    return `<div class="exit-row" data-dir="${dir}"><span class="exit-dir">→ ${label}</span>${dest ? `<span class="exit-dest">${dest}</span>` : ""}</div>`;
-  }).join("");
-  body.querySelectorAll(".exit-row").forEach((row) => {
-    row.addEventListener("click", () => onAction(`go ${row.dataset.dir}`));
-  });
+    const segments = [
+      { text: "→ " + label, fg: theme.colors.location }
+    ];
+    if (dest) {
+      segments.push({ text: "  " + dest, fg: theme.colors.dim });
+    }
+    const rowIdx = cells.length;
+    cells.push(coloredRow(segments, cols));
+    panel.registerHitRegion({
+      col: 0,
+      row: rowIdx,
+      width: cols,
+      height: 1,
+      data: { action: `go ${dir}` }
+    });
+  }
+  panel.paint(cells);
 }
 
 // src/panels/present.ts
-var currentBody = null;
-onRoundStateChange((rs) => {
-  if (!currentBody)
-    return;
-  const rows = currentBody.querySelectorAll(".npc-row");
-  rows.forEach((row) => {
-    row.classList.toggle("npc-thinking", rs.phase === "npc_response");
-  });
-});
-function renderPresentPanel(body, state2, onAction) {
-  currentBody = body;
+function renderPresentPanel(panel, state2, onAction) {
+  const cols = panel.cols;
+  const cells = [];
   const npcs = state2.location.npcs || [];
   const items = state2.location.items || [];
   const players = state2.location.players || [];
+  panel.clearHitRegions();
   if (npcs.length === 0 && items.length === 0 && players.length === 0) {
-    body.innerHTML = '<div class="empty-msg">Nothing here</div>';
+    cells.push(textRow("Nothing here", theme.colors.dim, cols));
+    panel.paint(cells);
     return;
   }
   const rs = getRoundState();
-  const thinkingClass = rs.phase === "npc_response" ? " npc-thinking" : "";
-  let html = "";
+  const isThinking = rs.phase === "npc_response";
+  const npcColor = isThinking ? theme.colors.system : theme.colors.npc;
   for (const npc of npcs) {
     const name = typeof npc === "string" ? npc : npc.name;
     const role = typeof npc === "string" ? "" : npc.role || "";
-    html += `<div class="npc-row${thinkingClass}" data-action="talk to ${name}" style="cursor:pointer"><span class="npc-diamond">◆</span><span class="npc">${name}</span>${role ? `<span class="npc-role">— ${role}</span>` : ""}</div>`;
+    const segments = [
+      { text: "◆ ", fg: npcColor },
+      { text: name, fg: npcColor }
+    ];
+    if (role) {
+      segments.push({ text: " — " + role, fg: theme.colors.dim });
+    }
+    const rowIdx = cells.length;
+    cells.push(coloredRow(segments, cols));
+    panel.registerHitRegion({
+      col: 0,
+      row: rowIdx,
+      width: cols,
+      height: 1,
+      data: { action: `talk to ${name}` }
+    });
   }
   for (const p of players) {
     const name = typeof p === "string" ? p : p.name;
-    html += `<div class="player-row"><span class="player-at">@</span><span class="player-name">${name}</span></div>`;
+    cells.push(coloredRow([
+      { text: "@ ", fg: theme.colors.heal },
+      { text: name, fg: theme.colors.primary }
+    ], cols));
   }
   for (const item of items) {
     const name = typeof item === "string" ? item : item.name;
-    html += `<div class="item-row" data-action="examine ${name}" style="cursor:pointer"><span class="item-bullet">·</span> ${name}</div>`;
+    const rowIdx = cells.length;
+    cells.push(coloredRow([
+      { text: "· ", fg: theme.colors.dim },
+      { text: name, fg: theme.colors.primary }
+    ], cols));
+    panel.registerHitRegion({
+      col: 0,
+      row: rowIdx,
+      width: cols,
+      height: 1,
+      data: { action: `examine ${name}` }
+    });
   }
-  body.innerHTML = html;
-  body.querySelectorAll("[data-action]").forEach((el) => {
-    el.addEventListener("click", () => onAction(el.dataset.action));
-  });
+  panel.paint(cells);
 }
 
 // src/panels/questlog.ts
-function renderQuestLogPanel(body, quests) {
+function renderQuestLogPanel(panel, quests) {
+  const cols = panel.cols;
+  const cells = [];
   if (!quests || quests.length === 0) {
-    body.innerHTML = '<div class="empty-msg">No active quests</div>';
+    cells.push(textRow("No active quests", theme.colors.dim, cols));
+    panel.paint(cells);
     return;
   }
-  const html = quests.map((q) => {
+  for (let i = 0;i < quests.length; i++) {
+    const q = quests[i];
+    if (i > 0)
+      cells.push(emptyRow(cols));
+    const nameSegs = [
+      { text: q.name, fg: q.completed ? theme.colors.dim : theme.colors.primary, attrs: 1 }
+    ];
+    if (q.completed) {
+      nameSegs.push({ text: " [DONE]", fg: theme.colors.heal });
+    }
+    cells.push(coloredRow(nameSegs, cols));
+    if (q.giver) {
+      cells.push(coloredRow([
+        { text: "from ", fg: theme.colors.dim },
+        { text: q.giver, fg: theme.colors.npc }
+      ], cols));
+    }
     const progress = q.totalStages > 0 ? Math.round(q.currentStage / q.totalStages * 10) : 0;
-    const progressBar = "█".repeat(progress) + "░".repeat(10 - progress);
-    const statusLabel = q.completed ? '<span class="quest-done">[DONE]</span>' : "";
-    return `
-      <div class="quest-entry${q.completed ? " completed" : ""}">
-        <div class="quest-name">${q.name} ${statusLabel}</div>
-        ${q.giver ? `<div class="quest-giver">from ${q.giver}</div>` : ""}
-        <div class="quest-progress">
-          <span class="bar-fill-xp">${progressBar}</span>
-          <span class="quest-stage">${q.currentStage}/${q.totalStages}</span>
-        </div>
-        ${q.description ? `<div class="quest-desc">${q.description.slice(0, 120)}${q.description.length > 120 ? "..." : ""}</div>` : ""}
-      </div>
-    `;
-  }).join("");
-  body.innerHTML = html;
+    const filled = Math.min(10, Math.max(0, progress));
+    const empty = 10 - filled;
+    const stageText = ` ${q.currentStage}/${q.totalStages}`;
+    cells.push(coloredRow([
+      { text: "█".repeat(filled), fg: theme.colors.accent },
+      { text: "░".repeat(empty), fg: theme.colors.dim },
+      { text: stageText, fg: theme.colors.primary }
+    ], cols));
+    if (q.description) {
+      const desc = q.description.length > 60 ? q.description.slice(0, 57) + "..." : q.description;
+      cells.push(textRow(desc, theme.colors.dim, cols));
+    }
+  }
+  panel.paint(cells);
 }
 
 // src/panels/factions.ts
 function dispositionColor(disposition) {
   switch (disposition) {
     case "hostile":
-      return "faction-hostile";
+      return theme.colors.damage;
     case "unfriendly":
-      return "faction-hostile";
+      return theme.colors.damage;
     case "friendly":
-      return "faction-friendly";
+      return theme.colors.heal;
     case "allied":
-      return "faction-friendly";
+      return theme.colors.heal;
     default:
-      return "faction-neutral";
+      return theme.colors.primary;
   }
 }
-function renderFactionsPanel(body, factions) {
+function renderFactionsPanel(panel, factions) {
+  const cols = panel.cols;
+  const cells = [];
   if (!factions || factions.length === 0) {
-    body.innerHTML = '<div class="empty-msg">No known factions</div>';
+    cells.push(textRow("No known factions", theme.colors.dim, cols));
+    panel.paint(cells);
     return;
   }
-  const html = factions.map((f) => {
+  for (let i = 0;i < factions.length; i++) {
+    const f = factions[i];
+    if (i > 0)
+      cells.push(emptyRow(cols));
+    cells.push(textRow(f.name, theme.colors.primary, cols));
     const normalized = Math.round((f.reputation + 1) * 5);
     const clamped = Math.max(0, Math.min(10, normalized));
-    const colorClass = dispositionColor(f.disposition);
-    const bar = "█".repeat(clamped) + "░".repeat(10 - clamped);
-    return `
-      <div class="faction-entry">
-        <div class="faction-name">${f.name}</div>
-        <div class="faction-bar">
-          <span class="${colorClass}">${bar}</span>
-          <span class="faction-disposition">${f.disposition}</span>
-        </div>
-      </div>
-    `;
-  }).join("");
-  body.innerHTML = html;
+    const barColor = dispositionColor(f.disposition);
+    cells.push(coloredRow([
+      { text: "█".repeat(clamped), fg: barColor },
+      { text: "░".repeat(10 - clamped), fg: theme.colors.dim },
+      { text: " " + f.disposition, fg: barColor }
+    ], cols));
+  }
+  panel.paint(cells);
+}
+
+// src/ui/terminal-panel.ts
+class TerminalPanel {
+  canvas;
+  ctx;
+  charSize;
+  cols = 0;
+  rows = 0;
+  font;
+  prevCells = [];
+  hitRegions = [];
+  resizeObserver;
+  boundClick;
+  constructor(opts) {
+    this.font = opts.font ?? MONO_FONT;
+    this.canvas = document.createElement("canvas");
+    this.canvas.style.display = "block";
+    this.canvas.style.width = "100%";
+    this.canvas.style.height = "100%";
+    opts.container.appendChild(this.canvas);
+    const ctx = this.canvas.getContext("2d");
+    if (!ctx)
+      throw new Error("TerminalPanel: failed to get 2d context");
+    this.ctx = ctx;
+    this.charSize = measureChar(this.ctx, this.font);
+    this.resize();
+    this.resizeObserver = new ResizeObserver(() => this.resize());
+    this.resizeObserver.observe(opts.container);
+    this.boundClick = (e) => this.handleClick(e);
+    this.canvas.addEventListener("click", this.boundClick);
+  }
+  resize() {
+    const rect = this.canvas.parentElement?.getBoundingClientRect();
+    if (!rect)
+      return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = rect.width;
+    const cssH = rect.height;
+    this.canvas.width = Math.floor(cssW * dpr);
+    this.canvas.height = Math.floor(cssH * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.cols = Math.floor(cssW / this.charSize.width);
+    this.rows = Math.floor(cssH / this.charSize.height);
+    this.prevCells = [];
+  }
+  paint(cells) {
+    const rows = Math.min(cells.length, this.rows);
+    for (let r = 0;r < rows; r++) {
+      const row = cells[r];
+      const prevRow = this.prevCells[r];
+      const cols = Math.min(row?.length ?? 0, this.cols);
+      for (let c = 0;c < cols; c++) {
+        const cell = row[c];
+        const prev = prevRow?.[c];
+        if (prev && prev.char === cell.char && prev.fg === cell.fg && prev.bg === cell.bg && prev.attrs === cell.attrs) {
+          continue;
+        }
+        const px = c * this.charSize.width;
+        const py = r * this.charSize.height;
+        this.ctx.clearRect(px, py, this.charSize.width, this.charSize.height);
+        fillCell(this.ctx, c, r, cell, this.charSize);
+      }
+    }
+    this.prevCells = cells.map((row) => row.map((cell) => ({ ...cell })));
+  }
+  registerHitRegion(region) {
+    this.hitRegions.push(region);
+  }
+  clearHitRegions() {
+    this.hitRegions = [];
+  }
+  handleClick(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    const col = Math.floor((e.clientX - rect.left) / this.charSize.width);
+    const row = Math.floor((e.clientY - rect.top) / this.charSize.height);
+    for (const region of this.hitRegions) {
+      if (col >= region.col && col < region.col + region.width && row >= region.row && row < region.row + region.height) {
+        this.canvas.dispatchEvent(new CustomEvent("panel-click", {
+          detail: region.data,
+          bubbles: true
+        }));
+        return;
+      }
+    }
+  }
+  destroy() {
+    this.resizeObserver.disconnect();
+    this.canvas.removeEventListener("click", this.boundClick);
+  }
 }
 
 // src/ui/window.ts
@@ -4373,9 +4883,14 @@ function createWindow(opts) {
     body.style.overflowY = "auto";
   el.appendChild(titleBar);
   el.appendChild(body);
+  let panel;
+  if (opts.canvas) {
+    panel = new TerminalPanel({ container: body });
+  }
   return {
     el,
     body,
+    panel,
     setTitle(title) {
       titleBar.textContent = `─ ${title} ─`;
     },
@@ -5077,13 +5592,13 @@ function renderAllPanels() {
   if (!gameState)
     return;
   characterWin.setTitle(gameState.player.name || "Character");
-  renderCharacterPanel(characterWin.body, gameState);
-  renderInventoryPanel(inventoryWin.body, gameState);
+  renderCharacterPanel(characterWin.panel, gameState);
+  renderInventoryPanel(inventoryWin.panel, gameState);
   exitsWin.setTitle(gameState.location.name || "Exits");
-  renderExitsPanel(exitsWin.body, gameState, handleAction);
-  renderPresentPanel(presentWin.body, gameState, handleAction);
-  renderQuestLogPanel(questWin.body, gameState.quests);
-  renderFactionsPanel(factionWin.body, gameState.factions);
+  renderExitsPanel(exitsWin.panel, gameState, handleAction);
+  renderPresentPanel(presentWin.panel, gameState, handleAction);
+  renderQuestLogPanel(questWin.panel, gameState.quests);
+  renderFactionsPanel(factionWin.panel, gameState.factions);
   updateMap(gameState, handleAction);
   if (wiki && gameState.roomMap) {
     wiki.show(gameState.roomMap.id, gameState.roomMap.name);
@@ -5156,9 +5671,9 @@ function handleMessage(msg) {
   switch (msg.type) {
     case "narrative": {
       narrative.removeThinking();
-      const segments = parseNarrative(msg.text || "");
-      const html = renderSegments(segments);
-      narrative.addHtml(html, "narrative");
+      const channel = msg.channel || "narrative";
+      const blockType = channel === "events" ? "event" : channel === "ooc" ? "ooc" : "narrative";
+      narrative.addBlock(msg.text || "", blockType);
       if (msg.state_update && gameState) {
         applyStateUpdate(gameState, msg.state_update);
         const session2 = getSession();
@@ -5203,6 +5718,26 @@ function handleMessage(msg) {
       narrative.addBlock(deathMsg, "death-feed");
       break;
     }
+    case "scene_art": {
+      const artText = (msg.lines || []).join(`
+`);
+      if (artText) {
+        narrative.addBlock(artText, "scene-art");
+      }
+      break;
+    }
+    case "entity_art": {
+      if (msg.entity_id && gameState) {
+        const npc = gameState.location.npcs.find((n) => n.id === msg.entity_id);
+        const item = gameState.location.items.find((i) => i.id === msg.entity_id);
+        const entity = npc || item;
+        if (entity) {
+          entity.ascii_art = (msg.lines || []).join(`
+`);
+        }
+      }
+      break;
+    }
     case "phase":
       updateRoundState(msg);
       break;
@@ -5217,7 +5752,7 @@ function handleMessage(msg) {
         const exists = gameState.location.players.some((p) => p.id === msg.player_id);
         if (!exists) {
           gameState.location.players.push({ name: msg.player_name, id: msg.player_id });
-          renderPresentPanel(presentWin.body, gameState, handleAction);
+          renderPresentPanel(presentWin.panel, gameState, handleAction);
           narrative.addBlock(`${msg.player_name} arrived.`, "system");
         }
       }
@@ -5226,7 +5761,7 @@ function handleMessage(msg) {
     case "player_left": {
       if (gameState) {
         gameState.location.players = gameState.location.players.filter((p) => p.id !== msg.player_id);
-        renderPresentPanel(presentWin.body, gameState, handleAction);
+        renderPresentPanel(presentWin.panel, gameState, handleAction);
         narrative.addBlock(`${msg.player_name} departed.`, "system");
       }
       break;
@@ -5237,7 +5772,7 @@ function handleMessage(msg) {
           name: p.player_name,
           id: p.player_id
         }));
-        renderPresentPanel(presentWin.body, gameState, handleAction);
+        renderPresentPanel(presentWin.panel, gameState, handleAction);
       }
       break;
     }
@@ -5294,8 +5829,7 @@ async function enterWorld(playerName, walletAddress) {
   renderAllPanels();
   narrative.addBlock(`Welcome, ${playerName}. You find yourself at ${session2.currentLocation}.`, "system");
   if (session2.openingNarrative) {
-    const segments = parseNarrative(session2.openingNarrative);
-    narrative.addHtml(renderSegments(segments), "narrative");
+    narrative.addBlock(session2.openingNarrative, "narrative");
   }
   updateRoundState({ type: "phase", phase: "ready", location: session2.currentLocation });
   document.getElementById("action-input").focus();
@@ -5370,14 +5904,14 @@ function mount(mountId, el) {
 document.addEventListener("DOMContentLoaded", () => {
   header = createHeader();
   mount("tui-header", header.el);
-  narrativeWin = createWindow({ title: "Narrative", id: "narrative-win", className: "resizable", scrollable: true });
+  narrativeWin = createWindow({ title: "Narrative", id: "narrative-win", className: "resizable" });
   mapWin = createWindow({ title: "Map", id: "map-win" });
-  characterWin = createWindow({ title: "Character", id: "character-win", className: "sidebar-win resizable" });
-  inventoryWin = createWindow({ title: "Inventory", id: "inventory-win", className: "sidebar-win resizable" });
-  exitsWin = createWindow({ title: "Exits", id: "exits-win", className: "sidebar-win resizable" });
-  presentWin = createWindow({ title: "Present", id: "present-win", className: "sidebar-win resizable" });
-  questWin = createWindow({ title: "Quests", id: "quest-win", className: "sidebar-win resizable" });
-  factionWin = createWindow({ title: "Factions", id: "faction-win", className: "sidebar-win resizable" });
+  characterWin = createWindow({ title: "Character", id: "character-win", className: "sidebar-win resizable", canvas: true });
+  inventoryWin = createWindow({ title: "Inventory", id: "inventory-win", className: "sidebar-win resizable", canvas: true });
+  exitsWin = createWindow({ title: "Exits", id: "exits-win", className: "sidebar-win resizable", canvas: true });
+  presentWin = createWindow({ title: "Present", id: "present-win", className: "sidebar-win resizable", canvas: true });
+  questWin = createWindow({ title: "Quests", id: "quest-win", className: "sidebar-win resizable", canvas: true });
+  factionWin = createWindow({ title: "Factions", id: "faction-win", className: "sidebar-win resizable", canvas: true });
   commandWin = createWindow({ title: "Command", id: "command-win" });
   mount("narrative-mount", narrativeWin.el);
   mount("map-mount", mapWin.el);
@@ -5390,6 +5924,16 @@ document.addEventListener("DOMContentLoaded", () => {
   mount("command-mount", commandWin.el);
   statusBar = createStatusBar();
   mount("status-mount", statusBar.el);
+  exitsWin.panel.canvas.addEventListener("panel-click", (e) => {
+    const detail = e.detail;
+    if (detail.action)
+      handleAction(detail.action);
+  });
+  presentWin.panel.canvas.addEventListener("panel-click", (e) => {
+    const detail = e.detail;
+    if (detail.action)
+      handleAction(detail.action);
+  });
   document.addEventListener("keydown", (e) => {
     if (e.key === "m" && document.activeElement?.tagName !== "INPUT") {
       mapWin.toggle();
@@ -5398,17 +5942,13 @@ document.addEventListener("DOMContentLoaded", () => {
   npcDialog = createDialog();
   mount("dialog-mount", npcDialog.el);
   narrative = initNarrative(narrativeWin.body);
-  narrativeWin.body.addEventListener("click", (e) => {
-    const link = e.target.closest(".entity-link");
-    if (!link)
-      return;
-    const name = link.dataset.entityName;
-    const id = link.dataset.entityId;
-    if (name) {
-      if (id) {
-        wiki.show(id, name);
+  narrative.canvas.addEventListener("narrative-entity-click", (e) => {
+    const { entityId, entityName } = e.detail;
+    if (entityName) {
+      if (entityId) {
+        wiki.show(entityId, entityName);
       } else {
-        wiki.showByName(name);
+        wiki.showByName(entityName);
       }
     }
   });
@@ -5483,7 +6023,16 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("death-restart-btn").addEventListener("click", () => {
     document.getElementById("death-overlay").classList.add("hidden");
     document.getElementById("char-create-overlay").classList.remove("hidden");
-    narrativeWin.body.innerHTML = "";
+    narrative = initNarrative(narrativeWin.body);
+    narrative.canvas.addEventListener("narrative-entity-click", (e) => {
+      const { entityId, entityName } = e.detail;
+      if (entityName) {
+        if (entityId)
+          wiki.show(entityId, entityName);
+        else
+          wiki.showByName(entityName);
+      }
+    });
     document.getElementById("char-name-input").focus();
   });
   const walletConnectBtn = document.getElementById("wallet-connect-btn");
