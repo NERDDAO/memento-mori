@@ -56,12 +56,5 @@ async def submit_action(req: ActionRequest):
         # Solo fast-path: if only 1 player at location, close round immediately
         if ws_hub and ws_hub.players_at_location(req.location) <= 1:
             await round_manager.close_round(req.location)
-        else:
-            # Multi-player: send thinking indicator
-            if ws_hub:
-                await ws_hub.send_to_player(req.player_id, {
-                    "type": "thinking",
-                    "action": req.action,
-                })
 
     return ActionResponse(status="queued")

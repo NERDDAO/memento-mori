@@ -30,12 +30,6 @@ def make_round_callback(bridge: MatrixBridge, ws_hub: WebSocketHub):
 
         room_id = await bridge.get_or_create_room(location)
 
-        # Send thinking indicator to all players at this location
-        await ws_hub.broadcast_to_location(location, {
-            "type": "thinking",
-            "action": f"Processing round ({len(actions)} actions)",
-        })
-
         # Step 1: Send each player action as a readable message from the player
         # NPC agents see these and can respond
         for a in actions:

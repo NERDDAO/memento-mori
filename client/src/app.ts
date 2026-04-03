@@ -194,10 +194,6 @@ function handleMessage(msg: any): void {
       }
       break;
     }
-    case 'thinking':
-      narrative.showThinking();
-      statusBar.setPhase('thinking');
-      break;
     case 'death_feed': {
       const skull = '\u2620';
       const deathMsg = `${skull} ${msg.player_name || 'Unknown'} (Level ${msg.level || '?'}) fell at ${msg.location || 'unknown'}. ${msg.cause || ''}`;
