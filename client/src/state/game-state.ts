@@ -33,6 +33,7 @@ export interface GameState {
     exits: LocationExit[];
     npcs: LocationEntity[];
     items: LocationEntity[];
+    players: LocationEntity[];
   };
   inventory: Array<{
     name: string;
@@ -73,6 +74,7 @@ export function createInitialState(playerName: string): GameState {
       exits: [],
       npcs: [],
       items: [],
+      players: [],
     },
     inventory: [],
     quests: [],
