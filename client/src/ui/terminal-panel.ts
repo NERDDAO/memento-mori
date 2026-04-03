@@ -38,6 +38,7 @@ export class TerminalPanel {
 
   private font: string;
   private prevCells: CharCell[][] = [];
+  private lastCells: CharCell[][] = [];  // last painted content for resize repaint
   private hitRegions: HitRegion[] = [];
   private resizeObserver: ResizeObserver;
   private boundClick: (e: MouseEvent) => void;
@@ -91,8 +92,11 @@ export class TerminalPanel {
     this.cols = Math.floor(cssW / this.charSize.width);
     this.rows = Math.floor(cssH / this.charSize.height);
 
-    // Force full repaint on next paint()
+    // Force full repaint
     this.prevCells = [];
+    if (this.lastCells.length > 0) {
+      this.paint(this.lastCells);
+    }
   }
 
   /**
@@ -131,10 +135,11 @@ export class TerminalPanel {
       }
     }
 
-    // Deep-copy cells for next-frame diff
+    // Deep-copy cells for next-frame diff and resize repaint
     this.prevCells = cells.map(row =>
       row.map(cell => ({ ...cell })),
     );
+    this.lastCells = cells;
   }
 
   /** Register a clickable region (call after paint, before next paint). */

@@ -3239,7 +3239,10 @@ var BLOCK_TYPE_COLORS = {
   ooc: theme.colors.accent,
   divider: theme.colors.dim,
   "death-feed": theme.colors.damage,
-  "scene-art": theme.colors.dim
+  "scene-art": theme.colors.dim,
+  "npc-name": theme.colors.npc,
+  "npc-dialogue": theme.colors.npc,
+  "npc-status": theme.colors.system
 };
 var ENTITY_TYPE_COLORS = {
   npc: theme.colors.npc,
@@ -3353,6 +3356,30 @@ function initNarrative(container) {
     if (blockType === "divider") {
       const rule = "─".repeat(Math.min(maxCol, cols - padding * 2));
       return [{ text: rule, col: padding, row: 0, fg: theme.colors.dim }];
+    }
+    if (blockType === "npc-name") {
+      return [{ text: `◆ ${blockText}`, col: padding, row: 0, fg: theme.colors.npc, attrs: 1 }];
+    }
+    if (blockType === "npc-dialogue") {
+      const dialogPadding = padding + 2;
+      const dialogMaxCol = Math.max(cols - dialogPadding - padding, 10);
+      const words = blockText.split(" ");
+      const placed2 = [];
+      let col2 = dialogPadding;
+      let row2 = 0;
+      for (let r = 0;r < 20; r++) {
+        placed2.push({ text: "│", col: padding, row: r, fg: theme.colors.npc });
+      }
+      for (const word of words) {
+        if (col2 + word.length > dialogPadding + dialogMaxCol && col2 > dialogPadding) {
+          row2++;
+          col2 = dialogPadding;
+        }
+        placed2.push({ text: word + " ", col: col2, row: row2, fg: theme.colors.npc, attrs: 2 });
+        col2 += word.length + 1;
+      }
+      const actualRows = row2 + 1;
+      return placed2.filter((p) => !(p.text === "│" && p.row >= actualRows));
     }
     let segments = segmentCache.get(blockId);
     if (!segments) {
@@ -3510,8 +3537,12 @@ function initNarrative(container) {
     }
     canvas.style.cursor = overEntity ? "pointer" : "default";
   });
-  function addBlockInternal(text, type) {
+  const namedBlockIds = new Map;
+  function addBlockInternal(text, type, customId) {
     const block = store.add(text, "", type);
+    if (customId) {
+      namedBlockIds.set(customId, block.id);
+    }
     if (userAtBottom) {
       requestAnimationFrame(() => {
         scrollToBottom();
@@ -3520,6 +3551,15 @@ function initNarrative(container) {
     }
     scheduleRender();
     return block.id;
+  }
+  function removeNamedBlock(customId) {
+    const blockId = namedBlockIds.get(customId);
+    if (blockId) {
+      segmentCache.delete(blockId);
+      layoutCache.delete(blockId);
+      store.removeById(blockId);
+      namedBlockIds.delete(customId);
+    }
   }
   function startThinkingAnimation() {
     if (thinkingTimer)
@@ -3554,6 +3594,15 @@ function initNarrative(container) {
       temp.innerHTML = html;
       const text = temp.textContent || temp.innerText || html;
       addBlockInternal(text, type);
+    },
+    replaceBlock(id, text, type) {
+      removeNamedBlock(id);
+      addBlockInternal(text, type, id);
+    },
+    removeBlockById(id) {
+      removeNamedBlock(id);
+      clampScroll();
+      scheduleRender();
     },
     showThinking() {
       thinkingBlockId = addBlockInternal("The world responds", "thinking");
@@ -4787,6 +4836,7 @@ class TerminalPanel {
   rows = 0;
   font;
   prevCells = [];
+  lastCells = [];
   hitRegions = [];
   resizeObserver;
   boundClick;
@@ -4821,6 +4871,9 @@ class TerminalPanel {
     this.cols = Math.floor(cssW / this.charSize.width);
     this.rows = Math.floor(cssH / this.charSize.height);
     this.prevCells = [];
+    if (this.lastCells.length > 0) {
+      this.paint(this.lastCells);
+    }
   }
   paint(cells) {
     const rows = Math.min(cells.length, this.rows);
@@ -4841,6 +4894,7 @@ class TerminalPanel {
       }
     }
     this.prevCells = cells.map((row) => row.map((cell) => ({ ...cell })));
+    this.lastCells = cells;
   }
   registerHitRegion(region) {
     this.hitRegions.push(region);
@@ -5562,11 +5616,13 @@ function formatAddress(addr) {
 // src/app.ts
 var gameState;
 var narrative;
+var eventsFeed;
 var header;
 var npcDialog;
 var wiki;
 var statusBar;
 var narrativeWin;
+var eventsWin;
 var mapWin;
 var characterWin;
 var inventoryWin;
@@ -5672,8 +5728,18 @@ function handleMessage(msg) {
     case "narrative": {
       narrative.removeThinking();
       const channel = msg.channel || "narrative";
-      const blockType = channel === "events" ? "event" : channel === "ooc" ? "ooc" : "narrative";
-      narrative.addBlock(msg.text || "", blockType);
+      if (channel === "events") {
+        eventsFeed.addBlock(msg.text || "", "event");
+      } else if (channel === "ooc") {
+        eventsFeed.addBlock(msg.text || "", "ooc");
+      } else if (msg.npc) {
+        const npcKey = msg.npc_username || msg.npc.toLowerCase().replace(/\s+/g, "-");
+        narrative.removeBlockById(`npc-status-${npcKey}`);
+        narrative.addBlock(`${msg.npc}`, "npc-name");
+        narrative.addBlock(msg.text || "", "npc-dialogue");
+      } else {
+        narrative.addBlock(msg.text || "", "narrative");
+      }
       if (msg.state_update && gameState) {
         applyStateUpdate(gameState, msg.state_update);
         const session2 = getSession();
@@ -5690,19 +5756,19 @@ function handleMessage(msg) {
           if (events.combat) {
             const c = events.combat;
             if (c.damage_dealt != null) {
-              narrative.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ""}`, "event-combat");
+              eventsFeed.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ""}`, "event-combat");
             }
             if (c.xp_gained) {
-              narrative.addBlock(`[+${c.xp_gained} XP]`, "event-xp");
+              eventsFeed.addBlock(`[+${c.xp_gained} XP]`, "event-xp");
             }
             if (c.target_dead) {
-              narrative.addBlock(`${c.target_name || "Target"} has been slain.`, "event-death");
+              eventsFeed.addBlock(`${c.target_name || "Target"} has been slain.`, "event-death");
             }
           }
           if (events.inventory_changes) {
             for (const inv of events.inventory_changes) {
               const prefix = inv.event_type === "DROP" ? "-" : "+";
-              narrative.addBlock(`[${prefix}${inv.item_name}]`, "event-item");
+              eventsFeed.addBlock(`[${prefix}${inv.item_name}]`, "event-item");
             }
           }
         }
@@ -5738,9 +5804,24 @@ function handleMessage(msg) {
       }
       break;
     }
-    case "phase":
-      updateRoundState(msg);
+    case "npc_status": {
+      const npcKey = msg.npc_username || msg.npc || "unknown";
+      narrative.replaceBlock(`npc-status-${npcKey}`, `${msg.npc}: ${msg.text}`, "npc-status");
       break;
+    }
+    case "phase": {
+      updateRoundState(msg);
+      const phase = msg.phase || "";
+      const crew = msg.crew || "";
+      if (phase === "resolving" && crew) {
+        eventsFeed.replaceBlock("phase-progress", `[${crew}]`, "event");
+      } else if (phase === "npc_response") {
+        eventsFeed.replaceBlock("phase-progress", "[waiting for NPCs]", "event");
+      } else if (phase === "ready") {
+        eventsFeed.removeBlockById("phase-progress");
+      }
+      break;
+    }
     case "status":
       if (msg.tick != null)
         statusBar.setTick(msg.tick);
@@ -5905,6 +5986,7 @@ document.addEventListener("DOMContentLoaded", () => {
   header = createHeader();
   mount("tui-header", header.el);
   narrativeWin = createWindow({ title: "Narrative", id: "narrative-win", className: "resizable" });
+  eventsWin = createWindow({ title: "Events", id: "events-win" });
   mapWin = createWindow({ title: "Map", id: "map-win" });
   characterWin = createWindow({ title: "Character", id: "character-win", className: "sidebar-win resizable", canvas: true });
   inventoryWin = createWindow({ title: "Inventory", id: "inventory-win", className: "sidebar-win resizable", canvas: true });
@@ -5914,6 +5996,7 @@ document.addEventListener("DOMContentLoaded", () => {
   factionWin = createWindow({ title: "Factions", id: "faction-win", className: "sidebar-win resizable", canvas: true });
   commandWin = createWindow({ title: "Command", id: "command-win" });
   mount("narrative-mount", narrativeWin.el);
+  mount("events-mount", eventsWin.el);
   mount("map-mount", mapWin.el);
   mount("character-mount", characterWin.el);
   mount("inventory-mount", inventoryWin.el);
@@ -5942,6 +6025,7 @@ document.addEventListener("DOMContentLoaded", () => {
   npcDialog = createDialog();
   mount("dialog-mount", npcDialog.el);
   narrative = initNarrative(narrativeWin.body);
+  eventsFeed = initNarrative(eventsWin.body);
   narrative.canvas.addEventListener("narrative-entity-click", (e) => {
     const { entityId, entityName } = e.detail;
     if (entityName) {

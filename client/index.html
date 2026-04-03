@@ -64,11 +64,21 @@
     .win.resizable { resize: both; overflow: auto; }
     .win-body { padding: 8px 10px; flex: 1; min-height: 0; }
 
-    /* Narrative */
-    #narrative-win { flex: 1; min-height: 0; }
+    /* Narrative + Events side-by-side */
+    #narrative-row {
+      display: flex; flex-direction: row; gap: 4px;
+      flex: 1; min-height: 0;
+    }
+    #narrative-win { flex: 3; min-height: 0; }
     #narrative-win .win-body {
       overflow-y: auto; position: relative;
       font-family: Georgia, 'Times New Roman', serif; font-size: 16px; line-height: 1.7;
+    }
+    #events-win { flex: 1; min-height: 0; min-width: 220px; }
+    #events-win .win-body {
+      overflow-y: auto; position: relative;
+      font-family: 'Fira Code', 'Cascadia Code', monospace; font-size: 12px; line-height: 1.5;
+      color: var(--text-dim);
     }
 
     /* Map */
@@ -438,7 +448,10 @@
     <div id="tui-header"></div>
     <div id="tui-main">
       <div id="left-col">
-        <div id="narrative-mount"></div>
+        <div id="narrative-row">
+          <div id="narrative-mount"></div>
+          <div id="events-mount"></div>
+        </div>
         <div id="map-mount"></div>
       </div>
       <div id="right-col">

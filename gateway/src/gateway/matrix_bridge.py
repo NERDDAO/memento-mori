@@ -137,6 +137,7 @@ class MatrixBridge:
             return
 
         if rpg_type == "narrative":
+            logger.info("Narrator message at %s (sender=%s)", room.display_name, event.sender)
             location = self.room_to_location.get(room.room_id, "")
             state_update = rpg_meta.get("state_update", {})
             player_id = rpg_meta.get("player_id", "")
@@ -178,25 +179,44 @@ class MatrixBridge:
             await _send_status("synced")
             return
 
-        # NPC agent message — forward to players as narrative
+        # Debug: log all unhandled messages to trace the leak
         sender = event.sender or ""
+        if not rpg_type and not sender.startswith("@bonfires-"):
+            logger.debug("Unhandled msg from %s: rpg_meta=%s body=%.80s", sender, rpg_meta, event.body)
+
+        # NPC agent message — forward to players as narrative
         if sender.startswith("@bonfires-") and not rpg_meta:
             location = self.room_to_location.get(room.room_id, "")
             npc_username = sender.split(":")[0].lstrip("@")  # "bonfires-roric"
             npc_name = npc_username.replace("bonfires-", "").replace("_", " ").title()
 
+            # Detect if this is an edit (m.replace) — used for status/thinking updates
+            relates_to = content.get("m.relates_to", {})
+            is_replace = relates_to.get("rel_type") == "m.replace"
+            new_content = content.get("m.new_content", {})
+            text = new_content.get("body", event.body) if is_replace else event.body
+
+            # Check if this is a status message — marked by the agent runtime
+            is_status = content.get("com.bonfires.status", False)
+
             msg = {
-                "type": "narrative",
-                "text": event.body,
+                "type": "npc_status" if is_status else "narrative",
+                "text": text,
                 "npc": npc_name,
+                "npc_username": npc_username,
                 "location": location or room.display_name or "unknown",
                 "channel": "narrative",
             }
+            if is_replace:
+                msg["replaces"] = relates_to.get("event_id", "")
+
             if location:
                 await self.ws_hub.broadcast_to_location(location, msg)
             else:
                 await self.ws_hub.broadcast_all(msg)
-            logger.info("NPC %s spoke at %s", npc_name, location)
+
+            if not is_status:
+                logger.info("NPC %s spoke at %s", npc_name, location)
 
     async def register_player(self, player_name: str, player_id: str) -> str | None:
         """Register a Matrix user for a player. Returns access_token or None."""

@@ -16,6 +16,8 @@ import { theme } from '../renderer/theme';
 export interface NarrativeController {
   addBlock(text: string, type: string): void;
   addHtml(html: string, type: string): void;
+  replaceBlock(id: string, text: string, type: string): void;
+  removeBlockById(id: string): void;
   showThinking(): void;
   removeThinking(): void;
   canvas: HTMLCanvasElement;
@@ -57,6 +59,9 @@ const BLOCK_TYPE_COLORS: Record<string, string> = {
   'divider':        theme.colors.dim,
   'death-feed':     theme.colors.damage,
   'scene-art':      theme.colors.dim,
+  'npc-name':       theme.colors.npc,
+  'npc-dialogue':   theme.colors.npc,
+  'npc-status':     theme.colors.system,
 };
 
 const ENTITY_TYPE_COLORS: Record<string, string> = {
@@ -208,6 +213,36 @@ export function initNarrative(container: HTMLElement): NarrativeController {
     if (blockType === 'divider') {
       const rule = '\u2500'.repeat(Math.min(maxCol, cols - padding * 2));
       return [{ text: rule, col: padding, row: 0, fg: theme.colors.dim }];
+    }
+
+    // NPC name header: bold gold with diamond marker
+    if (blockType === 'npc-name') {
+      return [{ text: `\u25C6 ${blockText}`, col: padding, row: 0, fg: theme.colors.npc, attrs: 1 }]; // ATTR_BOLD
+    }
+
+    // NPC dialogue: indented, italic, with left bar
+    if (blockType === 'npc-dialogue') {
+      const dialogPadding = padding + 2;
+      const dialogMaxCol = Math.max(cols - dialogPadding - padding, 10);
+      const words = blockText.split(' ');
+      const placed: PlacedSegment[] = [];
+      let col = dialogPadding;
+      let row = 0;
+      // Draw left accent bar
+      for (let r = 0; r < 20; r++) { // will be trimmed to actual rows
+        placed.push({ text: '\u2502', col: padding, row: r, fg: theme.colors.npc });
+      }
+      for (const word of words) {
+        if (col + word.length > dialogPadding + dialogMaxCol && col > dialogPadding) {
+          row++;
+          col = dialogPadding;
+        }
+        placed.push({ text: word + ' ', col, row, fg: theme.colors.npc, attrs: 2 }); // ATTR_ITALIC
+        col += word.length + 1;
+      }
+      // Trim bar to actual row count
+      const actualRows = row + 1;
+      return placed.filter(p => !(p.text === '\u2502' && p.row >= actualRows));
     }
 
     // Get or compute segments
@@ -424,9 +459,17 @@ export function initNarrative(container: HTMLElement): NarrativeController {
 
   // ── Block management ──────────────────────────────────────
 
-  function addBlockInternal(text: string, type: string): string {
+  /** Track named blocks for replace/remove by custom ID */
+  const namedBlockIds: Map<string, string> = new Map();
+
+  function addBlockInternal(text: string, type: string, customId?: string): string {
     // Store still needs html field — pass empty string since we render via canvas
     const block = store.add(text, '', type);
+
+    // Track custom ID mapping
+    if (customId) {
+      namedBlockIds.set(customId, block.id);
+    }
 
     // Auto-scroll to bottom if user was at bottom
     if (userAtBottom) {
@@ -438,6 +481,16 @@ export function initNarrative(container: HTMLElement): NarrativeController {
 
     scheduleRender();
     return block.id;
+  }
+
+  function removeNamedBlock(customId: string): void {
+    const blockId = namedBlockIds.get(customId);
+    if (blockId) {
+      segmentCache.delete(blockId);
+      layoutCache.delete(blockId);
+      store.removeById(blockId);
+      namedBlockIds.delete(customId);
+    }
   }
 
   // ── Thinking animation ────────────────────────────────────
@@ -483,6 +536,17 @@ export function initNarrative(container: HTMLElement): NarrativeController {
       temp.innerHTML = html;
       const text = temp.textContent || temp.innerText || html;
       addBlockInternal(text, type);
+    },
+
+    replaceBlock(id: string, text: string, type: string) {
+      removeNamedBlock(id);
+      addBlockInternal(text, type, id);
+    },
+
+    removeBlockById(id: string) {
+      removeNamedBlock(id);
+      clampScroll();
+      scheduleRender();
     },
 
     showThinking() {

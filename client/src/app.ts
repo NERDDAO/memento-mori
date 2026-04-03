@@ -29,12 +29,14 @@ import type { RoomMap } from './map/types';
 
 let gameState: GameState;
 let narrative: NarrativeController;
+let eventsFeed: NarrativeController;
 
 let header: ReturnType<typeof createHeader>;
 let npcDialog: ReturnType<typeof createDialog>;
 let wiki: ReturnType<typeof createWikiPanel>;
 let statusBar: ReturnType<typeof createStatusBar>;
 let narrativeWin: ReturnType<typeof createWindow>;
+let eventsWin: ReturnType<typeof createWindow>;
 let mapWin: ReturnType<typeof createWindow>;
 let characterWin: ReturnType<typeof createWindow>;
 let inventoryWin: ReturnType<typeof createWindow>;
@@ -146,8 +148,21 @@ function handleMessage(msg: any): void {
     case 'narrative': {
       narrative.removeThinking();
       const channel = msg.channel || 'narrative';
-      const blockType = channel === 'events' ? 'event' : channel === 'ooc' ? 'ooc' : 'narrative';
-      narrative.addBlock(msg.text || '', blockType);
+
+      // Route by channel: narrative prose stays in narrative, events go to events feed
+      if (channel === 'events') {
+        eventsFeed.addBlock(msg.text || '', 'event');
+      } else if (channel === 'ooc') {
+        eventsFeed.addBlock(msg.text || '', 'ooc');
+      } else if (msg.npc) {
+        // NPC dialogue — remove thinking indicator and show with name header
+        const npcKey = msg.npc_username || msg.npc.toLowerCase().replace(/\s+/g, '-');
+        narrative.removeBlockById(`npc-status-${npcKey}`);
+        narrative.addBlock(`${msg.npc}`, 'npc-name');
+        narrative.addBlock(msg.text || '', 'npc-dialogue');
+      } else {
+        narrative.addBlock(msg.text || '', 'narrative');
+      }
 
       if (msg.state_update && gameState) {
         applyStateUpdate(gameState, msg.state_update);
@@ -162,25 +177,25 @@ function handleMessage(msg: any): void {
 
         renderAllPanels();
 
-        // Display event notifications
+        // Display event notifications in the events feed
         if (msg.state_update.events) {
           const events = msg.state_update.events;
           if (events.combat) {
             const c = events.combat;
             if (c.damage_dealt != null) {
-              narrative.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ''}`, 'event-combat');
+              eventsFeed.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ''}`, 'event-combat');
             }
             if (c.xp_gained) {
-              narrative.addBlock(`[+${c.xp_gained} XP]`, 'event-xp');
+              eventsFeed.addBlock(`[+${c.xp_gained} XP]`, 'event-xp');
             }
             if (c.target_dead) {
-              narrative.addBlock(`${c.target_name || 'Target'} has been slain.`, 'event-death');
+              eventsFeed.addBlock(`${c.target_name || 'Target'} has been slain.`, 'event-death');
             }
           }
           if (events.inventory_changes) {
             for (const inv of events.inventory_changes) {
               const prefix = inv.event_type === 'DROP' ? '-' : '+';
-              narrative.addBlock(`[${prefix}${inv.item_name}]`, 'event-item');
+              eventsFeed.addBlock(`[${prefix}${inv.item_name}]`, 'event-item');
             }
           }
         }
@@ -220,9 +235,26 @@ function handleMessage(msg: any): void {
       }
       break;
     }
-    case 'phase':
-      updateRoundState(msg as PhaseMessage);
+    case 'npc_status': {
+      // NPC thinking/status — replace previous status for this NPC
+      const npcKey = msg.npc_username || msg.npc || 'unknown';
+      narrative.replaceBlock(`npc-status-${npcKey}`, `${msg.npc}: ${msg.text}`, 'npc-status');
       break;
+    }
+    case 'phase': {
+      updateRoundState(msg as PhaseMessage);
+      // Show phase progress in events feed
+      const phase = msg.phase || '';
+      const crew = msg.crew || '';
+      if (phase === 'resolving' && crew) {
+        eventsFeed.replaceBlock('phase-progress', `[${crew}]`, 'event');
+      } else if (phase === 'npc_response') {
+        eventsFeed.replaceBlock('phase-progress', '[waiting for NPCs]', 'event');
+      } else if (phase === 'ready') {
+        eventsFeed.removeBlockById('phase-progress');
+      }
+      break;
+    }
     case 'status':
       if (msg.tick != null) statusBar.setTick(msg.tick);
       if (msg.chain != null) statusBar.setChain(msg.chain);
@@ -403,6 +435,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 2. Create windows
   narrativeWin = createWindow({ title: 'Narrative', id: 'narrative-win', className: 'resizable' });
+  eventsWin = createWindow({ title: 'Events', id: 'events-win' });
   mapWin = createWindow({ title: 'Map', id: 'map-win' });
   characterWin = createWindow({ title: 'Character', id: 'character-win', className: 'sidebar-win resizable', canvas: true });
   inventoryWin = createWindow({ title: 'Inventory', id: 'inventory-win', className: 'sidebar-win resizable', canvas: true });
@@ -414,6 +447,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 3. Mount windows by replacing mount divs
   mount('narrative-mount', narrativeWin.el);
+  mount('events-mount', eventsWin.el);
   mount('map-mount', mapWin.el);
   mount('character-mount', characterWin.el);
   mount('inventory-mount', inventoryWin.el);
@@ -448,8 +482,9 @@ document.addEventListener('DOMContentLoaded', () => {
   npcDialog = createDialog();
   mount('dialog-mount', npcDialog.el);
 
-  // 6. Narrative
+  // 6. Narrative + Events feed
   narrative = initNarrative(narrativeWin.body);
+  eventsFeed = initNarrative(eventsWin.body);
 
   // 6b. Entity clicks from canvas narrative panel
   narrative.canvas.addEventListener('narrative-entity-click', (e: Event) => {

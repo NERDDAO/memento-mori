@@ -363,14 +363,14 @@ class RoundController:
             )
             self.narrative = ""
 
-        # 5b. Fire-and-forget scene art
-        if self.narrative:
-            import threading
-            threading.Thread(
-                target=self.request_art,
-                args=(self.context[:500],),
-                daemon=True,
-            ).start()
+        # 5b. Fire-and-forget scene art (disabled until KG caching is fixed)
+        # if self.narrative:
+        #     import threading
+        #     threading.Thread(
+        #         target=self.request_art,
+        #         args=(self.context[:500],),
+        #         daemon=True,
+        #     ).start()
 
         # 6. Post-turn bookkeeping (memory, time advance)
         if self.narrative:
