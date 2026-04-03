@@ -1,6 +1,7 @@
 // src/panels/narrative.ts
 import { parseNarrative, renderSegments } from '../renderer/text-renderer';
 import { NarrativeStore } from '../renderer/line-cache';
+import { onRoundStateChange, type RoundState } from '../state/round-state';
 
 export interface NarrativeController {
   addBlock(text: string, type: string): void;
@@ -89,6 +90,15 @@ export function initNarrative(container: HTMLElement): NarrativeController {
     scheduleRender();
     return block.id;
   }
+
+  // Round phase dividers
+  let lastPhase = '';
+  onRoundStateChange((rs: RoundState) => {
+    if (rs.phase === 'resolving' && lastPhase !== 'resolving') {
+      addBlockInternal('', '<hr class="round-divider">', 'divider');
+    }
+    lastPhase = rs.phase;
+  });
 
   return {
     addBlock(text: string, type: string) {
