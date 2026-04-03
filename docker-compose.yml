@@ -4,6 +4,7 @@ services:
     container_name: memento-synapse
     volumes:
       - memento-mori-synapse-data:/data
+      - ./matrix/appservice-bonfires.yaml:/data/appservices/bonfires.yaml:ro
     ports:
       - "8008:8008"
 

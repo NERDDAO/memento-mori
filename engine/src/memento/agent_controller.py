@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+import requests as _requests
+
 from memento.bonfires_client import get_client
 
 logger = logging.getLogger(__name__)
@@ -157,6 +159,10 @@ class AgentController:
             is_alive=True,
         )
         self._agents[name] = npc_agent
+
+        # Join the bot to the location's Matrix room
+        self.ensure_in_room(location_name)
+
         return npc_agent
 
     def move_npc_agent(
@@ -230,17 +236,36 @@ class AgentController:
         """
         spawned: list[NPCAgent] = []
 
-        # Find NPCs at this location from KG
+        # Find NPCs at this location — try entity search first, fall back to KG search
+        npcs: list[dict[str, Any]] = []
         try:
             client = get_client()
-            result = client.kg.search(f"NPC LOCATED_IN {location_name}", num_results=20)
-            entities = result.get("entities", result.get("nodes", []))
-        except Exception:
-            logger.warning("reconcile_location: KG search failed for %s", location_name, exc_info=True)
-            return spawned
+            # Direct entity search for the location, then get neighbors
+            loc_entity = client.kg.get_entity_or_none(location_name)
+            if not loc_entity:
+                # Try search by name
+                result = client.kg.search(location_name, num_results=1)
+                loc_entities = result.get("entities", result.get("nodes", []))
+                loc_entity = loc_entities[0] if loc_entities else None
 
-        # Filter to NPCs
-        npcs = [e for e in entities if "NPC" in e.get("labels", [])]
+            if loc_entity:
+                loc_uuid = loc_entity.get("uuid", "")
+                if loc_uuid:
+                    # Get neighbors — includes NPCs LOCATED_IN this location
+                    neighbors = client.kg.get_node_episodes(loc_uuid)
+                    # Also search for entities connected to this location
+                    result = client.kg.search(location_name, num_results=20)
+                    all_entities = result.get("entities", result.get("nodes", []))
+                    npcs = [e for e in all_entities if "NPC" in e.get("labels", [])]
+
+            if not npcs:
+                # Fallback: broader search
+                result = client.kg.search(f"{location_name} NPC", num_results=20)
+                all_entities = result.get("entities", result.get("nodes", []))
+                npcs = [e for e in all_entities if "NPC" in e.get("labels", [])]
+        except Exception:
+            logger.warning("reconcile_location: entity search failed for %s", location_name, exc_info=True)
+            return spawned
         if not npcs:
             logger.info("reconcile_location: no NPCs found at %s", location_name)
             return spawned
@@ -292,6 +317,10 @@ class AgentController:
             )
             if agent:
                 spawned.append(agent)
+
+        # Ensure the appservice bot is in the location's Matrix room
+        if self._agents:
+            self.ensure_in_room(location_name)
 
         logger.info(
             "reconcile_location: %s — %d NPCs found, %d agents spawned",
@@ -363,6 +392,108 @@ class AgentController:
     def list_alive(self) -> list[NPCAgent]:
         """List all alive tracked NPC agents."""
         return [a for a in self._agents.values() if a.is_alive]
+
+    # ── Matrix room management ──
+
+    def join_room(self, room_id: str) -> bool:
+        """Join the appservice bot to a Matrix room.
+
+        Uses the narrator token to invite, then the appservice token to join.
+        """
+        bot_user = f"@bonfires-bot:{os.getenv('MATRIX_DOMAIN', 'localhost')}"
+        narrator_token = os.getenv("MATRIX_BOT_TOKEN", "")
+
+        if not self.matrix_as_token or not narrator_token or not self.matrix_homeserver:
+            logger.warning("join_room: missing Matrix config")
+            return False
+
+        base = self.matrix_homeserver.rstrip("/")
+
+        # Step 1: Invite bot user (using narrator token)
+        try:
+            resp = _requests.post(
+                f"{base}/_matrix/client/v3/rooms/{room_id}/invite",
+                params={"access_token": narrator_token},
+                json={"user_id": bot_user},
+                timeout=10,
+            )
+            if resp.status_code not in (200, 403):  # 403 = already in room
+                logger.warning("join_room invite failed: %s %s", resp.status_code, resp.text[:200])
+        except Exception:
+            logger.warning("join_room invite request failed", exc_info=True)
+
+        # Step 2: Join as bot user (using appservice token)
+        try:
+            resp = _requests.post(
+                f"{base}/_matrix/client/v3/join/{room_id}",
+                params={"access_token": self.matrix_as_token, "user_id": bot_user},
+                json={},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                logger.info("Joined bot to room %s", room_id)
+                return True
+            else:
+                logger.warning("join_room join failed: %s %s", resp.status_code, resp.text[:200])
+        except Exception:
+            logger.warning("join_room join request failed", exc_info=True)
+
+        return False
+
+    def ensure_in_room(self, location_name: str) -> bool:
+        """Ensure the appservice bot is in the room for a location.
+
+        Looks up the room ID from the gateway's MatrixBridge room cache,
+        or tries to find it by alias.
+        """
+        room_id = self._resolve_room_id(location_name)
+        if not room_id:
+            logger.warning("ensure_in_room: no room found for %s", location_name)
+            return False
+        return self.join_room(room_id)
+
+    def _resolve_room_id(self, location_name: str) -> str:
+        """Resolve a location name to a Matrix room ID."""
+        base = self.matrix_homeserver.rstrip("/")
+        narrator_token = os.getenv("MATRIX_BOT_TOKEN", "")
+        domain = os.getenv("MATRIX_DOMAIN", "localhost")
+
+        # Try room alias
+        alias = f"#loc-{location_name.lower().replace(' ', '-')}:{domain}"
+        try:
+            resp = _requests.get(
+                f"{base}/_matrix/client/v3/directory/room/{alias}",
+                params={"access_token": narrator_token},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return resp.json().get("room_id", "")
+        except Exception:
+            pass
+
+        # Try by listing joined rooms and matching name
+        try:
+            resp = _requests.get(
+                f"{base}/_matrix/client/v3/joined_rooms",
+                params={"access_token": narrator_token},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                for rid in resp.json().get("joined_rooms", []):
+                    # Get room name
+                    state_resp = _requests.get(
+                        f"{base}/_matrix/client/v3/rooms/{rid}/state/m.room.name",
+                        params={"access_token": narrator_token},
+                        timeout=10,
+                    )
+                    if state_resp.status_code == 200:
+                        name = state_resp.json().get("name", "")
+                        if name.lower() == location_name.lower():
+                            return rid
+        except Exception:
+            pass
+
+        return ""
 
     # ── Private helpers ──
 
