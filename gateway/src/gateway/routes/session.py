@@ -107,6 +107,23 @@ async def list_archetypes():
     return result
 
 
+class CharactersRequest(BaseModel):
+    wallet_address: str = Field(..., min_length=42, max_length=42, pattern=r'^0x[a-fA-F0-9]{40}$')
+
+
+@router.post("/session/characters")
+async def list_characters(req: CharactersRequest):
+    """List existing characters for a wallet address."""
+    try:
+        from memento.session import SessionManager
+        sm = SessionManager()
+        characters = await asyncio.to_thread(sm.get_user_characters, req.wallet_address)
+        return {"characters": characters}
+    except Exception:
+        logger.warning("Character list failed", exc_info=True)
+        return {"characters": []}
+
+
 class JoinSessionRequest(BaseModel):
     player_id: str
     game_id: str = "default"

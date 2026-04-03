@@ -301,6 +301,73 @@ async function enterWorld(playerName: string, walletAddress: string): Promise<vo
   (document.getElementById('action-input') as HTMLInputElement).focus();
 }
 
+// --- Character picker (returning players) ---
+function showCharacterPicker(characters: any[], walletAddress: string): void {
+  const walletStepEl = document.getElementById('wallet-step')!;
+  const pickerDiv = document.createElement('div');
+  pickerDiv.id = 'char-picker';
+  pickerDiv.innerHTML = `
+    <div class="picker-title">Your Characters</div>
+    ${characters.map((c: any) => `
+      <div class="picker-card" data-player-id="${c.player_id}">
+        <span class="picker-name">${c.player_name}</span>
+        <span class="picker-info">${c.archetype || 'Unknown'} \u00B7 HP ${c.health}</span>
+      </div>
+    `).join('')}
+    <div class="picker-card picker-new">
+      <span class="picker-name">+ New Character</span>
+    </div>
+  `;
+  walletStepEl.after(pickerDiv);
+
+  pickerDiv.addEventListener('click', (e: MouseEvent) => {
+    const card = (e.target as HTMLElement).closest('.picker-card') as HTMLElement | null;
+    if (!card) return;
+    if (card.classList.contains('picker-new')) {
+      pickerDiv.remove();
+      const archStep = document.getElementById('archetype-step');
+      if (archStep) {
+        archStep.classList.remove('hidden');
+        loadArchetypes();
+      } else {
+        document.getElementById('name-step')!.classList.remove('hidden');
+      }
+    } else {
+      const playerId = card.dataset.playerId!;
+      const playerName = card.querySelector('.picker-name')!.textContent || 'Wanderer';
+      pickerDiv.remove();
+      enterWorldExisting(playerId, playerName, walletAddress);
+    }
+  });
+}
+
+async function enterWorldExisting(playerId: string, playerName: string, walletAddress: string): Promise<void> {
+  const overlay = document.getElementById('char-create-overlay')!;
+  overlay.classList.add('hidden');
+
+  await fetch(`${GATEWAY_URL}/api/session/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ player_id: playerId }),
+  });
+
+  const session = getSession();
+  session.playerId = playerId;
+  session.playerName = playerName;
+  session.walletAddress = walletAddress;
+  session.currentLocation = 'The Threshold';
+
+  gameState = createInitialState(playerName);
+  if (!gameState.roomMap) {
+    applyStateUpdate(gameState, { room_map: getThresholdMap() });
+  }
+  registerMapEntities(gameState.roomMap);
+  renderAllPanels();
+  narrative.addBlock(`Welcome back, ${playerName}.`, 'system');
+  updateRoundState({ type: 'phase', phase: 'ready', location: session.currentLocation });
+  (document.getElementById('action-input') as HTMLInputElement).focus();
+}
+
 // --- Helper: replace a mount div with a component element ---
 function mount(mountId: string, el: HTMLElement): void {
   const mountEl = document.getElementById(mountId);
@@ -482,7 +549,22 @@ document.addEventListener('DOMContentLoaded', () => {
       const addr = await connectWallet();
       walletStep.classList.add('hidden');
       walletAddressEl.textContent = `\u2713 ${formatAddress(addr)}`;
-      // Show archetype selection (or skip to name if no archetype step)
+
+      // Check for existing characters
+      try {
+        const charResp = await fetch(`${GATEWAY_URL}/api/session/characters`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet_address: addr }),
+        });
+        const charData = await charResp.json();
+        if (charData.characters && charData.characters.length > 0) {
+          showCharacterPicker(charData.characters, addr);
+          return;
+        }
+      } catch { /* no existing characters, proceed to creation */ }
+
+      // No existing characters — proceed to archetype/name selection
       if (archetypeStep) {
         archetypeStep.classList.remove('hidden');
         loadArchetypes();

@@ -48,6 +48,14 @@ class SessionManager:
             },
         )
 
+        # 1b. Link player to user (wallet owner)
+        if wallet_address:
+            try:
+                user_uuid = self.get_or_create_user(wallet_address)
+                client.kg.create_edge(user_uuid, player_uuid, "OWNS", "")
+            except Exception:
+                logger.warning("Failed to link player to user", exc_info=True)
+
         # 2. Create session kEngram
         session_id = f"session-{player_uuid[:8]}"
         try:
@@ -107,6 +115,55 @@ class SessionManager:
             "skills": arch_skills,
             "inventory": inventory_names,
         }
+
+    def get_or_create_user(self, wallet_address: str) -> str:
+        """Find or create a User entity for this wallet. Returns user_uuid."""
+        client = get_client()
+        try:
+            result = client.kg.search(f"wallet {wallet_address}", num_results=5)
+            for entity in result.get("entities", result.get("nodes", [])):
+                if "User" in entity.get("labels", []) and entity.get("wallet") == wallet_address:
+                    return entity.get("uuid", entity.get("id", ""))
+        except Exception:
+            logger.debug("User search failed", exc_info=True)
+
+        user_uuid = client.kg.create_entity(
+            f"User:{wallet_address[:10]}",
+            ["User"],
+            {"wallet": wallet_address, "summary": f"Player account {wallet_address[:10]}..."},
+        )
+        logger.info("Created User entity %s for wallet %s", user_uuid, wallet_address[:10])
+        return user_uuid
+
+    def get_user_characters(self, wallet_address: str) -> list[dict]:
+        """Return all Player characters owned by this wallet."""
+        client = get_client()
+        try:
+            result = client.kg.search(f"wallet {wallet_address}", num_results=5)
+            entities = result.get("entities", result.get("nodes", []))
+            user_uuid = None
+            for entity in entities:
+                if "User" in entity.get("labels", []) and entity.get("wallet") == wallet_address:
+                    user_uuid = entity.get("uuid", entity.get("id", ""))
+                    break
+            if not user_uuid:
+                return []
+
+            edges = client.kg.get_edges(user_uuid, direction="outgoing", edge_type="OWNS")
+            characters = []
+            for edge in edges:
+                target = edge.get("target", {})
+                if "Player" in target.get("labels", []):
+                    characters.append({
+                        "player_id": target.get("uuid", target.get("id", "")),
+                        "player_name": target.get("name", "Unknown"),
+                        "archetype": target.get("archetype", ""),
+                        "health": int(target.get("health", 100)),
+                    })
+            return characters
+        except Exception:
+            logger.warning("Failed to query user characters", exc_info=True)
+            return []
 
     def _find_starting_location(self) -> str:
         """Find an existing location or return a default.
