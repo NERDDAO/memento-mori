@@ -76,6 +76,7 @@ def make_action_callback(ws_hub: WebSocketHub):
             "phase": "collecting",
             "action_count": action_count,
             "deadline": int(deadline * 1000),  # unix ms for client
+            "channel": "events",
         })
 
     return on_action_received
