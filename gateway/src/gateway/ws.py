@@ -83,7 +83,7 @@ class WebSocketHub:
                 await ws.send_json(message)
             except Exception:
                 logger.warning("WebSocket send failed for %s, disconnecting", player_id, exc_info=True)
-                self.disconnect(player_id)
+                await self.disconnect(player_id)
 
     async def broadcast_to_location(self, location: str, message: dict[str, Any]) -> None:
         """Send a message to all players at a location."""

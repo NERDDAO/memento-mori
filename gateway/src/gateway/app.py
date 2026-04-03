@@ -75,10 +75,10 @@ async def websocket_endpoint(websocket: WebSocket, player_id: str):
             # Keep connection alive, receive pings
             await websocket.receive_text()
     except WebSocketDisconnect:
-        ws_hub.disconnect(player_id)
+        await ws_hub.disconnect(player_id)
     except Exception:
         logger.warning("WebSocket error for %s, disconnecting", player_id, exc_info=True)
-        ws_hub.disconnect(player_id)
+        await ws_hub.disconnect(player_id)
 
 
 # Static file serving — must be last (mounts at "/")

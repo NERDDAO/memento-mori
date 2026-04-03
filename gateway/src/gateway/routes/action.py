@@ -47,7 +47,7 @@ async def submit_action(req: ActionRequest):
 
     # Track player location
     if ws_hub:
-        ws_hub.set_location(req.player_id, req.location)
+        await ws_hub.set_location(req.player_id, req.location)
 
     if round_manager:
         await round_manager.submit_action(

@@ -51,6 +51,11 @@ async def create_session(req: CreateSessionRequest, request: Request):
         if bridge and bridge.connected:
             await bridge.register_player(req.player_name, result["player_id"])
 
+        # Store player name for presence tracking
+        from gateway.app import ws_hub
+        if ws_hub:
+            ws_hub.player_names[result["player_id"]] = req.player_name
+
         return CreateSessionResponse(
             player_id=result["player_id"],
             session_id=result["session_id"],
@@ -71,6 +76,10 @@ async def create_session(req: CreateSessionRequest, request: Request):
         from gateway.app import bridge
         if bridge and bridge.connected:
             await bridge.register_player(req.player_name, player_id)
+
+        from gateway.app import ws_hub
+        if ws_hub:
+            ws_hub.player_names[player_id] = req.player_name
 
         return CreateSessionResponse(
             player_id=player_id,
