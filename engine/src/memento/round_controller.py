@@ -292,8 +292,20 @@ class RoundController:
         """Execute the full round. Returns ``(narrative, state_update_dict)``.
 
         This method is designed to be called from a worker thread via
-        ``asyncio.to_thread``.
+        ``asyncio.to_thread``.  Wraps the entire flow in a try/except so a
+        hung crew or unexpected error always emits ``ready`` and never leaves
+        the client locked.
         """
+        try:
+            return self._run_inner()
+        except Exception:
+            logger.error("RoundController.run() failed", exc_info=True)
+            self.subsystem_warnings.append("round_failed")
+            self.emit_phase("ready")
+            return "", self._build_state_update()
+
+    def _run_inner(self) -> tuple[str, dict]:
+        """Core round logic — called by run() inside a safety wrapper."""
         # 1. Context
         self.gather_context()
 

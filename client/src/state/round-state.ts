@@ -24,6 +24,10 @@ type RoundListener = (state: RoundState) => void;
 
 const listeners: RoundListener[] = [];
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
+let safetyTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Safety timeout — force ready if stuck in resolving/npc_response for too long.
+const SAFETY_TIMEOUT_MS = 120_000; // 2 minutes
 
 const state: RoundState = {
   phase: "ready",
@@ -67,6 +71,27 @@ function startCountdown(deadline: number): void {
   }, 1000);
 }
 
+function clearSafetyTimer(): void {
+  if (safetyTimer) {
+    clearTimeout(safetyTimer);
+    safetyTimer = null;
+  }
+}
+
+function startSafetyTimer(): void {
+  clearSafetyTimer();
+  safetyTimer = setTimeout(() => {
+    safetyTimer = null;
+    if (state.phase === "resolving" || state.phase === "npc_response") {
+      console.warn(`[round-state] safety timeout — forcing ready (was ${state.phase})`);
+      state.phase = "ready";
+      state.crew = undefined;
+      stopCountdown();
+      notify();
+    }
+  }, SAFETY_TIMEOUT_MS);
+}
+
 export function updateRoundState(msg: PhaseMessage): void {
   state.phase = msg.phase;
   state.crew = msg.crew;
@@ -79,6 +104,13 @@ export function updateRoundState(msg: PhaseMessage): void {
   } else if (msg.phase !== "collecting") {
     stopCountdown();
     state.actionCount = undefined;
+  }
+
+  // Safety timeout: if we enter a locked phase, start a timer to force ready
+  if (msg.phase === "resolving" || msg.phase === "npc_response") {
+    startSafetyTimer();
+  } else {
+    clearSafetyTimer();
   }
 
   notify();
