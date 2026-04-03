@@ -13,3 +13,4 @@ llm:
     combat_narration: "openrouter/google/gemini-2.5-flash"
     npc_concept: "openrouter/google/gemini-2.5-flash"
     stat_assignment: "openrouter/google/gemini-2.5-flash"
+    ascii_art: "openrouter/google/gemini-2.5-flash"

@@ -32,3 +32,4 @@ crews:
   npc_memory: null
   faction_generation: npc_concept
   reputation: stat_assignment
+  ascii_art: ascii_art
