@@ -75,7 +75,7 @@ class SessionManager:
         try:
             from memento.tools import chain as _chain
             if _chain.is_enabled():
-                _chain.register_character(player_uuid, player_name, wallet_address, 1)
+                _chain.register_character(player_uuid, player_name, wallet_address)
         except Exception as e:
             logger.warning("Chain register_character failed", exc_info=True)
 
@@ -142,7 +142,7 @@ class SessionManager:
             return f"You stand at {location_name}. The air is heavy with foreboding. Your journey begins."
 
     def end_session(self, player_id: str) -> dict:
-        """End a session — verify kEngram, sync context."""
+        """End a session — verify kEngram, sync context, commit epoch."""
         client = get_client()
         try:
             client.agents.sync(
@@ -151,6 +151,14 @@ class SessionManager:
             )
         except Exception as e:
             logger.warning("Session sync failed", exc_info=True)
+
+        # Commit epoch snapshot at session boundary
+        try:
+            from memento.epoch import run_epoch
+            run_epoch(tick=0)
+        except Exception as e:
+            logger.warning("Epoch commit on session end failed", exc_info=True)
+
         return {"status": "ended", "player_id": player_id}
 
     def handle_death(self, player_id: str, cause: str, location: str) -> dict:
@@ -170,9 +178,24 @@ class SessionManager:
         try:
             from memento.tools import chain as _chain
             if _chain.is_enabled():
-                _chain.record_death(player_id, cause, location, 0, 0)
+                _chain.record_death(player_id, cause, location, 0)
         except Exception as e:
             logger.warning("Chain record_death failed", exc_info=True)
+
+        # Deactivate NPC agent if the dead entity is an NPC (non-fatal)
+        try:
+            from memento.agent_controller import get_agent_controller
+            controller = get_agent_controller()
+            controller.kill_npc_agent(player_id, cause=cause, location=location)
+        except Exception:
+            logger.debug("Agent deactivation skipped for %s", player_id)
+
+        # Commit epoch snapshot on permadeath
+        try:
+            from memento.epoch import run_epoch
+            run_epoch(tick=0)
+        except Exception:
+            logger.warning("Epoch commit on death failed", exc_info=True)
 
         return {
             "status": "dead",

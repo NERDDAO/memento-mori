@@ -55,4 +55,21 @@ class NPCGenerationFlow(Flow[NPCGenState]):
             result = final_crew.kickoff()
             self.state.npcs_created.append(result.raw[:200])
 
+            # Spawn Bonfires agent for this NPC
+            try:
+                from memento.agent_controller import get_agent_controller
+                controller = get_agent_controller()
+                controller.spawn_npc_agent(
+                    concept=concept,
+                    mechanics=mechanized,
+                    finalization_result=result.raw,
+                    location_name=self.state.location_name,
+                    npc_labels=["Combat", "Memory", "Trade"],
+                )
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Agent spawn failed for NPC at %s", self.state.location_name, exc_info=True,
+                )
+
         return self.state.npcs_created

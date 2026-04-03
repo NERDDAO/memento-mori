@@ -294,6 +294,13 @@ async def move_entity(req: MoveRequest):
         create_edge, req.entity_name, req.destination, "LOCATED_IN",
         f"{req.entity_name} moved to {req.destination}",
     )
+    # Update agent controller tracking
+    try:
+        from memento.agent_controller import get_agent_controller
+        controller = get_agent_controller()
+        controller.move_npc_agent(req.entity_name, to_location=req.destination)
+    except Exception:
+        pass  # Non-fatal — agent may not exist
     return {"result": result, "entity": req.entity_name, "destination": req.destination}
 
 
