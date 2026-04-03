@@ -207,6 +207,35 @@ function handleMessage(msg: any): void {
       if (msg.tick != null) statusBar.setTick(msg.tick);
       if (msg.chain != null) statusBar.setChain(msg.chain);
       break;
+    case 'player_joined': {
+      if (gameState) {
+        const exists = gameState.location.players.some(p => p.id === msg.player_id);
+        if (!exists) {
+          gameState.location.players.push({ name: msg.player_name, id: msg.player_id });
+          renderPresentPanel(presentWin.body, gameState, handleAction);
+          narrative.addBlock(`${msg.player_name} arrived.`, 'system');
+        }
+      }
+      break;
+    }
+    case 'player_left': {
+      if (gameState) {
+        gameState.location.players = gameState.location.players.filter(p => p.id !== msg.player_id);
+        renderPresentPanel(presentWin.body, gameState, handleAction);
+        narrative.addBlock(`${msg.player_name} departed.`, 'system');
+      }
+      break;
+    }
+    case 'presence': {
+      if (gameState) {
+        gameState.location.players = (msg.players || []).map((p: any) => ({
+          name: p.player_name,
+          id: p.player_id,
+        }));
+        renderPresentPanel(presentWin.body, gameState, handleAction);
+      }
+      break;
+    }
     default:
       console.log('Unknown message:', msg);
   }
@@ -348,7 +377,10 @@ document.addEventListener('DOMContentLoaded', () => {
     <input type="text" id="action-input" placeholder="What do you do?" autocomplete="off" spellcheck="false" />
   `;
   const actionInput = commandWin.body.querySelector('#action-input') as HTMLInputElement;
-  initInput(actionInput, handleAction);
+  initInput(actionInput, handleAction, () => ({
+    npcs: gameState?.location?.npcs || [],
+    players: gameState?.location?.players || [],
+  }));
 
   // 8. Map + Wiki — split map window body into canvas wrap + world map + wiki panel
   const mapCanvasWrap = document.createElement('div');

@@ -19,7 +19,8 @@ export function renderPresentPanel(
   currentBody = body;
   const npcs = state.location.npcs || [];
   const items = state.location.items || [];
-  if (npcs.length === 0 && items.length === 0) {
+  const players = state.location.players || [];
+  if (npcs.length === 0 && items.length === 0 && players.length === 0) {
     body.innerHTML = '<div class="empty-msg">Nothing here</div>';
     return;
   }
@@ -30,6 +31,10 @@ export function renderPresentPanel(
     const name = typeof npc === 'string' ? npc : (npc as any).name;
     const role = typeof npc === 'string' ? '' : ((npc as any).role || '');
     html += `<div class="npc-row${thinkingClass}" data-action="talk to ${name}" style="cursor:pointer"><span class="npc-diamond">\u25C6</span><span class="npc">${name}</span>${role ? `<span class="npc-role">\u2014 ${role}</span>` : ''}</div>`;
+  }
+  for (const p of players) {
+    const name = typeof p === 'string' ? p : p.name;
+    html += `<div class="player-row"><span class="player-at">@</span><span class="player-name">${name}</span></div>`;
   }
   for (const item of items) {
     const name = typeof item === 'string' ? item : (item as any).name;

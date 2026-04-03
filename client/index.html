@@ -400,6 +400,28 @@
       border-top: 1px solid var(--border-dim, #333);
       margin: 0.5em 0;
     }
+
+    /* Player presence */
+    .player-row { padding: 2px 4px; color: var(--text-cyan, #4ec9b0); }
+    .player-at { margin-right: 4px; opacity: 0.6; }
+
+    /* @mention dropdown */
+    .mention-dropdown {
+      position: fixed;
+      background: var(--bg-panel, #1e1e1e);
+      border: 1px solid var(--border, #444);
+      max-height: 180px;
+      overflow-y: auto;
+      z-index: 100;
+      min-width: 200px;
+      font-family: inherit;
+      font-size: inherit;
+    }
+    .mention-item { padding: 4px 8px; cursor: pointer; }
+    .mention-item.selected, .mention-item:hover { background: var(--bg-highlight, #2a2d2e); }
+    .mention-icon { margin-right: 6px; opacity: 0.6; }
+    .mention-npc .mention-icon { color: var(--text-yellow, #d7ba7d); }
+    .mention-player .mention-icon { color: var(--text-cyan, #4ec9b0); }
   </style>
 </head>
 <body>
