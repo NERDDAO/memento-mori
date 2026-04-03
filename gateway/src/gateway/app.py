@@ -9,7 +9,7 @@ from gateway.log import get_logger
 from gateway.matrix_bridge import MatrixBridge
 from gateway.ws import WebSocketHub
 from memento.round_manager import RoundManager
-from gateway.round_callback import make_round_callback
+from gateway.round_callback import make_round_callback, make_action_callback
 
 logger = get_logger(__name__)
 
@@ -32,6 +32,7 @@ async def lifespan(app: FastAPI):
         bridge = MatrixBridge(homeserver, token, ws_hub)
         await bridge.connect()
         round_manager.on_round_close(make_round_callback(bridge, ws_hub))
+        round_manager.on_action(make_action_callback(ws_hub))
     yield
     if bridge:
         await bridge.disconnect()

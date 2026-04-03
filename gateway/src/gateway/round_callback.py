@@ -67,3 +67,20 @@ def make_round_callback(bridge: MatrixBridge, ws_hub: WebSocketHub):
             logger.info("Batch sent to %s: %d actions", location, len(actions))
 
     return on_round_close
+
+
+def make_action_callback(ws_hub: WebSocketHub):
+    """Create an async callback for RoundManager.on_action.
+
+    Emits 'collecting' phase to all players at the location.
+    """
+
+    async def on_action_received(location: str, action_count: int, deadline: float) -> None:
+        await ws_hub.broadcast_to_location(location, {
+            "type": "phase",
+            "phase": "collecting",
+            "action_count": action_count,
+            "deadline": int(deadline * 1000),  # unix ms for client
+        })
+
+    return on_action_received
