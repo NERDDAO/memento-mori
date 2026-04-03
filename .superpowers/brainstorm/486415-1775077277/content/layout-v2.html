@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Memento Mori — Layout Options</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#111118; color:#c8c8d0; font-family:system-ui,sans-serif; padding:24px; }
+  h2 { color:#e0e0e8; margin-bottom:8px; }
+  .subtitle { color:#6a6a78; margin-bottom:32px; }
+  .label { display:block; color:#8b5cf6; font-size:13px; font-weight:600; margin-bottom:12px; letter-spacing:1px; }
+
+  /* Mockup container */
+  .mockup-wrap {
+    margin-bottom:40px;
+    border:1px solid #2a2a38;
+    border-radius:8px;
+    overflow:hidden;
+    cursor:pointer;
+    transition: border-color 0.2s;
+  }
+  .mockup-wrap:hover { border-color:#8b5cf6; }
+  .mockup-wrap.selected { border-color:#8b5cf6; box-shadow:0 0 20px rgba(139,92,246,0.15); }
+  .mockup-title { background:#1a1a25; padding:12px 16px; color:#e0e0e8; font-weight:600; border-bottom:1px solid #2a2a38; }
+  .mockup-desc { background:#1a1a25; padding:8px 16px 12px; color:#6a6a78; font-size:13px; border-bottom:1px solid #2a2a38; }
+
+  /* The actual TUI mockup */
+  .tui {
+    background:#0a0a0f;
+    font-family:'Courier New',Consolas,monospace;
+    font-size:13px;
+    line-height:1.5;
+    padding:0;
+    color:#c8c8d0;
+  }
+
+  /* === OPTION A: Unified Frame === */
+  .tui-a {
+    display:grid;
+    grid-template-rows: auto 1fr auto;
+    height:480px;
+    border:2px solid #2a2a38;
+  }
+  .tui-a .header {
+    border-bottom:1px solid #2a2a38;
+    padding:6px 12px;
+    display:flex;
+    justify-content:space-between;
+    color:#6a6a78;
+    font-size:12px;
+  }
+  .tui-a .header .title { color:#8b5cf6; }
+  .tui-a .main {
+    display:grid;
+    grid-template-columns:1fr 240px;
+    overflow:hidden;
+  }
+  .tui-a .narrative {
+    padding:12px 16px;
+    overflow-y:auto;
+    border-right:1px solid #2a2a38;
+  }
+  .tui-a .sidebar {
+    overflow-y:auto;
+  }
+  .tui-a .sidebar .panel {
+    padding:8px 12px;
+    border-bottom:1px solid #2a2a38;
+  }
+  .tui-a .sidebar .panel-label {
+    color:#6a6a78;
+    font-size:10px;
+    letter-spacing:1px;
+    margin-bottom:4px;
+  }
+  .tui-a .input-row {
+    border-top:1px solid #2a2a38;
+    padding:6px 12px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .tui-a .input-row .prompt { color:#6a6a78; }
+  .tui-a .input-row .cursor { color:#c8c8d0; animation: blink 1s infinite; }
+
+  /* === OPTION B: Independent Windows === */
+  .tui-b {
+    display:grid;
+    grid-template-columns:1fr 250px;
+    grid-template-rows: auto 1fr auto;
+    height:480px;
+    gap:4px;
+    padding:4px;
+  }
+  .tui-b .header {
+    grid-column:1/-1;
+    padding:4px 12px;
+    color:#6a6a78;
+    font-size:12px;
+    display:flex;
+    justify-content:space-between;
+  }
+  .tui-b .header .title { color:#8b5cf6; }
+  .tui-b .window {
+    border:1px solid #2a2a38;
+    border-radius:2px;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+  .tui-b .win-title {
+    background:#16161f;
+    padding:2px 8px;
+    font-size:11px;
+    color:#6a6a78;
+    border-bottom:1px solid #2a2a38;
+  }
+  .tui-b .win-body {
+    padding:8px 10px;
+    flex:1;
+    overflow-y:auto;
+  }
+  .tui-b .narrative-win {
+    grid-row:2;
+    grid-column:1;
+  }
+  .tui-b .sidebar-col {
+    grid-row:2;
+    grid-column:2;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+  }
+  .tui-b .input-win {
+    grid-column:1/-1;
+  }
+  .tui-b .input-win .win-body {
+    display:flex; align-items:center; gap:8px; padding:4px 10px;
+  }
+
+  /* Shared text styles */
+  .loc { color:#7aa2d4; }
+  .npc { color:#d4a574; }
+  .item { color:#a335ee; }
+  .exit { color:#50c8c8; }
+  .dim { color:#6a6a78; }
+  .sys { color:#5a5a70; font-style:italic; }
+  .dmg { color:#e05050; }
+  .heal { color:#50c878; }
+  .accent { color:#8b5cf6; }
+  .player-action { color:#5a5a70; font-style:italic; border-left:2px solid #2a2a38; padding-left:8px; margin:8px 0; }
+  .bar { display:inline; }
+  .bar-fill-hp { color:#e05050; }
+  .bar-fill-xp { color:#8b5cf6; }
+  .bar-empty { color:#2a2a38; }
+  .prompt-char { color:#6a6a78; }
+  .cursor { animation: blink 1s step-end infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  p.narr { margin-bottom:10px; }
+
+  .selection-hint { text-align:center; color:#6a6a78; font-size:13px; margin-top:16px; }
+</style>
+</head>
+<body>
+
+<h2>Two-Column Text UI Layout</h2>
+<p class="subtitle">Both use box-drawing borders for a unified MUD aesthetic. Click to select.</p>
+
+<!-- OPTION A -->
+<span class="label">A · UNIFIED FRAME</span>
+<div class="mockup-wrap" onclick="this.classList.toggle('selected'); document.querySelectorAll('.mockup-wrap').forEach(e => { if(e!==this) e.classList.remove('selected') })">
+<div class="mockup-desc">Single outer border. Header spans full width. Internal dividers. One cohesive TUI app.</div>
+<div class="tui tui-a">
+  <div class="header">
+    <span>&#9789; Waning Crescent &middot; 3rd of Ashfall &middot; Dusk</span>
+    <span class="title">MEMENTO MORI</span>
+  </div>
+  <div class="main">
+    <div class="narrative">
+      <p class="narr"><span class="loc">The Threshold</span></p>
+      <p class="narr">The tavern smells of damp wood and old smoke. A fire crackles in the hearth, casting long shadows across the stone floor. <span class="npc">Roric</span> leans against the bar, watching you with narrowed eyes.</p>
+      <p class="narr"><span class="npc">"Another soul stumbles through the door,"</span> he mutters. <span class="npc">"The Wastes don't give many second chances."</span></p>
+      <div class="player-action">&gt; examine the fire</div>
+      <p class="narr">The flames twist into shapes — faces, perhaps, or memories. The warmth is almost alive here. A <span class="item">tattered journal</span> lies near the hearth, its pages curling in the heat.</p>
+    </div>
+    <div class="sidebar">
+      <div class="panel">
+        <div class="panel-label">CHARACTER</div>
+        <div><span class="npc">Grumlock</span> <span class="dim">Lv.3</span></div>
+        <div><span class="dim">HP</span> <span class="bar"><span class="bar-fill-hp">████████</span><span class="bar-empty">░░</span></span> <span class="dim">42/50</span></div>
+        <div><span class="dim">XP</span> <span class="bar"><span class="bar-fill-xp">██████</span><span class="bar-empty">░░░░</span></span> <span class="dim">120</span></div>
+      </div>
+      <div class="panel">
+        <div class="panel-label">INVENTORY</div>
+        <div><span class="dim">·</span> <span class="item">Tattered Journal</span></div>
+        <div><span class="dim">·</span> Dull Iron Dagger <span class="dim">E</span></div>
+      </div>
+      <div class="panel">
+        <div class="panel-label">EXITS</div>
+        <div><span class="exit">→ East</span> <span class="dim">Fog Road</span></div>
+        <div><span class="exit">→ North</span> <span class="dim">Skeletal Woods</span></div>
+        <div><span class="exit">→ South</span> <span class="dim">The Wastes</span></div>
+      </div>
+      <div class="panel">
+        <div class="panel-label">PRESENT</div>
+        <div><span class="npc">◆ Roric</span> <span class="dim">— Barkeep</span></div>
+        <div><span class="npc">◆ Elara</span> <span class="dim">— Wanderer</span></div>
+        <div><span class="npc">◆ Grumlock</span> <span class="dim">— Smith</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="input-row">
+    <span class="prompt">&gt;</span>
+    <span>talk to roric</span><span class="cursor">▌</span>
+  </div>
+</div>
+</div>
+
+<!-- OPTION B -->
+<span class="label" style="margin-top:24px;">B · INDEPENDENT WINDOWS</span>
+<div class="mockup-wrap" onclick="this.classList.toggle('selected'); document.querySelectorAll('.mockup-wrap').forEach(e => { if(e!==this) e.classList.remove('selected') })">
+<div class="mockup-desc">Each panel is its own bordered window with a title bar. Like tmux — panels can resize independently.</div>
+<div class="tui tui-b">
+  <div class="header">
+    <span>&#9789; Waning Crescent &middot; 3rd of Ashfall &middot; Dusk</span>
+    <span class="title">MEMENTO MORI</span>
+  </div>
+  <div class="window narrative-win">
+    <div class="win-title">─ Narrative ─</div>
+    <div class="win-body">
+      <p class="narr"><span class="loc">The Threshold</span></p>
+      <p class="narr">The tavern smells of damp wood and old smoke. A fire crackles in the hearth, casting long shadows across the stone floor. <span class="npc">Roric</span> leans against the bar, watching you with narrowed eyes.</p>
+      <p class="narr"><span class="npc">"Another soul stumbles through the door,"</span> he mutters. <span class="npc">"The Wastes don't give many second chances."</span></p>
+      <div class="player-action">&gt; examine the fire</div>
+      <p class="narr">The flames twist into shapes — faces, perhaps, or memories. The warmth is almost alive here. A <span class="item">tattered journal</span> lies near the hearth, its pages curling in the heat.</p>
+    </div>
+  </div>
+  <div class="sidebar-col">
+    <div class="window" style="flex:0 0 auto;">
+      <div class="win-title">─ Grumlock ─</div>
+      <div class="win-body">
+        <div><span class="dim">Lv.3</span></div>
+        <div><span class="dim">HP</span> <span class="bar-fill-hp">████████</span><span class="bar-empty">░░</span> <span class="dim">42/50</span></div>
+        <div><span class="dim">XP</span> <span class="bar-fill-xp">██████</span><span class="bar-empty">░░░░</span> <span class="dim">120</span></div>
+      </div>
+    </div>
+    <div class="window" style="flex:0 0 auto;">
+      <div class="win-title">─ Inventory ─</div>
+      <div class="win-body">
+        <div><span class="dim">·</span> <span class="item">Tattered Journal</span></div>
+        <div><span class="dim">·</span> Dull Iron Dagger <span class="dim">E</span></div>
+      </div>
+    </div>
+    <div class="window" style="flex:0 0 auto;">
+      <div class="win-title">─ Exits ─</div>
+      <div class="win-body">
+        <div><span class="exit">→ East</span> <span class="dim">Fog Road</span></div>
+        <div><span class="exit">→ North</span> <span class="dim">Skeletal Woods</span></div>
+        <div><span class="exit">→ South</span> <span class="dim">The Wastes</span></div>
+      </div>
+    </div>
+    <div class="window" style="flex:1 1 auto;">
+      <div class="win-title">─ Present ─</div>
+      <div class="win-body">
+        <div><span class="npc">◆ Roric</span> <span class="dim">— Barkeep</span></div>
+        <div><span class="npc">◆ Elara</span> <span class="dim">— Wanderer</span></div>
+        <div><span class="npc">◆ Grumlock</span> <span class="dim">— Smith</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="window input-win">
+    <div class="win-title">─ Command ─</div>
+    <div class="win-body">
+      <span class="prompt-char">&gt;</span>
+      <span>talk to roric</span><span class="cursor">▌</span>
+    </div>
+  </div>
+</div>
+</div>
+
+<p class="selection-hint">Click a mockup to select it, then tell me in the terminal.</p>
+
+</body>
+</html>

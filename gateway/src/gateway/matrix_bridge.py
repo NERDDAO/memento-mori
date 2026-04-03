@@ -143,6 +143,26 @@ class MatrixBridge:
                 await self.ws_hub.broadcast_all(msg)
 
             await _send_status("synced")
+            return
+
+        # NPC agent message — forward to players as narrative
+        sender = event.sender or ""
+        if sender.startswith("@bonfires-") and not rpg_meta:
+            location = self.room_to_location.get(room.room_id, "")
+            npc_username = sender.split(":")[0].lstrip("@")  # "bonfires-roric"
+            npc_name = npc_username.replace("bonfires-", "").replace("_", " ").title()
+
+            msg = {
+                "type": "narrative",
+                "text": event.body,
+                "npc": npc_name,
+                "location": location or room.display_name or "unknown",
+            }
+            if location:
+                await self.ws_hub.broadcast_to_location(location, msg)
+            else:
+                await self.ws_hub.broadcast_all(msg)
+            logger.info("NPC %s spoke at %s", npc_name, location)
 
     async def register_player(self, player_name: str, player_id: str) -> str | None:
         """Register a Matrix user for a player. Returns access_token or None."""

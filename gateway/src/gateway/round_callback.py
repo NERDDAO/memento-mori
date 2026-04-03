@@ -1,4 +1,4 @@
-"""Round close callback — sends batched actions to Matrix for engine processing."""
+"""Round close callback — sends player actions to Matrix, then triggers engine."""
 
 from __future__ import annotations
 
@@ -17,8 +17,10 @@ logger = get_logger(__name__)
 def make_round_callback(bridge: MatrixBridge, ws_hub: WebSocketHub):
     """Create an async callback for RoundManager.on_round_close.
 
-    When a round closes, sends a batch message to the Matrix room
-    for that location so the engine can process all actions together.
+    When a round closes:
+    1. Send each player action as a readable message from the player's Matrix user
+       (so NPC agents can see and respond to them)
+    2. Send a batch metadata message for the engine to process
     """
 
     async def on_round_close(location: str, actions: list[PlayerAction]) -> None:
@@ -34,7 +36,12 @@ def make_round_callback(bridge: MatrixBridge, ws_hub: WebSocketHub):
             "action": f"Processing round ({len(actions)} actions)",
         })
 
-        # Build batch message for engine
+        # Step 1: Send each player action as a readable message from the player
+        # NPC agents see these and can respond
+        for a in actions:
+            await bridge.send_action(room_id, a.player_id, a.action)
+
+        # Step 2: Send batch metadata for the engine listener
         action_list = [
             {
                 "player_id": a.player_id,
@@ -46,7 +53,7 @@ def make_round_callback(bridge: MatrixBridge, ws_hub: WebSocketHub):
 
         content = {
             "msgtype": "m.text",
-            "body": f"Round closed at {location} ({len(actions)} actions)",
+            "body": f"[engine:batch] {len(actions)} actions at {location}",
             "com.bonfires.rpg": {
                 "type": "player-action-batch",
                 "batch": True,
@@ -55,7 +62,6 @@ def make_round_callback(bridge: MatrixBridge, ws_hub: WebSocketHub):
             },
         }
 
-        # Send as narrator bot
         if bridge.client:
             await bridge.client.room_send(room_id, "m.room.message", content)
             logger.info("Batch sent to %s: %d actions", location, len(actions))

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm mud:*)",
+      "Bash(forge build:*)",
+      "Bash(WORLD_ADDRESS=\"0x1FecC50367E1B170A67A68E121a4201dF9Cfd289\" forge test -vv --rpc-url http://localhost:8545)",
+      "Bash(anvil --port 8545)",
+      "Bash(curl -s -X POST http://localhost:8545 -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}')",
+      "Bash(WORLD_ADDRESS=0x130304a46FC044A2751303C5A51A6448c97EB36C forge test --fork-url http://localhost:8545 -vv)"
+    ]
+  }
+}

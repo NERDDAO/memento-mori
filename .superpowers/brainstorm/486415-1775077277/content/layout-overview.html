@@ -1,0 +1,78 @@
+<h2>Two-Column Text UI Layout</h2>
+<p class="subtitle">Both columns use box-drawing borders for a unified MUD aesthetic. Which framing style?</p>
+
+<div class="cards">
+  <!-- Option A: Classic MUD -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0a0a0f; padding:16px; font-family:'Courier New',monospace; font-size:11px; line-height:1.4; color:#c8c8d0; white-space:pre; overflow:hidden;">
+<span style="color:#2a2a38">╔══════════════════════════════════════════════════╦═══════════════════════╗</span>
+<span style="color:#6a6a78"> ☽ Waning Crescent  ·  3rd of Ashfall  ·  Dusk    </span><span style="color:#2a2a38">║</span><span style="color:#8b5cf6"> MEMENTO MORI          </span>
+<span style="color:#2a2a38">╠══════════════════════════════════════════════════╬═══════════════════════╣</span>
+<span style="color:#2a2a38">║</span>                                                  <span style="color:#2a2a38">║</span> <span style="color:#d4a574">Grumlock</span> <span style="color:#6a6a78">Lv.3</span>         <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span> <span style="color:#7aa2d4">The Threshold</span>                                    <span style="color:#2a2a38">║</span> <span style="color:#6a6a78">HP</span> <span style="color:#e05050">████████</span><span style="color:#2a2a38">░░</span> <span style="color:#6a6a78">42/50</span>  <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span>                                                  <span style="color:#2a2a38">║</span> <span style="color:#6a6a78">XP</span> <span style="color:#8b5cf6">██████</span><span style="color:#2a2a38">░░░░</span> <span style="color:#6a6a78">120</span>   <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span> <span style="color:#c8c8d0">The tavern smells of damp wood and old</span>          <span style="color:#2a2a38">╠═══════════════════════╣</span>
+<span style="color:#2a2a38">║</span> <span style="color:#c8c8d0">smoke. A fire crackles in the hearth,</span>           <span style="color:#2a2a38">║</span> <span style="color:#6a6a78">INVENTORY</span>              <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span> <span style="color:#c8c8d0">casting long shadows across the stone</span>           <span style="color:#2a2a38">║</span>                       <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span> <span style="color:#c8c8d0">floor.</span> <span style="color:#d4a574">Roric</span> <span style="color:#c8c8d0">leans against the bar,</span>             <span style="color:#2a2a38">║</span> <span style="color:#808080">· Tattered Journal</span>    <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span> <span style="color:#c8c8d0">watching you with narrowed eyes.</span>                <span style="color:#2a2a38">║</span> <span style="color:#808080">· Dull Iron Dagger</span> <span style="color:#6a6a78">E</span>  <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span>                                                  <span style="color:#2a2a38">║</span>                       <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span> <span style="color:#d4a574">"Another soul stumbles through the</span>              <span style="color:#2a2a38">╠═══════════════════════╣</span>
+<span style="color:#2a2a38">║</span> <span style="color:#d4a574"> door,"</span> <span style="color:#c8c8d0">he mutters.</span> <span style="color:#d4a574">"The Wastes</span>               <span style="color:#2a2a38">║</span> <span style="color:#6a6a78">EXITS</span>                  <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span> <span style="color:#d4a574"> don't give many second chances."</span>               <span style="color:#2a2a38">║</span>                       <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span>                                                  <span style="color:#2a2a38">║</span> <span style="color:#50c8c8">→ East</span>  <span style="color:#6a6a78">Fog Road</span>      <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span> <span style="color:#5a5a70">> examine the fire</span>                              <span style="color:#2a2a38">║</span> <span style="color:#50c8c8">→ North</span> <span style="color:#6a6a78">Skeletal Woods</span> <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span>                                                  <span style="color:#2a2a38">║</span> <span style="color:#50c8c8">→ South</span> <span style="color:#6a6a78">The Wastes</span>    <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span> <span style="color:#c8c8d0">The flames twist into shapes — faces,</span>           <span style="color:#2a2a38">║</span>                       <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span> <span style="color:#c8c8d0">perhaps, or memories. The warmth is</span>             <span style="color:#2a2a38">╠═══════════════════════╣</span>
+<span style="color:#2a2a38">║</span> <span style="color:#c8c8d0">almost alive here.</span>                               <span style="color:#2a2a38">║</span> <span style="color:#6a6a78">PRESENT</span>                <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span>                                                  <span style="color:#2a2a38">║</span>                       <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span>                                                  <span style="color:#2a2a38">║</span> <span style="color:#d4a574">◆ Roric</span> <span style="color:#6a6a78">— Barkeep</span>     <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span>                                                  <span style="color:#2a2a38">║</span> <span style="color:#d4a574">◆ Elara</span> <span style="color:#6a6a78">— Wanderer</span>   <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">║</span>                                                  <span style="color:#2a2a38">║</span> <span style="color:#d4a574">◆ Grumlock</span> <span style="color:#6a6a78">— Smith</span>   <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">╠══════════════════════════════════════════════════╩═══════════════════════╣</span>
+<span style="color:#6a6a78">║</span> <span style="color:#6a6a78">> </span><span style="color:#c8c8d0">talk to roric</span><span style="color:#2a2a38">▌</span>                                                      <span style="color:#2a2a38">║</span>
+<span style="color:#2a2a38">╚═════════════════════════════════════════════════════════════════════════╝</span></div>
+    <div class="card-body">
+      <h3>A · Unified Frame</h3>
+      <p>Single outer border wraps everything. Header spans full width with date/time. Narrative and side panels share internal dividers. Feels like one cohesive TUI application.</p>
+    </div>
+  </div>
+
+  <!-- Option B: Independent Windows -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0a0a0f; padding:16px; font-family:'Courier New',monospace; font-size:11px; line-height:1.4; color:#c8c8d0; white-space:pre; overflow:hidden;">
+<span style="color:#6a6a78"> ☽ Waning Crescent  ·  3rd of Ashfall  ·  Dusk                              </span>
+<span style="color:#2a2a38">┌─ Narrative ──────────────────────────────────┐ ┌─ Grumlock ────────────┐</span>
+<span style="color:#2a2a38">│</span>                                               <span style="color:#2a2a38">│ │</span> <span style="color:#6a6a78">Lv.3</span>                  <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span> <span style="color:#7aa2d4">The Threshold</span>                                  <span style="color:#2a2a38">│ │</span> <span style="color:#6a6a78">HP</span> <span style="color:#e05050">████████</span><span style="color:#2a2a38">░░</span> <span style="color:#6a6a78">42/50</span>  <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span>                                               <span style="color:#2a2a38">│ │</span> <span style="color:#6a6a78">XP</span> <span style="color:#8b5cf6">██████</span><span style="color:#2a2a38">░░░░</span> <span style="color:#6a6a78">120</span>   <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span> <span style="color:#c8c8d0">The tavern smells of damp wood and old</span>        <span style="color:#2a2a38">│ └───────────────────────┘</span>
+<span style="color:#2a2a38">│</span> <span style="color:#c8c8d0">smoke. A fire crackles in the hearth,</span>         <span style="color:#2a2a38">│ ┌─ Inventory ────────────┐</span>
+<span style="color:#2a2a38">│</span> <span style="color:#c8c8d0">casting long shadows across the stone</span>         <span style="color:#2a2a38">│ │</span>                        <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span> <span style="color:#c8c8d0">floor.</span> <span style="color:#d4a574">Roric</span> <span style="color:#c8c8d0">leans against the bar,</span>           <span style="color:#2a2a38">│ │</span> <span style="color:#808080">· Tattered Journal</span>     <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span> <span style="color:#c8c8d0">watching you with narrowed eyes.</span>              <span style="color:#2a2a38">│ │</span> <span style="color:#808080">· Dull Iron Dagger</span> <span style="color:#6a6a78">E</span>   <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span>                                               <span style="color:#2a2a38">│ │</span>                        <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span> <span style="color:#d4a574">"Another soul stumbles through the</span>            <span style="color:#2a2a38">│ └────────────────────────┘</span>
+<span style="color:#2a2a38">│</span> <span style="color:#d4a574"> door,"</span> <span style="color:#c8c8d0">he mutters.</span> <span style="color:#d4a574">"The Wastes</span>             <span style="color:#2a2a38">│ ┌─ Exits ───────────────┐</span>
+<span style="color:#2a2a38">│</span> <span style="color:#d4a574"> don't give many second chances."</span>             <span style="color:#2a2a38">│ │</span>                        <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span>                                               <span style="color:#2a2a38">│ │</span> <span style="color:#50c8c8">→ East</span>  <span style="color:#6a6a78">Fog Road</span>       <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span> <span style="color:#5a5a70">> examine the fire</span>                            <span style="color:#2a2a38">│ │</span> <span style="color:#50c8c8">→ North</span> <span style="color:#6a6a78">Skeletal Woods</span>  <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span>                                               <span style="color:#2a2a38">│ │</span> <span style="color:#50c8c8">→ South</span> <span style="color:#6a6a78">The Wastes</span>     <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span> <span style="color:#c8c8d0">The flames twist into shapes — faces,</span>         <span style="color:#2a2a38">│ └────────────────────────┘</span>
+<span style="color:#2a2a38">│</span> <span style="color:#c8c8d0">perhaps, or memories. The warmth is</span>           <span style="color:#2a2a38">│ ┌─ Present ─────────────┐</span>
+<span style="color:#2a2a38">│</span> <span style="color:#c8c8d0">almost alive here.</span>                             <span style="color:#2a2a38">│ │</span>                        <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span>                                               <span style="color:#2a2a38">│ │</span> <span style="color:#d4a574">◆ Roric</span> <span style="color:#6a6a78">— Barkeep</span>      <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span>                                               <span style="color:#2a2a38">│ │</span> <span style="color:#d4a574">◆ Elara</span> <span style="color:#6a6a78">— Wanderer</span>    <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span>                                               <span style="color:#2a2a38">│ │</span> <span style="color:#d4a574">◆ Grumlock</span> <span style="color:#6a6a78">— Smith</span>    <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">│</span>                                               <span style="color:#2a2a38">│ └────────────────────────┘</span>
+<span style="color:#2a2a38">└───────────────────────────────────────────────┘</span>
+<span style="color:#2a2a38">┌─ Command ────────────────────────────────────────────────────────────────┐</span>
+<span style="color:#2a2a38">│</span> <span style="color:#6a6a78">> </span><span style="color:#c8c8d0">talk to roric</span><span style="color:#2a2a38">▌</span>                                                       <span style="color:#2a2a38">│</span>
+<span style="color:#2a2a38">└──────────────────────────────────────────────────────────────────────────┘</span></div>
+    <div class="card-body">
+      <h3>B · Independent Windows</h3>
+      <p>Each panel is its own bordered window with a title. Header floats above unbounded. More like tmux/tiling WM — panels can resize and rearrange independently. Slightly more visual separation.</p>
+    </div>
+  </div>
+</div>
