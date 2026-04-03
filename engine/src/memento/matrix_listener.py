@@ -1,4 +1,4 @@
-"""Matrix listener — watches location rooms, dispatches to GameTurnFlow."""
+"""Matrix listener — watches location rooms, dispatches to RoundController."""
 
 from __future__ import annotations
 
@@ -13,13 +13,13 @@ from memento.log import get_logger
 logger = get_logger(__name__)
 
 
-# Global lock — serializes all GameTurnFlow execution across threads.
+# Global lock — serializes all RoundController execution across threads.
 # Prevents concurrent KG mutations and world-time races.
 _turn_lock = threading.Lock()
 
 
 class EngineMatrixListener:
-    """Listens for player actions on Matrix, runs GameTurnFlow, posts narrative back."""
+    """Listens for player actions on Matrix, runs RoundController, posts narrative back."""
 
     def __init__(self) -> None:
         self.homeserver = os.getenv("MATRIX_HOMESERVER", "http://localhost:8008")
@@ -124,7 +124,8 @@ class EngineMatrixListener:
             await asyncio.to_thread(self._reconcile_single_location, location_name)
 
             narrative, state_update = await asyncio.to_thread(
-                self._run_batch_turn, location_name, actions
+                self._run_batch_turn, location_name, actions,
+                self.client, room.room_id, asyncio.get_event_loop()
             )
 
             if self.client and narrative:
@@ -150,7 +151,8 @@ class EngineMatrixListener:
 
             location_name = room.display_name or "Unknown"
             narrative, state_update = await asyncio.to_thread(
-                self._run_turn, player_id, location_name, action_text
+                self._run_turn, player_id, location_name, action_text,
+                self.client, room.room_id, asyncio.get_event_loop()
             )
 
             if self.client and narrative:
@@ -169,86 +171,54 @@ class EngineMatrixListener:
                 )
 
     @staticmethod
-    def _run_turn(player_id: str, location_name: str, action: str) -> tuple[str, dict]:
-        """Run GameTurnFlow synchronously (called from thread). Returns (narrative, state_update)."""
+    def _run_turn(player_id: str, location_name: str, action: str,
+                  matrix_client=None, room_id: str = "",
+                  loop=None) -> tuple[str, dict]:
+        """Run RoundController synchronously (called from thread). Returns (narrative, state_update)."""
         with _turn_lock:
-            return EngineMatrixListener._run_turn_inner(player_id, location_name, action)
-
-    @staticmethod
-    def _run_turn_inner(player_id: str, location_name: str, action: str) -> tuple[str, dict]:
-        from memento.flows.game_turn import GameTurnFlow
-        from memento.models.state_update import StateUpdate, EventSummary, CombatEvent, QuestSummary
-
-        flow = GameTurnFlow()
-        flow.state.player_name = player_id
-        flow.state.location_name = location_name
-        flow.state.action = action
-        flow.kickoff()
-
-        # Build structured event summary from flow state
-        events_summary = None
-        flow_events = getattr(flow.state, "events", {})
-        if flow_events and isinstance(flow_events, dict):
-            categories = flow_events.get("categories", [])
-            combat = None
-            if "combat" in categories and "combat_result" in flow_events:
-                combat = CombatEvent(
-                    action_type=flow_events.get("action_type", "attack"),
-                    target_name=flow_events.get("combat_target", ""),
-                    target_dead="dead" in str(flow_events.get("combat_consequences", "")).lower(),
-                )
-            events_summary = EventSummary(
-                categories=categories,
-                combat=combat,
+            return EngineMatrixListener._run_turn_inner(
+                player_id, location_name, action, matrix_client, room_id, loop
             )
 
-        # Query active quests for this player
-        active_quests = None
-        raw_quests = GameTurnFlow.query_active_quests(player_id)
-        if raw_quests:
-            active_quests = [
-                QuestSummary(**q) for q in raw_quests
-            ]
+    @staticmethod
+    def _run_turn_inner(player_id: str, location_name: str, action: str,
+                        matrix_client=None, room_id: str = "",
+                        loop=None) -> tuple[str, dict]:
+        from memento.round_controller import RoundController
 
-        state_update = StateUpdate(
+        controller = RoundController(
             location=location_name,
-            world_time=flow.state.world_time if isinstance(flow.state.world_time, dict) else None,
-            events=events_summary,
-            active_quests=active_quests,
-            subsystem_warnings=getattr(flow.state, "subsystem_warnings", []),
+            actions=[{"player_name": player_id, "action": action}],
+            loop=loop,
+            room_id=room_id,
+            matrix_client=matrix_client,
         )
-        return flow.state.narrative, state_update.model_dump(exclude_none=True)
+        return controller.run()
 
     @staticmethod
-    def _run_batch_turn(location_name: str, actions: list[dict]) -> tuple[str, dict]:
-        """Run GameTurnFlow with multiple actions. Returns (narrative, state_update)."""
+    def _run_batch_turn(location_name: str, actions: list[dict],
+                        matrix_client=None, room_id: str = "",
+                        loop=None) -> tuple[str, dict]:
+        """Run RoundController with multiple actions. Returns (narrative, state_update)."""
         with _turn_lock:
-            return EngineMatrixListener._run_batch_turn_inner(location_name, actions)
+            return EngineMatrixListener._run_batch_turn_inner(
+                location_name, actions, matrix_client, room_id, loop
+            )
 
     @staticmethod
-    def _run_batch_turn_inner(location_name: str, actions: list[dict]) -> tuple[str, dict]:
-        from memento.flows.game_turn import GameTurnFlow
-        from memento.models.state_update import StateUpdate
+    def _run_batch_turn_inner(location_name: str, actions: list[dict],
+                              matrix_client=None, room_id: str = "",
+                              loop=None) -> tuple[str, dict]:
+        from memento.round_controller import RoundController
 
-        flow = GameTurnFlow()
-        flow.state.location_name = location_name
-        # Set first player as primary (for context gathering), pass all actions
-        if actions:
-            flow.state.player_name = actions[0].get("player_name", "unknown")
-        flow.state.actions = actions
-        # Build combined action string for crews that expect a single action
-        combined = "; ".join(
-            f"{a.get('player_name', '?')}: {a.get('action', '?')}" for a in actions
-        )
-        flow.state.action = combined
-        flow.kickoff()
-
-        state_update = StateUpdate(
+        controller = RoundController(
             location=location_name,
-            world_time=flow.state.world_time if isinstance(flow.state.world_time, dict) else None,
-            subsystem_warnings=getattr(flow.state, "subsystem_warnings", []),
+            actions=actions,
+            loop=loop,
+            room_id=room_id,
+            matrix_client=matrix_client,
         )
-        return flow.state.narrative, state_update.model_dump(exclude_none=True)
+        return controller.run()
 
 
 async def main():
