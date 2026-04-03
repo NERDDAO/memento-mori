@@ -18,20 +18,58 @@ class WebSocketHub:
     def __init__(self) -> None:
         self.connections: dict[str, WebSocket] = {}  # player_id -> websocket
         self.player_locations: dict[str, str] = {}   # player_id -> location_name
+        self.player_names: dict[str, str] = {}       # player_id -> display name
 
-    async def connect(self, player_id: str, websocket: WebSocket) -> None:
+    async def connect(self, player_id: str, websocket: WebSocket, player_name: str = "") -> None:
         """Accept and register a WebSocket connection."""
         await websocket.accept()
         self.connections[player_id] = websocket
+        if player_name:
+            self.player_names[player_id] = player_name
 
-    def disconnect(self, player_id: str) -> None:
-        """Remove a disconnected player."""
+    async def disconnect(self, player_id: str) -> None:
+        """Remove a disconnected player and broadcast their departure."""
+        location = self.player_locations.get(player_id, "")
+        name = self.player_names.get(player_id, player_id)
         self.connections.pop(player_id, None)
         self.player_locations.pop(player_id, None)
+        self.player_names.pop(player_id, None)
+        if location:
+            await self.broadcast_to_location(location, {
+                "type": "player_left",
+                "player_id": player_id,
+                "player_name": name,
+                "location": location,
+            })
 
-    def set_location(self, player_id: str, location: str) -> None:
-        """Track which location a player is in."""
+    async def set_location(self, player_id: str, location: str) -> None:
+        """Track which location a player is in and broadcast presence updates."""
+        old_location = self.player_locations.get(player_id, "")
+        name = self.player_names.get(player_id, player_id)
         self.player_locations[player_id] = location
+        if old_location and old_location != location:
+            await self.broadcast_to_location(old_location, {
+                "type": "player_left", "player_id": player_id,
+                "player_name": name, "location": old_location,
+            })
+        for pid, loc in list(self.player_locations.items()):
+            if loc == location and pid != player_id:
+                await self.send_to_player(pid, {
+                    "type": "player_joined", "player_id": player_id,
+                    "player_name": name, "location": location,
+                })
+        players = self.get_players_at_location(location)
+        await self.send_to_player(player_id, {
+            "type": "presence", "players": players, "location": location,
+        })
+
+    def get_players_at_location(self, location: str) -> list[dict[str, str]]:
+        """Return all players currently at a given location."""
+        return [
+            {"player_id": pid, "player_name": self.player_names.get(pid, pid)}
+            for pid, loc in self.player_locations.items()
+            if loc == location
+        ]
 
     def players_at_location(self, location: str) -> int:
         """Count connected players at a given location."""
