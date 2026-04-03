@@ -372,6 +372,34 @@
     .status-chain { text-align: center; }
     .status-chain.connected { color: var(--text-heal); }
     .status-tick { text-align: right; min-width: 80px; }
+
+    /* Round controller phases */
+    .status-phase.ready { color: var(--text-green, #6a9955); }
+    .status-phase.collecting { color: var(--text-yellow, #d7ba7d); }
+    .status-phase.resolving { color: var(--text-blue, #569cd6); }
+    .status-phase.npc-response { color: var(--text-purple, #c586c0); }
+
+    /* Input locking */
+    .input-locked {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* NPC thinking pulse */
+    .npc-thinking {
+      animation: npc-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes npc-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Round divider */
+    .narrative-block.divider hr.round-divider {
+      border: none;
+      border-top: 1px solid var(--border-dim, #333);
+      margin: 0.5em 0;
+    }
   </style>
 </head>
 <body>
