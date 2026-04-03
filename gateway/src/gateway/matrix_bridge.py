@@ -114,6 +114,7 @@ class MatrixBridge:
                     "type": "phase",
                     "phase": rpg_meta.get("phase", "resolving"),
                     "crew": rpg_meta.get("crew"),
+                    "channel": rpg_meta.get("channel", "events"),
                 })
             return
 
@@ -144,6 +145,7 @@ class MatrixBridge:
                 "text": event.body,
                 "location": location or room.display_name or "unknown",
                 "state_update": state_update,
+                "channel": rpg_meta.get("channel", "narrative"),
             }
             # Batch narratives go to all players at location
             # Single-player narratives go to the specific player
@@ -170,6 +172,7 @@ class MatrixBridge:
                 "text": event.body,
                 "npc": npc_name,
                 "location": location or room.display_name or "unknown",
+                "channel": "narrative",
             }
             if location:
                 await self.ws_hub.broadcast_to_location(location, msg)

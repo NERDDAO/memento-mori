@@ -164,6 +164,7 @@ class RoundController:
             "type": "phase",
             "phase": phase,
             "location": self.location,
+            "channel": "events",
         }
         if crew:
             rpg_meta["crew"] = crew

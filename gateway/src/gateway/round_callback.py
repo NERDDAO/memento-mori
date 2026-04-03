@@ -53,6 +53,7 @@ def make_round_callback(bridge: MatrixBridge, ws_hub: WebSocketHub):
                 "batch": True,
                 "location": location,
                 "actions": action_list,
+                "channel": "events",
             },
         }
 

@@ -145,9 +145,11 @@ function handleMessage(msg: any): void {
   switch (msg.type) {
     case 'narrative': {
       narrative.removeThinking();
+      const channel = msg.channel || 'narrative';
+      const blockType = channel === 'events' ? 'event' : channel === 'ooc' ? 'ooc' : 'narrative';
       const segments = parseNarrative(msg.text || '');
       const html = renderSegments(segments);
-      narrative.addHtml(html, 'narrative');
+      narrative.addHtml(html, blockType);
 
       if (msg.state_update && gameState) {
         applyStateUpdate(gameState, msg.state_update);

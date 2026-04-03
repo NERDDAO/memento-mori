@@ -139,6 +139,7 @@ class EngineMatrixListener:
                             "type": "narrative",
                             "location": location_name,
                             "state_update": state_update,
+                            "channel": "narrative",
                         },
                     },
                 )
@@ -166,6 +167,7 @@ class EngineMatrixListener:
                             "type": "narrative",
                             "player_id": player_id,
                             "state_update": state_update,
+                            "channel": "narrative",
                         },
                     },
                 )
