@@ -6,6 +6,7 @@
 
 import { createInitialState, applyStateUpdate, type GameState } from './state/game-state';
 import { getSession, initSession, sendAction, setMessageHandler, setConnectionHandler, GATEWAY_URL } from './state/session';
+import { updateRoundState, type PhaseMessage } from './state/round-state';
 import { parseNarrative, renderSegments, setKnownEntities } from './renderer/text-renderer';
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
@@ -144,7 +145,6 @@ function handleMessage(msg: any): void {
   switch (msg.type) {
     case 'narrative': {
       narrative.removeThinking();
-      statusBar.setPhase('synced');
       const segments = parseNarrative(msg.text || '');
       const html = renderSegments(segments);
       narrative.addHtml(html, 'narrative');
@@ -200,8 +200,10 @@ function handleMessage(msg: any): void {
       narrative.addBlock(deathMsg, 'death-feed');
       break;
     }
+    case 'phase':
+      updateRoundState(msg as PhaseMessage);
+      break;
     case 'status':
-      if (msg.phase) statusBar.setPhase(msg.phase);
       if (msg.tick != null) statusBar.setTick(msg.tick);
       if (msg.chain != null) statusBar.setChain(msg.chain);
       break;
@@ -266,6 +268,7 @@ async function enterWorld(playerName: string, walletAddress: string): Promise<vo
     narrative.addHtml(renderSegments(segments), 'narrative');
   }
 
+  updateRoundState({ type: 'phase', phase: 'ready', location: session.currentLocation });
   (document.getElementById('action-input') as HTMLInputElement).focus();
 }
 
