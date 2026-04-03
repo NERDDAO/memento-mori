@@ -1,40 +1,95 @@
 // client/src/panels/character.ts
 import type { GameState } from '../state/game-state';
+import type { TerminalPanel } from '../ui/terminal-panel';
+import type { CharCell } from '../renderer/canvas-text';
+import { theme } from '../renderer/theme';
 
-const SKILL_CATEGORIES: Record<string, string[]> = {
-  combat: ['swordsmanship', 'archery', 'unarmed', 'blocking'],
-  stealth: ['lockpicking', 'pickpocket', 'sneaking', 'disguise'],
-  social: ['persuasion', 'intimidation', 'deception', 'insight'],
-  survival: ['tracking', 'foraging', 'medicine', 'navigation'],
-  arcane: ['spellcraft', 'alchemy', 'enchanting', 'lore'],
-};
-
-function renderSkills(skills: Record<string, number>): string {
-  const entries = Object.entries(skills).filter(([, v]) => v > 0);
-  if (entries.length === 0) return '';
-
-  const lines = entries.map(([name, level]) => {
-    const dots = '\u25CF'.repeat(level) + '\u25CB'.repeat(Math.max(0, 5 - level));
-    return `<div class="skill-row"><span class="skill-name">${name}</span> <span class="skill-dots">${dots}</span></div>`;
-  });
-  return `<div class="skills-section">${lines.join('')}</div>`;
+function textRow(text: string, fg: string, cols: number, attrs?: number): CharCell[] {
+  const row: CharCell[] = [];
+  for (let i = 0; i < cols; i++) {
+    row.push({ char: i < text.length ? text[i] : ' ', fg, attrs });
+  }
+  return row;
 }
 
-export function renderCharacterPanel(body: HTMLElement, state: GameState): void {
+function coloredRow(segments: Array<{ text: string; fg: string; attrs?: number }>, cols: number): CharCell[] {
+  const row: CharCell[] = [];
+  for (const seg of segments) {
+    for (const ch of seg.text) {
+      row.push({ char: ch, fg: seg.fg, attrs: seg.attrs });
+    }
+  }
+  // Pad to cols
+  while (row.length < cols) {
+    row.push({ char: ' ', fg: theme.colors.primary });
+  }
+  return row;
+}
+
+function emptyRow(cols: number): CharCell[] {
+  return Array(cols).fill({ char: ' ', fg: theme.colors.primary });
+}
+
+function barRow(
+  label: string,
+  value: number,
+  max: number,
+  barLen: number,
+  fullColor: string,
+  emptyColor: string,
+  cols: number,
+): CharCell[] {
+  const pct = max > 0 ? Math.min(value / max, 1) : 0;
+  const filled = Math.round(pct * barLen);
+  const empty = barLen - filled;
+  const valText = ` ${value}/${max}`;
+
+  const segments: Array<{ text: string; fg: string }> = [
+    { text: label + ' ', fg: theme.colors.dim },
+    { text: '\u2588'.repeat(filled), fg: fullColor },
+    { text: '\u2591'.repeat(empty), fg: emptyColor },
+    { text: valText, fg: theme.colors.primary },
+  ];
+
+  return coloredRow(segments, cols);
+}
+
+export function renderCharacterPanel(panel: TerminalPanel, state: GameState): void {
   const p = state.player;
-  const hpPct = p.maxHealth > 0 ? Math.round((p.health / p.maxHealth) * 100) : 0;
-  const xpPct = p.xpThreshold > 0 ? Math.round((p.xp / p.xpThreshold) * 100) : 0;
-  const hpFill = Math.round(hpPct / 10);
-  const xpFill = Math.round(xpPct / 10);
+  const cols = panel.cols;
+  const cells: CharCell[][] = [];
 
-  const archLabel = p.archetype ? `<div class="archetype-label">${p.archetype}</div>` : '';
-  const skillsHtml = renderSkills(p.skills);
+  // Archetype label
+  if (p.archetype) {
+    cells.push(textRow(p.archetype, theme.colors.accent, cols));
+    cells.push(emptyRow(cols));
+  }
 
-  body.innerHTML = `
-    ${archLabel}
-    <div><span class="stat-label">HP</span> <span class="bar-fill-hp">${'\u2588'.repeat(hpFill)}</span><span class="bar-empty">${'\u2591'.repeat(10 - hpFill)}</span> <span style="color:var(--text-dim)">${p.health}/${p.maxHealth}</span></div>
-    <div><span class="stat-label">XP</span> <span class="bar-fill-xp">${'\u2588'.repeat(xpFill)}</span><span class="bar-empty">${'\u2591'.repeat(10 - xpFill)}</span> <span style="color:var(--text-dim)">${p.xp}/${p.xpThreshold}</span></div>
-    <div><span class="stat-label">Lv</span> ${p.level}</div>
-    ${skillsHtml}
-  `;
+  // HP bar
+  const hpColor = p.health / p.maxHealth > 0.3 ? theme.colors.heal : theme.colors.damage;
+  cells.push(barRow('HP', p.health, p.maxHealth, 10, hpColor, theme.colors.dim, cols));
+
+  // XP bar
+  cells.push(barRow('XP', p.xp, p.xpThreshold, 10, theme.colors.accent, theme.colors.dim, cols));
+
+  // Level
+  cells.push(coloredRow([
+    { text: 'Lv ', fg: theme.colors.dim },
+    { text: String(p.level), fg: theme.colors.primary },
+  ], cols));
+
+  // Skills
+  const skillEntries = Object.entries(p.skills).filter(([, v]) => v > 0);
+  if (skillEntries.length > 0) {
+    cells.push(emptyRow(cols));
+    for (const [name, level] of skillEntries) {
+      const dots = '\u25CF'.repeat(level) + '\u25CB'.repeat(Math.max(0, 5 - level));
+      cells.push(coloredRow([
+        { text: name + ' ', fg: theme.colors.primary },
+        { text: dots, fg: theme.colors.accent },
+      ], cols));
+    }
+  }
+
+  panel.paint(cells);
 }

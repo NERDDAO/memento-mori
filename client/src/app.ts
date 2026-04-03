@@ -59,13 +59,13 @@ function registerMapEntities(map: import('./map/types').RoomMap | null): void {
 function renderAllPanels(): void {
   if (!gameState) return;
   characterWin.setTitle(gameState.player.name || 'Character');
-  renderCharacterPanel(characterWin.body, gameState);
-  renderInventoryPanel(inventoryWin.body, gameState);
+  renderCharacterPanel(characterWin.panel!, gameState);
+  renderInventoryPanel(inventoryWin.panel!, gameState);
   exitsWin.setTitle(gameState.location.name || 'Exits');
-  renderExitsPanel(exitsWin.body, gameState, handleAction);
-  renderPresentPanel(presentWin.body, gameState, handleAction);
-  renderQuestLogPanel(questWin.body, gameState.quests);
-  renderFactionsPanel(factionWin.body, gameState.factions);
+  renderExitsPanel(exitsWin.panel!, gameState, handleAction);
+  renderPresentPanel(presentWin.panel!, gameState, handleAction);
+  renderQuestLogPanel(questWin.panel!, gameState.quests);
+  renderFactionsPanel(factionWin.panel!, gameState.factions);
   updateMap(gameState, handleAction);
 
   // Show current location in wiki by default
@@ -214,7 +214,7 @@ function handleMessage(msg: any): void {
         const exists = gameState.location.players.some(p => p.id === msg.player_id);
         if (!exists) {
           gameState.location.players.push({ name: msg.player_name, id: msg.player_id });
-          renderPresentPanel(presentWin.body, gameState, handleAction);
+          renderPresentPanel(presentWin.panel!, gameState, handleAction);
           narrative.addBlock(`${msg.player_name} arrived.`, 'system');
         }
       }
@@ -223,7 +223,7 @@ function handleMessage(msg: any): void {
     case 'player_left': {
       if (gameState) {
         gameState.location.players = gameState.location.players.filter(p => p.id !== msg.player_id);
-        renderPresentPanel(presentWin.body, gameState, handleAction);
+        renderPresentPanel(presentWin.panel!, gameState, handleAction);
         narrative.addBlock(`${msg.player_name} departed.`, 'system');
       }
       break;
@@ -234,7 +234,7 @@ function handleMessage(msg: any): void {
           name: p.player_name,
           id: p.player_id,
         }));
-        renderPresentPanel(presentWin.body, gameState, handleAction);
+        renderPresentPanel(presentWin.panel!, gameState, handleAction);
       }
       break;
     }
@@ -387,12 +387,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // 2. Create windows
   narrativeWin = createWindow({ title: 'Narrative', id: 'narrative-win', className: 'resizable', scrollable: true });
   mapWin = createWindow({ title: 'Map', id: 'map-win' });
-  characterWin = createWindow({ title: 'Character', id: 'character-win', className: 'sidebar-win resizable' });
-  inventoryWin = createWindow({ title: 'Inventory', id: 'inventory-win', className: 'sidebar-win resizable' });
-  exitsWin = createWindow({ title: 'Exits', id: 'exits-win', className: 'sidebar-win resizable' });
-  presentWin = createWindow({ title: 'Present', id: 'present-win', className: 'sidebar-win resizable' });
-  questWin = createWindow({ title: 'Quests', id: 'quest-win', className: 'sidebar-win resizable' });
-  factionWin = createWindow({ title: 'Factions', id: 'faction-win', className: 'sidebar-win resizable' });
+  characterWin = createWindow({ title: 'Character', id: 'character-win', className: 'sidebar-win resizable', canvas: true });
+  inventoryWin = createWindow({ title: 'Inventory', id: 'inventory-win', className: 'sidebar-win resizable', canvas: true });
+  exitsWin = createWindow({ title: 'Exits', id: 'exits-win', className: 'sidebar-win resizable', canvas: true });
+  presentWin = createWindow({ title: 'Present', id: 'present-win', className: 'sidebar-win resizable', canvas: true });
+  questWin = createWindow({ title: 'Quests', id: 'quest-win', className: 'sidebar-win resizable', canvas: true });
+  factionWin = createWindow({ title: 'Factions', id: 'faction-win', className: 'sidebar-win resizable', canvas: true });
   commandWin = createWindow({ title: 'Command', id: 'command-win' });
 
   // 3. Mount windows by replacing mount divs
@@ -409,6 +409,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // Status bar
   statusBar = createStatusBar();
   mount('status-mount', statusBar.el);
+
+  // Wire up panel-click events for interactive panels
+  exitsWin.panel!.canvas.addEventListener('panel-click', (e: Event) => {
+    const detail = (e as CustomEvent).detail;
+    if (detail.action) handleAction(detail.action);
+  });
+  presentWin.panel!.canvas.addEventListener('panel-click', (e: Event) => {
+    const detail = (e as CustomEvent).detail;
+    if (detail.action) handleAction(detail.action);
+  });
 
   // 4. Map toggle with 'm' key (not when input focused)
   document.addEventListener('keydown', (e: KeyboardEvent) => {
