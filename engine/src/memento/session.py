@@ -110,7 +110,6 @@ class SessionManager:
             logger.warning("Chain register_character failed", exc_info=True)
 
         # 6. Create starting items from archetype
-        inventory_names = []
         for item_def in arch_items:
             try:
                 item_uuid = client.kg.create_entity(
@@ -119,11 +118,17 @@ class SessionManager:
                     {"summary": item_def.get("summary", "")},
                 )
                 client.kg.create_edge(player_uuid, item_uuid, "CARRIES", "")
-                inventory_names.append(item_def["name"])
             except Exception:
                 logger.warning("Failed to create starting item: %s", item_def.get("name"), exc_info=True)
 
-        # 7. Generate opening narration
+        # 7. Get inventory via manifest (deduped, enriched)
+        try:
+            from memento.inventory_manifest import get_inventory_as_state_update
+            inventory = get_inventory_as_state_update(player_uuid)
+        except Exception:
+            inventory = []
+
+        # 8. Generate opening narration
         opening = self._generate_opening(player_name, location_name)
 
         return {
@@ -135,7 +140,7 @@ class SessionManager:
             "health": health,
             "max_health": max_health,
             "skills": arch_skills,
-            "inventory": inventory_names,
+            "inventory": inventory,
             "room_map": room_map,
         }
 
@@ -279,15 +284,13 @@ class SessionManager:
                 room_map = get_room_manifest(threshold_uuid)
                 location_name = "The Threshold"
 
-        # Get inventory via CARRIES edges (UUID-based)
-        inventory = []
+        # Get inventory via manifest (deduped, enriched with labels)
         try:
-            carry_edges = client.kg.get_edges(player_id, direction="outgoing", edge_type="CARRIES")
-            for ce in carry_edges:
-                item = ce.get("target", {})
-                inventory.append(item.get("name", "Unknown Item"))
+            from memento.inventory_manifest import get_inventory_as_state_update
+            inventory = get_inventory_as_state_update(player_id)
         except Exception:
-            logger.debug("Inventory lookup failed for %s", player_id)
+            logger.debug("Inventory manifest failed for %s", player_id)
+            inventory = []
 
         return {
             "player_id": player_id,
