@@ -63,6 +63,8 @@ fi
 
 # --- Start engine listener ---
 if [ -n "$MATRIX_HOMESERVER" ] && [ -n "$MATRIX_BOT_TOKEN" ]; then
+    # Kill any stale engine listeners from previous runs
+    pkill -f "python.*memento.matrix_listener" 2>/dev/null && sleep 1
     echo "Starting engine Matrix listener..."
     (cd engine && PYTHONPATH=src python -m memento.matrix_listener) &
     ENGINE_PID=$!

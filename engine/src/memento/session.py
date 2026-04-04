@@ -89,13 +89,14 @@ class SessionManager:
             logger.warning("kEngram creation failed", exc_info=True)
 
         # 3. Find or create starting location
-        location_name = self._find_starting_location()
+        location_name, loc_uuid = self._find_starting_location()
 
         # 4. Place player at location and get room_map
         room_map = None
         try:
-            from memento.tools.kg import _resolve_entity_uuid
-            loc_uuid = _resolve_entity_uuid(location_name)
+            if not loc_uuid:
+                from memento.tools.kg import _resolve_entity_uuid
+                loc_uuid = _resolve_entity_uuid(location_name)
             if loc_uuid:
                 client.kg.create_edge(player_uuid, loc_uuid, "LOCATED_IN", "")
                 # Fetch room_map from location entity
@@ -294,31 +295,23 @@ class SessionManager:
             "room_map": room_map,
         }
 
-    def _find_starting_location(self) -> str:
-        """Find an existing location or seed The Threshold.
+    def _find_starting_location(self) -> tuple[str, str | None]:
+        """Ensure The Threshold exists and return its name and UUID.
 
-        Searches KG for locations, preferring ones with room_map data.
-        If no locations exist, auto-seeds The Threshold.
+        Uses seed_threshold() which is idempotent — creates if missing,
+        returns existing UUID if found. No KG text search needed.
         """
-        client = get_client()
-        try:
-            result = client.kg.search("tavern inn starting location", num_results=5)
-            entities = result.get("entities", result.get("nodes", []))
-            for entity in entities:
-                labels = entity.get("labels", [])
-                if "Location" in labels:
-                    return entity.get("name", "The Threshold")
-        except Exception:
-            pass
-
-        # No locations found — seed The Threshold
         try:
             from memento.seed import seed_threshold
             seed_result = seed_threshold()
-            logger.info("Auto-seeded The Threshold: %s", seed_result.get("uuid", ""))
-            return "The Threshold"
+            uuid = seed_result.get("uuid", "")
+            if uuid:
+                logger.info("Starting location: The Threshold (%s)", uuid)
+                return "The Threshold", uuid
         except Exception:
-            logger.warning("Auto-seed of The Threshold failed", exc_info=True)
+            logger.warning("seed_threshold failed", exc_info=True)
+
+        return "The Threshold", None
             return "The Threshold"
 
     def _generate_opening(self, player_name: str, location_name: str) -> str:
