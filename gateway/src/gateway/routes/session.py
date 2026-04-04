@@ -129,7 +129,52 @@ class JoinSessionRequest(BaseModel):
     game_id: str = "default"
 
 
-@router.post("/session/join")
-async def join_session(req: JoinSessionRequest):
-    """Join an existing game session."""
-    return {"status": "joined", "player_id": req.player_id}
+class JoinSessionResponse(BaseModel):
+    player_id: str
+    session_id: str
+    location: str
+    health: int = 100
+    max_health: int = 100
+    archetype: str = ""
+    skills: dict = {}
+    inventory: list[str] = []
+    room_map: dict | None = None
+
+
+@router.post("/session/join", response_model=JoinSessionResponse)
+async def join_session(req: JoinSessionRequest, request: Request):
+    """Join an existing game session — restores full player state from KG."""
+    try:
+        from memento.session import SessionManager
+        sm = SessionManager()
+        result = await asyncio.to_thread(sm.restore_player_state, req.player_id)
+
+        # Register Matrix user for presence
+        from gateway.app import bridge
+        if bridge and bridge.connected:
+            player_name = result.get("player_name", "Unknown")
+            await bridge.register_player(player_name, req.player_id)
+
+        # Store player name for presence tracking
+        from gateway.app import ws_hub
+        if ws_hub:
+            ws_hub.player_names[req.player_id] = result.get("player_name", "Unknown")
+
+        return JoinSessionResponse(
+            player_id=req.player_id,
+            session_id=f"session-{req.player_id[:8]}",
+            location=result.get("location_name", "The Threshold"),
+            health=result.get("health", 100),
+            max_health=result.get("max_health", 100),
+            archetype=result.get("archetype", ""),
+            skills=result.get("skills", {}),
+            inventory=result.get("inventory", []),
+            room_map=result.get("room_map"),
+        )
+    except Exception:
+        logger.error("Session join failed, using fallback", exc_info=True)
+        return JoinSessionResponse(
+            player_id=req.player_id,
+            session_id=f"session-{req.player_id[:8]}",
+            location="The Threshold",
+        )
