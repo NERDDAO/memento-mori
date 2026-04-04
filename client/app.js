@@ -5717,6 +5717,9 @@ function entityColor(entity) {
     return itemColor(entity);
   return TYPE_COLORS[entity.type] || "#c8c8d0";
 }
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
 function formatAddr(addr) {
   if (!addr || addr.length < 10 || addr === "0x0000000000000000000000000000000000000000")
     return "None";
@@ -5766,10 +5769,18 @@ function createCodexModal(getState, playerId) {
     }
     _allEntities = [];
     if (_codexData) {
-      _allEntities.push(..._codexData.npcs || []);
-      _allEntities.push(..._codexData.ground_items || []);
-      _allEntities.push(..._codexData.inventory || []);
-      _allEntities.push(..._codexData.locations || []);
+      for (const npc of _codexData.npcs || []) {
+        _allEntities.push({ ...npc, type: "npc" });
+      }
+      for (const gi of _codexData.ground_items || []) {
+        _allEntities.push({ ...gi, type: "item" });
+      }
+      for (const inv of _codexData.inventory || []) {
+        _allEntities.push({ ...inv, type: "item" });
+      }
+      for (const loc of _codexData.locations || []) {
+        _allEntities.push({ ...loc, type: "location", labels: loc.labels || ["Location"] });
+      }
     }
     const state2 = getState();
     if (state2) {
@@ -5801,10 +5812,12 @@ function createCodexModal(getState, playerId) {
     }
     if (entityId) {
       _selectedId = entityId;
-    } else if (_codexData?.npcs?.length) {
-      _selectedId = _codexData.npcs[0].id;
-    } else if (_allEntities.length) {
-      _selectedId = _allEntities[0].id;
+    } else {
+      const currentLoc = (_codexData?.locations || []).find((l) => l.current);
+      _selectedId = currentLoc?.id || (_allEntities.length ? _allEntities[0].id : null);
+    }
+    if (_selectedId && !_allEntities.find((e) => e.id === _selectedId)) {
+      _selectedId = _allEntities.length ? _allEntities[0].id : null;
     } else {
       _selectedId = null;
     }
@@ -5842,46 +5855,40 @@ function createCodexModal(getState, playerId) {
     sidebar.style.borderRight = "1px solid #1a1a24";
     sidebar.style.overflowY = "auto";
     sidebar.style.padding = "8px 0";
-    const state2 = getState();
     const npcs = _codexData?.npcs || [];
-    const items = _allEntities.filter((e) => e.type === "item");
+    const groundItems = _codexData?.ground_items || [];
+    const invItems = _codexData?.inventory || [];
     const locations = _codexData?.locations || [];
-    if (npcs.length) {
-      const npcHeader = document.createElement("div");
-      npcHeader.style.color = "#6a6a78";
-      npcHeader.style.fontSize = "10px";
-      npcHeader.style.letterSpacing = "1px";
-      npcHeader.style.padding = "2px 8px";
-      npcHeader.textContent = `NPCs (${npcs.length})`;
-      sidebar.appendChild(npcHeader);
-      for (const npc of npcs) {
-        sidebar.appendChild(createSidebarItem(npc, TYPE_COLORS.npc));
-      }
-    }
-    if (items.length) {
-      const itemHeader = document.createElement("div");
-      itemHeader.style.color = "#6a6a78";
-      itemHeader.style.fontSize = "10px";
-      itemHeader.style.letterSpacing = "1px";
-      itemHeader.style.padding = "6px 8px 2px";
-      itemHeader.textContent = `ITEMS (${items.length})`;
-      sidebar.appendChild(itemHeader);
-      for (const item of items) {
-        sidebar.appendChild(createSidebarItem(item, itemColor(item)));
-      }
-    }
-    if (locations.length) {
-      const locHeader = document.createElement("div");
-      locHeader.style.color = "#6a6a78";
-      locHeader.style.fontSize = "10px";
-      locHeader.style.letterSpacing = "1px";
-      locHeader.style.padding = "6px 8px 2px";
-      locHeader.textContent = `LOCATIONS (${locations.length})`;
+    const currentLoc = locations.find((l) => l.current);
+    const exitLocs = locations.filter((l) => !l.current);
+    if (currentLoc) {
+      const locHeader = createSectionHeader(`◉ ${currentLoc.name}`, TYPE_COLORS.location, true);
+      locHeader.addEventListener("click", () => {
+        _selectedId = currentLoc.id;
+        render();
+      });
       sidebar.appendChild(locHeader);
-      for (const loc of locations) {
-        const label = loc.current ? `${loc.name} ◉` : loc.direction ? `${loc.direction} → ${loc.name}` : loc.name;
-        const el = createSidebarItem({ ...loc, name: label }, TYPE_COLORS.location);
-        sidebar.appendChild(el);
+      for (const npc of npcs) {
+        sidebar.appendChild(createSidebarItem(npc, TYPE_COLORS.npc, "  "));
+      }
+      for (const gi of groundItems) {
+        sidebar.appendChild(createSidebarItem(gi, itemColor(gi), "  "));
+      }
+    }
+    if (exitLocs.length) {
+      const exitHeader = createSectionHeader("EXITS", "#6a6a78");
+      sidebar.appendChild(exitHeader);
+      for (const loc of exitLocs) {
+        const label = loc.direction ? `${loc.direction} → ${loc.name}` : loc.name;
+        sidebar.appendChild(createSidebarItem({ ...loc, name: label }, TYPE_COLORS.location));
+      }
+    }
+    if (invItems.length) {
+      const invHeader = createSectionHeader(`INVENTORY (${invItems.length})`, "#6a6a78");
+      sidebar.appendChild(invHeader);
+      for (const item of invItems) {
+        const prefix = item.equipped ? "• " : "  ";
+        sidebar.appendChild(createSidebarItem(item, itemColor(item), prefix));
       }
     }
     const detail = document.createElement("div");
@@ -5902,7 +5909,21 @@ function createCodexModal(getState, playerId) {
     body.appendChild(detail);
     win.appendChild(body);
   }
-  function createSidebarItem(entity, color) {
+  function createSectionHeader(text, color, bold = false) {
+    const el = document.createElement("div");
+    el.style.color = color;
+    el.style.fontSize = "10px";
+    el.style.letterSpacing = "1px";
+    el.style.padding = "6px 8px 2px";
+    el.style.cursor = "pointer";
+    if (bold) {
+      el.style.fontWeight = "bold";
+      el.style.fontSize = "11px";
+    }
+    el.textContent = text;
+    return el;
+  }
+  function createSidebarItem(entity, color, prefix = "") {
     const item = document.createElement("div");
     item.style.padding = "2px 8px";
     item.style.cursor = "pointer";
@@ -5914,7 +5935,7 @@ function createCodexModal(getState, playerId) {
     if (entity.id === _selectedId) {
       item.style.background = "#1a1a24";
     }
-    item.textContent = entity.name;
+    item.textContent = prefix + entity.name;
     item.addEventListener("click", () => {
       _selectedId = entity.id;
       render();
@@ -5944,6 +5965,69 @@ function createCodexModal(getState, playerId) {
       summary.style.marginBottom = "12px";
       summary.textContent = entity.summary;
       container.appendChild(summary);
+    }
+    if (entity.type === "location" && entity.exits) {
+      const exitsHeader = document.createElement("div");
+      exitsHeader.style.color = "#6a6a78";
+      exitsHeader.style.fontSize = "10px";
+      exitsHeader.style.letterSpacing = "1px";
+      exitsHeader.style.marginBottom = "4px";
+      exitsHeader.textContent = "EXITS";
+      container.appendChild(exitsHeader);
+      for (const ex of entity.exits) {
+        const row = document.createElement("div");
+        row.style.marginBottom = "4px";
+        row.innerHTML = `<span style="color:#8b5cf6">${esc(ex.direction || "?")}</span> <span style="color:#6a6a78">→</span> <span style="color:#7aa2d4;cursor:pointer">${esc(ex.target || "?")}</span>`;
+        const targetSpan = row.querySelector("span:last-child");
+        if (targetSpan) {
+          targetSpan.addEventListener("click", () => {
+            const linked = _allEntities.find((e) => e.name === ex.target);
+            if (linked) {
+              _selectedId = linked.id;
+              render();
+            }
+          });
+        }
+        container.appendChild(row);
+      }
+      if (entity.current) {
+        const npcsHere = _codexData?.npcs || [];
+        const itemsHere = _codexData?.ground_items || [];
+        if (npcsHere.length || itemsHere.length) {
+          const presHeader = document.createElement("div");
+          presHeader.style.color = "#6a6a78";
+          presHeader.style.fontSize = "10px";
+          presHeader.style.letterSpacing = "1px";
+          presHeader.style.margin = "12px 0 4px";
+          presHeader.textContent = "PRESENT";
+          container.appendChild(presHeader);
+          for (const npc of npcsHere) {
+            const row = document.createElement("div");
+            row.style.color = TYPE_COLORS.npc;
+            row.style.cursor = "pointer";
+            row.textContent = `● ${npc.name}`;
+            row.addEventListener("click", () => {
+              _selectedId = npc.id;
+              render();
+            });
+            container.appendChild(row);
+          }
+          for (const item of itemsHere) {
+            const row = document.createElement("div");
+            row.style.color = itemColor(item);
+            row.style.cursor = "pointer";
+            row.textContent = `• ${item.name}`;
+            row.addEventListener("click", () => {
+              _selectedId = item.id;
+              render();
+            });
+            container.appendChild(row);
+          }
+        }
+      }
+      const spacer = document.createElement("div");
+      spacer.style.marginTop = "12px";
+      container.appendChild(spacer);
     }
     if (entity.relationships && entity.relationships.length > 0) {
       const connHeader = document.createElement("div");
