@@ -125,6 +125,9 @@ export async function dropItem(itemId: string, quantity?: number): Promise<strin
   } else {
     _state.inventory.splice(idx, 1);
   }
+
+  // Optimistic: add to ground items so modal shows it moved
+  _state.location.items.push({ name: item.name, id: item.id });
   rerender();
 
   const result = await post('/drop', { player_id: _playerId, item_id: itemId, location_uuid: locationUuid(), quantity });
@@ -164,11 +167,14 @@ export async function pickupItem(itemId: string): Promise<string | null> {
   if (!_state) return 'Not initialized';
   const saved = snapshot();
 
-  // Optimistic: add to inventory (we don't have full metadata yet,
-  // but the WebSocket state_update will replace with real data)
+  // Optimistic: move from ground to inventory
+  const groundIdx = _state.location.items.findIndex(i => i.id === itemId);
+  const groundItem = groundIdx >= 0 ? _state.location.items[groundIdx] : null;
+  if (groundIdx >= 0) _state.location.items.splice(groundIdx, 1);
+
   _state.inventory.push({
     id: itemId,
-    name: '...',  // placeholder until state_update arrives
+    name: groundItem?.name || '...',
     rarity: 'common',
     slot_type: '',
     equipped: false,

@@ -5367,6 +5367,7 @@ async function dropItem(itemId, quantity) {
   } else {
     _state.inventory.splice(idx, 1);
   }
+  _state.location.items.push({ name: item.name, id: item.id });
   rerender();
   const result = await post("/drop", { player_id: _playerId, item_id: itemId, location_uuid: locationUuid(), quantity });
   if (!result.ok) {
@@ -5400,9 +5401,13 @@ async function pickupItem(itemId) {
   if (!_state)
     return "Not initialized";
   const saved = snapshot();
+  const groundIdx = _state.location.items.findIndex((i) => i.id === itemId);
+  const groundItem = groundIdx >= 0 ? _state.location.items[groundIdx] : null;
+  if (groundIdx >= 0)
+    _state.location.items.splice(groundIdx, 1);
   _state.inventory.push({
     id: itemId,
-    name: "...",
+    name: groundItem?.name || "...",
     rarity: "common",
     slot_type: "",
     equipped: false,

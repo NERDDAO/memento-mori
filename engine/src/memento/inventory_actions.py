@@ -366,7 +366,7 @@ def pickup(
 
 
 def _expire_carries_edge(client, player_uuid: str, item_id: str, timestamp: str) -> None:
-    """Find and expire the active CARRIES edge from player to item."""
+    """Find and expire ALL active CARRIES edges from player to item."""
     try:
         edges = client.kg.get_edges(
             player_uuid, direction="outgoing", edge_type="CARRIES",
@@ -378,7 +378,6 @@ def _expire_carries_edge(client, player_uuid: str, item_id: str, timestamp: str)
                 edge_uuid = edge.get("uuid", edge.get("id", ""))
                 if edge_uuid:
                     client.kg.update_edge(edge_uuid, {"expired_at": timestamp})
-                    return
     except Exception:
         logger.warning("Failed to expire CARRIES edge: %s -> %s", player_uuid, item_id)
 
@@ -386,7 +385,7 @@ def _expire_carries_edge(client, player_uuid: str, item_id: str, timestamp: str)
 def _expire_located_in_edge(
     client, item_id: str, location_uuid: str, timestamp: str,
 ) -> None:
-    """Find and expire the active LOCATED_IN edge from item to location."""
+    """Find and expire ALL active LOCATED_IN edges from item to location."""
     try:
         edges = client.kg.get_edges(
             item_id, direction="outgoing", edge_type="LOCATED_IN",
@@ -398,7 +397,6 @@ def _expire_located_in_edge(
                 edge_uuid = edge.get("uuid", edge.get("id", ""))
                 if edge_uuid:
                     client.kg.update_edge(edge_uuid, {"expired_at": timestamp})
-                    return
     except Exception:
         logger.warning("Failed to expire LOCATED_IN edge: %s -> %s", item_id, location_uuid)
 
