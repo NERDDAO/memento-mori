@@ -47,10 +47,10 @@ export default defineWorld({
       schema: {
         id: "bytes32",
         stateRoot: "bytes32",
-        ipfsCid: "string",
         tick: "uint256",
         timestamp: "uint256",
         entityCount: "uint32",
+        ipfsCid: "string",
         metadata: "string",
       },
       key: ["id"],
