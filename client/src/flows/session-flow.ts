@@ -54,17 +54,15 @@ export async function startGame(
     gameState.inventory = data.inventory.map(name => ({ name, rarity: 'common', equipped: false }));
   }
 
-  // 4. Wait for WebSocket connection
-  await new Promise<void>((resolve) => {
-    const session = getSession();
-    if (session.connected) {
-      resolve();
-      return;
-    }
-    setConnectionHandler((connected) => {
-      if (connected) resolve();
-    });
-  });
+  // 4. Wait for WebSocket connection (with 15s timeout — WS auto-reconnects)
+  await Promise.race([
+    new Promise<void>((resolve) => {
+      const session = getSession();
+      if (session.connected) { resolve(); return; }
+      setConnectionHandler((connected) => { if (connected) resolve(); });
+    }),
+    new Promise<void>((resolve) => setTimeout(resolve, 15000)),
+  ]);
 
   // 5. Dismiss loading
   overlays.dismiss('loading');

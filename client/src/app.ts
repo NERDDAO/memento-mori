@@ -298,7 +298,11 @@ function enterGame(config: { playerName: string; walletAddress: string; isReturn
         (document.getElementById('action-input') as HTMLInputElement).focus();
       },
     },
-  );
+  ).catch((err) => {
+    console.error('startGame failed:', err);
+    overlays.dismiss('loading');
+    overlays.show('char-create');
+  });
 }
 
 // --- Character picker (returning players) ---
