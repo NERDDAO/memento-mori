@@ -243,7 +243,7 @@ function handleMessage(msg: any): void {
     }
     case 'presence': {
       if (gameState) {
-        gameState.location.players = (msg.players || []).map((p: any) => ({
+        gameState.location.players = (msg.players || []).map((p: { player_name: string; player_id: string }) => ({
           name: p.player_name,
           id: p.player_id,
         }));
@@ -280,7 +280,7 @@ async function loadArchetypes(): Promise<void> {
   try {
     const resp = await fetch(`${GATEWAY_URL}/api/archetypes`);
     const archetypes = await resp.json();
-    container.innerHTML = archetypes.map((a: any) => `
+    container.innerHTML = archetypes.map((a: { name: string; description: string; stats: { health?: number }; skills: Record<string, number>; starting_items: string[] }) => `
       <div class="archetype-card" data-archetype="${a.name}">
         <div class="archetype-name">${a.name}</div>
         <div class="archetype-desc">${a.description}</div>
@@ -328,13 +328,23 @@ function enterGame(config: { playerName: string; walletAddress: string; isReturn
 }
 
 // --- Character picker (returning players) ---
-function showCharacterPicker(characters: any[], walletAddress: string): void {
+interface CharacterSummary {
+  player_id: string;
+  player_name: string;
+  archetype?: string;
+  health?: number;
+  is_dead?: boolean;
+  death_cause?: string;
+  death_location?: string;
+}
+
+function showCharacterPicker(characters: CharacterSummary[], walletAddress: string): void {
   const walletStepEl = document.getElementById('wallet-step')!;
   const pickerDiv = document.createElement('div');
   pickerDiv.id = 'char-picker';
 
-  const alive = characters.filter((c: any) => !c.is_dead);
-  const dead = characters.filter((c: any) => c.is_dead);
+  const alive = characters.filter((c: CharacterSummary) => !c.is_dead);
+  const dead = characters.filter((c: CharacterSummary) => c.is_dead);
 
   let html = '<div class="picker-title">Your Characters</div>';
 

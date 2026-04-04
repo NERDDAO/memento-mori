@@ -1,5 +1,6 @@
 // src/state/session.ts
 /** Session management — auth, WebSocket connection, player identity. */
+import type { InventoryItemUpdate } from '../types/schema.generated';
 
 const GATEWAY_PORT = window.location.port || '8081';
 export const GATEWAY_URL = `${window.location.protocol}//${window.location.hostname}:${GATEWAY_PORT}`;
@@ -50,7 +51,7 @@ export interface SessionCreateResponse {
   health?: number;
   max_health?: number;
   skills?: Record<string, number>;
-  inventory?: string[];
+  inventory?: Array<string | InventoryItemUpdate>;
   room_map?: any;
 }
 

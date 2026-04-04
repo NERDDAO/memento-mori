@@ -2,7 +2,13 @@
 /** Client-side game state — mirrors a subset of the KG. */
 
 import type { RoomMap } from '../map/types';
-import type { StateUpdate } from '../types/schema.generated';
+import type {
+  StateUpdate,
+  EntityRefUpdate,
+  InventoryItemUpdate,
+  QuestSummary,
+  FactionStanding,
+} from '../types/schema.generated';
 import { SCHEMA_VERSION } from '../types/schema.generated';
 
 export interface LocationExit {
@@ -104,30 +110,30 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
   if (update.xp != null) state.player.xp = update.xp;
   if (update.exits) state.location.exits = update.exits as LocationExit[];
   if (update.npcs) {
-    state.location.npcs = (update.npcs as any[]).map((n: any) => {
+    state.location.npcs = update.npcs.map((n: EntityRefUpdate) => {
       // Preserve cached ascii_art from previous state if not in update
       const existing = state.location.npcs.find(e => e.id === n.id);
       return {
         name: n.name || '',
         id: n.id || '',
         role: n.role || '',
-        ascii_art: n.ascii_art || existing?.ascii_art,
+        ascii_art: existing?.ascii_art,
       };
     });
   }
   if (update.items) {
-    state.location.items = (update.items as any[]).map((i: any) => {
+    state.location.items = update.items.map((i: EntityRefUpdate) => {
       const existing = state.location.items.find(e => e.id === i.id);
       return {
         name: i.name || '',
         id: i.id || '',
         role: i.role || '',
-        ascii_art: i.ascii_art || existing?.ascii_art,
+        ascii_art: existing?.ascii_art,
       };
     });
   }
   if (update.inventory) {
-    state.inventory = update.inventory.map((i: any) => ({
+    state.inventory = update.inventory.map((i: InventoryItemUpdate) => ({
       id: i.id || '',
       name: i.name || '?',
       rarity: i.rarity || 'common',
@@ -146,13 +152,13 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
     const rm = update.room_map;
     if (rm.name) state.location.name = rm.name;
     if (rm.exits) {
-      state.location.exits = rm.exits.map((e: any) => ({
+      state.location.exits = rm.exits.map((e: Record<string, any>) => ({
         direction: e.direction || '',
         name: e.target || e.name || '',
       }));
     }
     if (rm.npcs) {
-      state.location.npcs = rm.npcs.map((n: any) => {
+      state.location.npcs = rm.npcs.map((n: Record<string, any>) => {
         const existing = state.location.npcs.find(e => e.id === n.id);
         return {
           name: n.name || '',
@@ -163,7 +169,7 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
       });
     }
     if (rm.items) {
-      state.location.items = rm.items.map((i: any) => {
+      state.location.items = rm.items.map((i: Record<string, any>) => {
         const existing = state.location.items.find(e => e.id === i.id);
         return {
           name: i.name || '',
@@ -174,7 +180,7 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
     }
   }
   if (update.active_quests) {
-    state.quests = (update.active_quests as any[]).map((q: any) => ({
+    state.quests = update.active_quests.map((q: QuestSummary) => ({
       name: q.name || '',
       description: q.description || '',
       currentStage: q.current_stage || 0,
@@ -184,7 +190,7 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
     }));
   }
   if (update.factions) {
-    state.factions = (update.factions as any[]).map((f: any) => ({
+    state.factions = update.factions.map((f: FactionStanding) => ({
       name: f.name || '',
       reputation: f.reputation || 0,
       disposition: f.disposition || 'neutral',
