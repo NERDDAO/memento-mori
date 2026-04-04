@@ -119,12 +119,6 @@ async def drop_item(req: DropRequest):
     """Drop an item into the current room. Chain tx fires in background."""
     from memento.inventory_actions import drop, InventoryError
 
-    # Get player's current location
-    from gateway.app import ws_hub
-    location = ws_hub.player_locations.get(req.player_id) if ws_hub else None
-    if not location:
-        raise HTTPException(status_code=400, detail="Player location unknown")
-
     location_uuid = req.location_uuid or await _get_location_uuid(req.player_id)
     if not location_uuid:
         raise HTTPException(status_code=400, detail="Cannot resolve location")
