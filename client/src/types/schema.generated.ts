@@ -14,9 +14,15 @@ export interface EntityRefUpdate {
 }
 
 export interface InventoryItemUpdate {
+  id?: string;
   name?: string;
   rarity?: string;
+  slot_type?: string;
   equipped?: boolean;
+  is_consumable?: boolean;
+  is_quest_item?: boolean;
+  effects?: string[];
+  quantity?: number;
 }
 
 export interface WorldTimeDisplay {
@@ -61,6 +67,21 @@ export interface EventSummary {
   inventory_changes?: InventoryEvent[];
   quest_update?: string;
   reputation_changes?: Record<string, any>;
+}
+
+export interface QuestSummary {
+  name?: string;
+  description?: string;
+  current_stage?: number;
+  total_stages?: number;
+  giver?: string;
+  completed?: boolean;
+}
+
+export interface FactionStanding {
+  name?: string;
+  reputation?: number;
+  disposition?: string;
 }
 
 export interface StateUpdate {

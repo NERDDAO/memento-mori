@@ -50,7 +50,7 @@ export class EntityCardManager {
           const resp = await fetch(`/api/entity/${entityId}`);
           const data = await resp.json();
           if (data && data.name && !data.error) {
-            card = data;
+            card = data as EntityCardData;
             this.cache.set(entityId, card);
           }
         } catch {
@@ -64,7 +64,7 @@ export class EntityCardManager {
           const resp = await fetch(`/api/entity/search/${encodeURIComponent(entityName)}`);
           const data = await resp.json();
           if (data && data.name && !data.error) {
-            card = data;
+            card = data as EntityCardData;
             this.cache.set(entityId, card);
           }
         } catch {

@@ -102,7 +102,7 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
   if (update.max_health != null) state.player.maxHealth = update.max_health;
   if (update.level != null) state.player.level = update.level;
   if (update.xp != null) state.player.xp = update.xp;
-  if (update.exits) state.location.exits = update.exits;
+  if (update.exits) state.location.exits = update.exits as LocationExit[];
   if (update.npcs) {
     state.location.npcs = (update.npcs as any[]).map((n: any) => {
       // Preserve cached ascii_art from previous state if not in update
@@ -141,7 +141,7 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
   }
   if (update.skills) state.player.skills = update.skills as Record<string, number>;
   if (update.room_map) {
-    state.roomMap = update.room_map;
+    state.roomMap = update.room_map as RoomMap;
     // Sync roomMap entities into location for sidebar panels
     const rm = update.room_map;
     if (rm.name) state.location.name = rm.name;
