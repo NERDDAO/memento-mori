@@ -28,6 +28,7 @@ class CreateSessionResponse(BaseModel):
     max_health: int = 100
     skills: dict = {}
     inventory: list[str] = []
+    room_map: dict | None = None
 
 
 @router.post("/session/create", response_model=CreateSessionResponse)
@@ -66,6 +67,7 @@ async def create_session(req: CreateSessionRequest, request: Request):
             max_health=result.get("max_health", 100),
             skills=result.get("skills", {}),
             inventory=result.get("inventory", []),
+            room_map=result.get("room_map"),
         )
     except Exception:
         logger.error("Session creation via KG failed, using fallback", exc_info=True)

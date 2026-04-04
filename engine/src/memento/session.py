@@ -70,12 +70,21 @@ class SessionManager:
         # 3. Find or create starting location
         location_name = self._find_starting_location()
 
-        # 4. Place player at location
+        # 4. Place player at location and get room_map
+        room_map = None
         try:
             from memento.tools.kg import _resolve_entity_uuid
             loc_uuid = _resolve_entity_uuid(location_name)
             if loc_uuid:
                 client.kg.create_edge(player_uuid, loc_uuid, "LOCATED_IN", "")
+                # Fetch room_map from location entity
+                try:
+                    loc_entity = client.kg.get_entity(loc_uuid)
+                    rm_raw = loc_entity.get("room_map")
+                    if rm_raw:
+                        room_map = json.loads(rm_raw) if isinstance(rm_raw, str) else rm_raw
+                except Exception:
+                    logger.debug("Could not fetch room_map for %s", location_name)
         except Exception as e:
             logger.warning("Failed to place player at location", exc_info=True)
 
@@ -114,6 +123,7 @@ class SessionManager:
             "max_health": max_health,
             "skills": arch_skills,
             "inventory": inventory_names,
+            "room_map": room_map,
         }
 
     def get_or_create_user(self, wallet_address: str) -> str:
