@@ -166,10 +166,10 @@ class SessionManager:
             return []
 
     def _find_starting_location(self) -> str:
-        """Find an existing location or return a default.
+        """Find an existing location or seed The Threshold.
 
         Searches KG for locations, preferring ones with room_map data.
-        Falls back to The Threshold.
+        If no locations exist, auto-seeds The Threshold.
         """
         client = get_client()
         try:
@@ -179,8 +179,17 @@ class SessionManager:
                 labels = entity.get("labels", [])
                 if "Location" in labels:
                     return entity.get("name", "The Threshold")
+        except Exception:
+            pass
+
+        # No locations found — seed The Threshold
+        try:
+            from memento.seed import seed_threshold
+            seed_result = seed_threshold()
+            logger.info("Auto-seeded The Threshold: %s", seed_result.get("uuid", ""))
             return "The Threshold"
         except Exception:
+            logger.warning("Auto-seed of The Threshold failed", exc_info=True)
             return "The Threshold"
 
     def _generate_opening(self, player_name: str, location_name: str) -> str:
