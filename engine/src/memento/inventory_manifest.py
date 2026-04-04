@@ -260,7 +260,7 @@ def reconcile_with_chain(
                     # Mark expired — Graphiti supports setting expired_at
                     edge_uuid = edge.get("uuid", edge.get("id", ""))
                     if edge_uuid:
-                        client.kg.update_edge(edge_uuid, {"expired_at": now})
+                        client.kg.update_edge(edge_uuid, expired_at=now)
                         logger.info("Expired orphaned KG edge for item %s", item_id)
         except Exception:
             logger.warning("Failed to expire stale edge for item %s", item_id)

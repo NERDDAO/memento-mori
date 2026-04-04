@@ -377,7 +377,7 @@ def _expire_carries_edge(client, player_uuid: str, item_id: str, timestamp: str)
             if tid == item_id and not (edge.get("expired_at") or edge.get("invalid_at")):
                 edge_uuid = edge.get("uuid", edge.get("id", ""))
                 if edge_uuid:
-                    client.kg.update_edge(edge_uuid, {"expired_at": timestamp})
+                    client.kg.update_edge(edge_uuid, expired_at=timestamp)
     except Exception:
         logger.warning("Failed to expire CARRIES edge: %s -> %s", player_uuid, item_id)
 
@@ -396,7 +396,7 @@ def _expire_located_in_edge(
             if tid == location_uuid and not (edge.get("expired_at") or edge.get("invalid_at")):
                 edge_uuid = edge.get("uuid", edge.get("id", ""))
                 if edge_uuid:
-                    client.kg.update_edge(edge_uuid, {"expired_at": timestamp})
+                    client.kg.update_edge(edge_uuid, expired_at=timestamp)
     except Exception:
         logger.warning("Failed to expire LOCATED_IN edge: %s -> %s", item_id, location_uuid)
 
