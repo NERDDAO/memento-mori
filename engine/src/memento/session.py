@@ -354,14 +354,17 @@ class SessionManager:
 
         return {"status": "ended", "player_id": player_id}
 
-    def handle_death(self, player_id: str, cause: str, location: str) -> dict:
+    def handle_death(self, player_id: str, cause: str, location: str, location_uuid: str = "") -> dict:
         """Handle permadeath — the session is over forever."""
         client = get_client()
         # Mark player dead (append-only)
         try:
             client.kg.create_edge(player_id, player_id, "HAS_STATUS", f"DEAD. {cause}")
-            from memento.tools.kg import _resolve_entity_uuid
-            loc_uuid = _resolve_entity_uuid(location)
+            # Use UUID if available, fall back to text search
+            loc_uuid = location_uuid
+            if not loc_uuid:
+                from memento.tools.kg import _resolve_entity_uuid
+                loc_uuid = _resolve_entity_uuid(location)
             if loc_uuid:
                 client.kg.create_edge(player_id, loc_uuid, "DIED_AT", f"Fell here. {cause}")
         except Exception as e:

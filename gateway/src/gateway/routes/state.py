@@ -12,42 +12,23 @@ router = APIRouter()
 
 @router.get("/state")
 async def get_state(player_id: str = Query(...)):
-    """Get current game state for a player from the KG."""
+    """Get current game state for a player from the KG (UUID-based)."""
     try:
-        from memento.bonfires_client import get_client
-        client = await asyncio.to_thread(get_client)
-
-        result = await asyncio.to_thread(client.kg.search, player_id, 10)
-        entities = result.get("entities", result.get("nodes", []))
-
-        player_data = {}
-        location = "Unknown"
-        inventory = []
-
-        for entity in entities:
-            labels = entity.get("labels", [])
-            if "Player" in labels:
-                player_data = entity
-            elif "Location" in labels:
-                location = entity.get("name", "Unknown")
-            elif "Item" in labels:
-                inventory.append({
-                    "name": entity.get("name", "?"),
-                    "rarity": "common",
-                })
-
+        from memento.session import SessionManager
+        sm = SessionManager()
+        result = await asyncio.to_thread(sm.restore_player_state, player_id)
         return {
             "player_id": player_id,
-            "name": player_data.get("name", "Unknown"),
-            "location": location,
-            "health": 100,
-            "max_health": 100,
+            "name": result.get("player_name", "Unknown"),
+            "location": result.get("location_name", "Unknown"),
+            "health": result.get("health", 100),
+            "max_health": result.get("max_health", 100),
             "level": 1,
             "xp": 0,
-            "inventory": inventory,
+            "inventory": [{"name": n, "rarity": "common"} for n in result.get("inventory", [])],
         }
     except Exception:
-        logger.error("KG state query failed, returning degraded state", exc_info=True)
+        logger.error("State query failed", exc_info=True)
         return {
             "player_id": player_id,
             "location": "Unknown",

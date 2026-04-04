@@ -53,24 +53,23 @@ def _record_narration(location: str) -> None:
 
 
 def query_active_quests(player_uuid: str) -> list[dict]:
-    """Query KG for player's active quests. Returns list of quest summaries."""
+    """Query KG for player's active quests via edge traversal (UUID-based)."""
     if not player_uuid:
         return []
     try:
         from memento.bonfires_client import get_client
         client = get_client()
 
-        result = client.kg.search(f"quest player {player_uuid}", num_results=10)
-        entities = result.get("entities", result.get("nodes", []))
-
+        # Use edge traversal — HAS_QUEST edges from player to quest entities
+        edges = client.kg.get_edges(player_uuid, direction="outgoing", edge_type="HAS_QUEST")
         quests = []
-        for entity in entities:
-            labels = entity.get("labels", [])
-            if "Quest" in labels:
+        for edge in edges:
+            target = edge.get("target", {})
+            if "Quest" in target.get("labels", []):
                 quests.append({
-                    "name": entity.get("name", "Unknown Quest"),
-                    "description": entity.get("summary", ""),
-                    "giver": entity.get("giver", ""),
+                    "name": target.get("name", "Unknown Quest"),
+                    "description": target.get("summary", ""),
+                    "giver": target.get("giver", ""),
                     "current_stage": 0,
                     "total_stages": 3,
                     "completed": False,
@@ -114,8 +113,10 @@ class RoundController:
         room_id: str = "",
         matrix_client: Any = None,
         npc_wait: float = 15.0,
+        location_uuid: str = "",
     ) -> None:
         self.location = location
+        self.location_uuid = location_uuid
         self.actions = actions
         self.loop = loop
         self.room_id = room_id
@@ -424,9 +425,8 @@ class RoundController:
         try:
             from memento.bonfires_client import get_client
             client = get_client()
-            # Check KG for cached art
-            from memento.tools.kg import _resolve_entity_uuid
-            loc_uuid = _resolve_entity_uuid(self.location)
+            # Check KG for cached art — use stored UUID, no text search
+            loc_uuid = self.location_uuid
             if loc_uuid:
                 entity = client.kg.get_entity(loc_uuid)
                 if entity and entity.get("properties", {}).get("ascii_art"):
@@ -489,9 +489,8 @@ class RoundController:
                 },
             )
 
-            # Link quest to location
-            from memento.tools.kg import _resolve_entity_uuid
-            loc_uuid = _resolve_entity_uuid(self.location)
+            # Link quest to location — use stored UUID, no text search
+            loc_uuid = self.location_uuid
             if loc_uuid:
                 client.kg.create_edge(quest_uuid, loc_uuid, "AVAILABLE_AT", "")
 
