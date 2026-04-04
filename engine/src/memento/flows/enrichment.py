@@ -51,13 +51,18 @@ def enrich_entity(
         # Merge with existing
         merged = {**existing_attributes, **new_attrs}
 
-        # Write back to KG
+        # Write back to KG — fetch current entity to preserve labels
         client = get_client()
+        try:
+            current = client.kg.get_entity(entity_uuid)
+            labels = current.get("labels", [])
+        except Exception:
+            labels = []
         client.kg.update_entity(
             entity_uuid,
             entity_name,
-            [],  # don't change labels
-            existing_summary,  # don't change summary
+            labels,
+            existing_summary,
             attributes=merged,
         )
         logger.info("Enriched %s '%s' with %d fields", entity_type, entity_name, len(new_attrs))
