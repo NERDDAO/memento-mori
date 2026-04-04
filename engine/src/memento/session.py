@@ -12,6 +12,27 @@ from memento.log import get_logger
 logger = get_logger(__name__)
 
 
+def _extract_entity_attr(entity: dict, key: str) -> str | dict | None:
+    """Extract an attribute from a KG entity.
+
+    KG stores attributes as a JSON blob inside the summary field.
+    This checks both direct entity keys and parsed summary JSON.
+    """
+    # Direct attribute
+    val = entity.get(key)
+    if val is not None:
+        return val
+    # Try parsing summary as JSON
+    summary = entity.get("summary", "")
+    if isinstance(summary, str) and summary.startswith("{"):
+        try:
+            parsed = json.loads(summary)
+            return parsed.get(key)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return None
+
+
 class SessionManager:
     """Manages game sessions — player creation, placement, and cleanup."""
 
@@ -80,7 +101,7 @@ class SessionManager:
                 # Fetch room_map from location entity
                 try:
                     loc_entity = client.kg.get_entity(loc_uuid)
-                    rm_raw = loc_entity.get("room_map")
+                    rm_raw = _extract_entity_attr(loc_entity, "room_map")
                     if rm_raw:
                         room_map = json.loads(rm_raw) if isinstance(rm_raw, str) else rm_raw
                 except Exception:
@@ -214,12 +235,13 @@ class SessionManager:
             return {"player_id": player_id, "location_name": "The Threshold"}
 
         player_name = entity.get("name", "Unknown")
-        health = int(entity.get("health", 100))
-        max_health = int(entity.get("max_health", 100))
-        archetype = entity.get("archetype", "")
+        health = int(str(_extract_entity_attr(entity, "health") or 100))
+        max_health = int(str(_extract_entity_attr(entity, "max_health") or 100))
+        archetype = str(_extract_entity_attr(entity, "archetype") or "")
         skills = {}
         try:
-            skills = json.loads(entity.get("skills", "{}"))
+            skills_raw = _extract_entity_attr(entity, "skills") or "{}"
+            skills = json.loads(skills_raw) if isinstance(skills_raw, str) else skills_raw
         except (json.JSONDecodeError, TypeError):
             pass
 
@@ -237,7 +259,7 @@ class SessionManager:
                     if loc_uuid:
                         try:
                             loc_entity = client.kg.get_entity(loc_uuid)
-                            rm_raw = loc_entity.get("room_map")
+                            rm_raw = _extract_entity_attr(loc_entity, "room_map")
                             if rm_raw:
                                 room_map = json.loads(rm_raw) if isinstance(rm_raw, str) else rm_raw
                         except Exception:
