@@ -46,12 +46,12 @@ Add the following services to `docker-compose.dev.yml`, before the `volumes:` se
     image: ghcr.io/latticexyz/store-indexer:latest
     entrypoint: ["pnpm", "sqlite-indexer"]
     ports:
-      - "3001:3001"
+      - "3333:3333"
     environment:
       RPC_HTTP_URL: "http://anvil:8545"
       FOLLOW_BLOCK_TAG: "latest"
       SQLITE_FILENAME: "/data/indexer.db"
-      PORT: "3001"
+      PORT: "3333"
       ENABLE_UNSAFE_QUERY_API: "true"
     volumes:
       - mud_indexer_data:/data
@@ -145,12 +145,12 @@ start_chain() {
 REDSTONE_RPC=http://localhost:8545
 MUD_WORLD_ADDRESS=$WORLD_ADDR
 ENGINE_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-MUD_INDEXER_URL=http://localhost:3001
+MUD_INDEXER_URL=http://localhost:3333
 CHAIN_EOF
 
   echo -e "${GREEN}Chain config written to memento-mori/.env.dev${NC}"
   echo -e "  Anvil:     ${GREEN}localhost:8545${NC}"
-  echo -e "  Indexer:   ${GREEN}localhost:3001${NC}"
+  echo -e "  Indexer:   ${GREEN}localhost:3333${NC}"
   echo -e "  World:     ${GREEN}$WORLD_ADDR${NC}"
   echo ""
 }
@@ -204,7 +204,7 @@ git commit -m "feat: add ./dev.sh chain mode with Anvil + MUD deploy + indexer"
 Add after line 10 (`CHAIN_ENABLED = ...`):
 
 ```python
-MUD_INDEXER_URL = os.getenv("MUD_INDEXER_URL", "http://localhost:3001")
+MUD_INDEXER_URL = os.getenv("MUD_INDEXER_URL", "http://localhost:3333")
 ```
 
 - [ ] **Step 2: Commit**
@@ -467,7 +467,7 @@ Run: `cd /home/at0x/Vaults/Bonfires && ./dev.sh chain`
 Expected:
 - Anvil starts on :8545
 - Contracts deploy, world address printed
-- MUD indexer starts on :3001
+- MUD indexer starts on :3333
 - Chain env vars written to memento-mori/.env.dev
 - Delve, bonfires-ai, webapp start
 
@@ -482,7 +482,7 @@ Expected: Gateway starts with `CHAIN_ENABLED=true` (env vars set by dev.sh)
 Create a character in the game. Check the indexer:
 
 ```bash
-curl -s "http://localhost:3001/api/sql?query=SELECT%20*%20FROM%20memento__Characters" | python3 -m json.tool
+curl -s "http://localhost:3333/api/sql?query=SELECT%20*%20FROM%20memento__Characters" | python3 -m json.tool
 ```
 
 Expected: Character appears in indexer with correct wallet address.

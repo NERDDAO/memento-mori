@@ -7,7 +7,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-MUD_INDEXER_URL = os.getenv("MUD_INDEXER_URL", "http://localhost:3001")
+MUD_INDEXER_URL = os.getenv("MUD_INDEXER_URL", "http://localhost:3333")
 
 ALLOWED_TABLES = frozenset({
     "Characters", "Deaths", "Items",

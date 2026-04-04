@@ -22,7 +22,7 @@ Add to `docker-compose.dev.yml`:
 
 **MUD Store Indexer** (chain state reader):
 - Image: `ghcr.io/latticexyz/store-indexer:latest`
-- Port: 3001
+- Port: 3333
 - Env: `RPC_HTTP_URL=http://anvil:8545`, `FOLLOW_BLOCK_TAG=latest`, `SQLITE_FILENAME=/data/indexer.db`
 - Depends on: anvil
 - Volume: `mud-indexer-data:/data`
@@ -39,7 +39,7 @@ New mode: `./dev.sh chain`
   REDSTONE_RPC=http://localhost:8545
   MUD_WORLD_ADDRESS=<deployed address>
   ENGINE_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-  MUD_INDEXER_URL=http://localhost:3001
+  MUD_INDEXER_URL=http://localhost:3333
   ```
 - Then starts delve + bonfires-ai + webapp (same as `./dev.sh all`)
 
@@ -158,7 +158,7 @@ def bytes32_to_uuid(hex_str: str) -> str:
 | `REDSTONE_RPC` | `http://localhost:8545` | Anvil RPC |
 | `MUD_WORLD_ADDRESS` | `<from deploy>` | Deployed world contract |
 | `ENGINE_PRIVATE_KEY` | `0xac0974...` (Anvil default) | Engine wallet for writes |
-| `MUD_INDEXER_URL` | `http://localhost:3001` | Store-indexer HTTP |
+| `MUD_INDEXER_URL` | `http://localhost:3333` | Store-indexer HTTP |
 | `CHAIN_ENABLED` | Auto (`true` when address + key set) | Feature flag |
 
 ## 6. Files Modified/Created
@@ -174,7 +174,7 @@ def bytes32_to_uuid(hex_str: str) -> str:
 ## 7. Verification
 
 1. `./dev.sh chain` — Anvil starts, contracts deploy, indexer starts, world address written to .env.dev
-2. Create a character in the game — verify it appears in MUD indexer (`curl http://localhost:3001/api/...`)
+2. Create a character in the game — verify it appears in MUD indexer (`curl http://localhost:3333/api/...`)
 3. Disconnect, reconnect with same wallet — character picker shows the character from onchain data
 4. Kill a character — death record appears onchain, memorial shows in picker
 5. `./dev.sh all` (no chain) — character resume falls back to KG search, still works (unreliably)
