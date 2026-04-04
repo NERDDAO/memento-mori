@@ -363,19 +363,27 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
       container.appendChild(labels);
     }
 
-    // Summary
-    if (entity.summary) {
+    // Summary — use attributes.description if summary is a JSON blob
+    const attrs = entity.attributes || {};
+    let summaryText = entity.summary || '';
+    if (summaryText.startsWith('{')) {
+      // Summary is a JSON blob — use description from attributes instead
+      summaryText = attrs.description || attrs.personality || '';
+    }
+    if (!summaryText && attrs.description) {
+      summaryText = attrs.description;
+    }
+    if (summaryText) {
       const summary = document.createElement('div');
       summary.style.color = '#c8c8d0';
       summary.style.lineHeight = '1.5';
       summary.style.marginBottom = '12px';
-      summary.textContent = entity.summary;
+      summary.textContent = summaryText;
       container.appendChild(summary);
     }
 
     // Attributes section
-    const attrs = entity.attributes;
-    if (attrs && Object.keys(attrs).length > 0) {
+    if (Object.keys(attrs).length > 0) {
       // NPC attributes
       if (entity.type === 'npc') {
         if (attrs.personality) addSection(container, 'PERSONALITY', attrs.personality);
