@@ -112,3 +112,18 @@ def enrich_room_entities(location_uuid: str) -> None:
                 enrich_entity(item_id, item.get("name", ""), "item", summary, attrs, missing)
         except Exception:
             pass
+
+    # Check the location itself
+    if location_uuid and location_uuid not in _enriched:
+        try:
+            entity = client.kg.get_entity(location_uuid)
+            attrs = entity.get("attributes", {})
+            if isinstance(attrs, str):
+                attrs = json.loads(attrs) if attrs else {}
+            summary = entity.get("summary", "")
+            loc_name = entity.get("name", manifest.get("name", "Unknown"))
+            missing = needs_enrichment("location", attrs)
+            if missing:
+                enrich_entity(location_uuid, loc_name, "location", summary, attrs, missing)
+        except Exception:
+            pass
