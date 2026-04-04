@@ -11,19 +11,27 @@ import type { GameState, InventoryItem } from './game-state';
 const API_BASE = '/api/inventory';
 
 type RenderCallback = () => void;
+type EventCallback = (text: string, style: string) => void;
 
 let _state: GameState | null = null;
 let _playerId = '';
 let _onRender: RenderCallback | null = null;
+let _onEvent: EventCallback | null = null;
 
 export function initInventoryApi(
   state: GameState,
   playerId: string,
   onRender: RenderCallback,
+  onEvent?: EventCallback,
 ): void {
   _state = state;
   _playerId = playerId;
   _onRender = onRender;
+  _onEvent = onEvent || null;
+}
+
+function emitEvent(text: string, style: string = 'event-item'): void {
+  if (_onEvent) _onEvent(text, style);
 }
 
 function rerender(): void {
@@ -88,6 +96,7 @@ export async function equipItem(itemId: string, slot: string): Promise<string | 
     rollback(saved);
     return result.detail || 'Equip failed';
   }
+  emitEvent(`[equipped ${item.name} → ${slot}]`, 'event-item');
   return null;
 }
 
@@ -107,6 +116,7 @@ export async function unequipItem(slot: string): Promise<string | null> {
     rollback(saved);
     return result.detail || 'Unequip failed';
   }
+  emitEvent(`[unequipped ${item.name}]`, 'event-item');
   return null;
 }
 
@@ -135,6 +145,7 @@ export async function dropItem(itemId: string, quantity?: number): Promise<strin
     rollback(saved);
     return result.detail || 'Drop failed';
   }
+  emitEvent(`[-${item.name}] dropped`, 'event-item');
   return null;
 }
 
@@ -159,6 +170,7 @@ export async function useItem(itemId: string): Promise<string | null> {
     rollback(saved);
     return result.detail || 'Use failed';
   }
+  emitEvent(`[used ${item.name}]`, 'event-item');
   return null;
 }
 
@@ -190,5 +202,6 @@ export async function pickupItem(itemId: string): Promise<string | null> {
     rollback(saved);
     return result.detail || 'Pickup failed';
   }
+  emitEvent(`[+${groundItem?.name || 'item'}] picked up`, 'event-item');
   return null;
 }

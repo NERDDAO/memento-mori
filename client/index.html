@@ -69,7 +69,8 @@
       display: flex; flex-direction: row; gap: 4px;
       flex: 1; min-height: 0;
     }
-    #narrative-win { flex: 3; min-height: 0; }
+    #narrative-col { display: flex; flex-direction: column; flex: 3; min-height: 0; gap: 0; }
+    #narrative-win { flex: 1; min-height: 0; }
     #narrative-win .win-body {
       overflow-y: auto; position: relative;
       font-family: Georgia, 'Times New Roman', serif; font-size: 16px; line-height: 1.7;
@@ -480,7 +481,10 @@
     <div id="tui-main">
       <div id="left-col">
         <div id="narrative-row">
-          <div id="narrative-mount"></div>
+          <div id="narrative-col">
+            <div id="narrative-mount"></div>
+            <div id="command-mount"></div>
+          </div>
           <div id="events-mount"></div>
         </div>
         <div id="map-mount"></div>
@@ -494,7 +498,6 @@
         <div id="faction-mount"></div>
       </div>
     </div>
-    <div id="command-mount"></div>
     <div id="status-mount"></div>
     <div id="dialog-mount"></div>
   </div>

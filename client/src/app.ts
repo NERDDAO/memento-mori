@@ -312,7 +312,9 @@ function enterGame(config: { playerName: string; walletAddress: string; isReturn
         gameState = state;
         // Init optimistic inventory API
         const session = getSession();
-        initInventoryApi(gameState, session.playerId, renderAllPanels);
+        initInventoryApi(gameState, session.playerId, renderAllPanels, (text, style) => {
+          eventsFeed.addBlock(text, style);
+        });
         if (gameState.roomMap) registerMapEntities(gameState.roomMap);
         renderAllPanels();
         if (openingNarrative) {

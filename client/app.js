@@ -5281,10 +5281,16 @@ var API_BASE = "/api/inventory";
 var _state = null;
 var _playerId = "";
 var _onRender = null;
-function initInventoryApi(state2, playerId, onRender) {
+var _onEvent = null;
+function initInventoryApi(state2, playerId, onRender, onEvent) {
   _state = state2;
   _playerId = playerId;
   _onRender = onRender;
+  _onEvent = onEvent || null;
+}
+function emitEvent(text, style = "event-item") {
+  if (_onEvent)
+    _onEvent(text, style);
 }
 function rerender() {
   if (_onRender)
@@ -5336,6 +5342,7 @@ async function equipItem(itemId, slot) {
     rollback(saved);
     return result.detail || "Equip failed";
   }
+  emitEvent(`[equipped ${item.name} → ${slot}]`, "event-item");
   return null;
 }
 async function unequipItem(slot) {
@@ -5352,6 +5359,7 @@ async function unequipItem(slot) {
     rollback(saved);
     return result.detail || "Unequip failed";
   }
+  emitEvent(`[unequipped ${item.name}]`, "event-item");
   return null;
 }
 async function dropItem(itemId, quantity) {
@@ -5374,6 +5382,7 @@ async function dropItem(itemId, quantity) {
     rollback(saved);
     return result.detail || "Drop failed";
   }
+  emitEvent(`[-${item.name}] dropped`, "event-item");
   return null;
 }
 async function useItem(itemId) {
@@ -5395,6 +5404,7 @@ async function useItem(itemId) {
     rollback(saved);
     return result.detail || "Use failed";
   }
+  emitEvent(`[used ${item.name}]`, "event-item");
   return null;
 }
 async function pickupItem(itemId) {
@@ -5422,6 +5432,7 @@ async function pickupItem(itemId) {
     rollback(saved);
     return result.detail || "Pickup failed";
   }
+  emitEvent(`[+${groundItem?.name || "item"}] picked up`, "event-item");
   return null;
 }
 
@@ -6526,7 +6537,9 @@ function enterGame(config) {
     onGameReady(state2, openingNarrative) {
       gameState = state2;
       const session2 = getSession();
-      initInventoryApi(gameState, session2.playerId, renderAllPanels);
+      initInventoryApi(gameState, session2.playerId, renderAllPanels, (text, style) => {
+        eventsFeed.addBlock(text, style);
+      });
       if (gameState.roomMap)
         registerMapEntities(gameState.roomMap);
       renderAllPanels();
