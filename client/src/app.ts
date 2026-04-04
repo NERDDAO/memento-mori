@@ -24,7 +24,7 @@ import { createWindow } from './ui/window';
 import { createHeader, type WorldTime } from './ui/header';
 import { createDialog } from './ui/dialog';
 import { createInventoryModal } from './ui/inventory-modal';
-import { createWikiPanel } from './ui/wiki';
+import { createCodexModal } from './ui/codex-modal';
 import { createStatusBar } from './ui/status';
 import { hasProvider, connectWallet, formatAddress, getAddress } from './chain/wallet';
 import type { RoomMap } from './map/types';
@@ -39,7 +39,7 @@ let eventsFeed: NarrativeController;
 
 let header: ReturnType<typeof createHeader>;
 let npcDialog: ReturnType<typeof createDialog>;
-let wiki: ReturnType<typeof createWikiPanel>;
+let codex: ReturnType<typeof createCodexModal>;
 let statusBar: ReturnType<typeof createStatusBar>;
 let narrativeWin: ReturnType<typeof createWindow>;
 let eventsWin: ReturnType<typeof createWindow>;
@@ -78,10 +78,7 @@ function renderAllPanels(): void {
   renderFactionsPanel(factionWin.panel!, gameState.factions);
   updateMap(gameState, handleAction);
 
-  // Show current location in wiki by default
-  if (wiki && gameState.roomMap) {
-    wiki.show(gameState.roomMap.id, gameState.roomMap.name);
-  }
+  // (codex is opened on demand via 'k' key, not auto-shown)
 }
 
 // --- Action handling ---
@@ -491,14 +488,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 6b. Entity clicks from canvas narrative panel
   narrative.canvas.addEventListener('narrative-entity-click', (e: Event) => {
-    const { entityId, entityName } = (e as CustomEvent).detail;
-    if (entityName) {
-      if (entityId) {
-        wiki.show(entityId, entityName);
-      } else {
-        wiki.showByName(entityName);
-      }
-    }
+    const { entityId } = (e as CustomEvent).detail;
+    codex.open(entityId || undefined);
   });
 
   // 7. Command input
@@ -512,17 +503,27 @@ document.addEventListener('DOMContentLoaded', () => {
     players: gameState?.location?.players || [],
   }));
 
-  // 8. Map + Wiki — split map window body into canvas wrap + world map + wiki panel
+  // 8. Map — split map window body into canvas wrap + world map
   const mapCanvasWrap = document.createElement('div');
   mapCanvasWrap.className = 'map-canvas-wrap';
   const worldMapWrap = document.createElement('div');
   worldMapWrap.className = 'map-canvas-wrap';
   worldMapWrap.style.display = 'none';
-  wiki = createWikiPanel();
   mapWin.body.appendChild(mapCanvasWrap);
   mapWin.body.appendChild(worldMapWrap);
-  mapWin.body.appendChild(wiki.el);
   initMapPanel(mapCanvasWrap, handleAction);
+
+  // 8b. Codex modal
+  codex = createCodexModal(() => gameState, () => getSession().playerId);
+  document.body.appendChild(codex.el);
+
+  // 'k' key toggles codex modal (when input not focused)
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'k' && document.activeElement?.tagName !== 'INPUT') {
+      if (codex.active) codex.close();
+      else codex.open();
+    }
+  });
 
   // World map renderer
   const worldRenderer = new WorldMapRenderer(worldMapWrap);
@@ -530,9 +531,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let showingWorldMap = false;
 
   worldRenderer.setClickHandler((roomId) => {
-    if (roomId && wiki) {
-      const room = worldMapData?.rooms.find(r => r.id === roomId);
-      if (room) wiki.show(roomId, room.name);
+    if (roomId) {
+      codex.open(roomId);
     }
   });
 
@@ -586,11 +586,8 @@ document.addEventListener('DOMContentLoaded', () => {
     overlays.show('char-create');
     narrative = initNarrative(narrativeWin.body);
     narrative.canvas.addEventListener('narrative-entity-click', (e: Event) => {
-      const { entityId, entityName } = (e as CustomEvent).detail;
-      if (entityName) {
-        if (entityId) wiki.show(entityId, entityName);
-        else wiki.showByName(entityName);
-      }
+      const { entityId } = (e as CustomEvent).detail;
+      codex.open(entityId || undefined);
     });
     (document.getElementById('char-name-input') as HTMLInputElement).focus();
   });
