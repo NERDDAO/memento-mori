@@ -5913,8 +5913,15 @@ function createCodexModal(getState, playerId) {
         jumpBar.style.padding = "4px 0 2px";
         jumpBar.style.borderTop = "1px solid #1a1a24";
         for (let i = 1;i < sections.length; i++) {
-          const header2 = sections[i].querySelector("div");
-          const label = header2?.textContent?.trim() || `§${i}`;
+          const headers = sections[i].querySelectorAll("div");
+          let label = `§${i}`;
+          for (const h of headers) {
+            const style = h.style;
+            if (style.letterSpacing || style.fontSize === "10px") {
+              label = h.textContent?.trim() || label;
+              break;
+            }
+          }
           const chip = document.createElement("span");
           chip.style.color = "#6a6a78";
           chip.style.fontSize = "9px";

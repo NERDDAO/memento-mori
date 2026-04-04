@@ -317,10 +317,18 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
         jumpBar.style.padding = '4px 0 2px';
         jumpBar.style.borderTop = '1px solid #1a1a24';
 
-        // Extract section labels from headers
+        // Extract section labels from the first header-styled element
         for (let i = 1; i < sections.length; i++) {
-          const header = sections[i].querySelector('div');
-          const label = header?.textContent?.trim() || `\u00A7${i}`;
+          // Find the first small uppercase header (font-size 10px, letter-spacing)
+          const headers = sections[i].querySelectorAll('div');
+          let label = `\u00A7${i}`;
+          for (const h of headers) {
+            const style = (h as HTMLElement).style;
+            if (style.letterSpacing || style.fontSize === '10px') {
+              label = h.textContent?.trim() || label;
+              break;
+            }
+          }
           const chip = document.createElement('span');
           chip.style.color = '#6a6a78';
           chip.style.fontSize = '9px';
