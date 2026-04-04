@@ -28,6 +28,14 @@
       font-family: 'Courier New', Consolas, monospace; font-size: 13px;
     }
 
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #2a2a38; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3a3a48; }
+    ::-webkit-scrollbar-corner { background: transparent; }
+    * { scrollbar-width: thin; scrollbar-color: #2a2a38 transparent; }
+
     /* TUI Shell */
     #app {
       display: grid; grid-template-rows: auto 1fr auto auto;

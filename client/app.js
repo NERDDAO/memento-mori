@@ -5745,6 +5745,7 @@ function createCodexModal(getState, playerId) {
   let _codexData = null;
   let _selectedId = null;
   let _allEntities = [];
+  let _detailPage = 0;
   function close() {
     backdrop.style.display = "none";
   }
@@ -5890,11 +5891,62 @@ function createCodexModal(getState, playerId) {
     const detail = document.createElement("div");
     detail.style.flex = "1";
     detail.style.minWidth = "0";
-    detail.style.overflowY = "auto";
+    detail.style.display = "flex";
+    detail.style.flexDirection = "column";
     detail.style.padding = "8px 12px";
     const selected = _allEntities.find((e) => e.id === _selectedId);
     if (selected) {
-      renderDetail(detail, selected);
+      const sections = [];
+      renderDetailSections(sections, selected);
+      const SECTIONS_PER_PAGE = 4;
+      const totalPages = Math.max(1, Math.ceil(sections.length / SECTIONS_PER_PAGE));
+      _detailPage = Math.min(_detailPage, totalPages - 1);
+      const contentArea = document.createElement("div");
+      contentArea.style.flex = "1";
+      contentArea.style.overflowY = "hidden";
+      const start = _detailPage * SECTIONS_PER_PAGE;
+      const pageSections = sections.slice(start, start + SECTIONS_PER_PAGE);
+      for (const sec of pageSections) {
+        contentArea.appendChild(sec);
+      }
+      detail.appendChild(contentArea);
+      if (totalPages > 1) {
+        const pager = document.createElement("div");
+        pager.style.display = "flex";
+        pager.style.justifyContent = "center";
+        pager.style.alignItems = "center";
+        pager.style.gap = "12px";
+        pager.style.padding = "6px 0 2px";
+        pager.style.borderTop = "1px solid #1a1a24";
+        pager.style.color = "#6a6a78";
+        pager.style.fontSize = "11px";
+        const prev = document.createElement("span");
+        prev.textContent = "◀";
+        prev.style.cursor = _detailPage > 0 ? "pointer" : "default";
+        prev.style.color = _detailPage > 0 ? "#8b5cf6" : "#3a3a48";
+        if (_detailPage > 0) {
+          prev.addEventListener("click", () => {
+            _detailPage--;
+            render();
+          });
+        }
+        const info = document.createElement("span");
+        info.textContent = `${_detailPage + 1}/${totalPages}`;
+        const next = document.createElement("span");
+        next.textContent = "▶";
+        next.style.cursor = _detailPage < totalPages - 1 ? "pointer" : "default";
+        next.style.color = _detailPage < totalPages - 1 ? "#8b5cf6" : "#3a3a48";
+        if (_detailPage < totalPages - 1) {
+          next.addEventListener("click", () => {
+            _detailPage++;
+            render();
+          });
+        }
+        pager.appendChild(prev);
+        pager.appendChild(info);
+        pager.appendChild(next);
+        detail.appendChild(pager);
+      }
     } else {
       detail.style.color = "#6a6a78";
       detail.style.fontStyle = "italic";
@@ -5934,27 +5986,36 @@ function createCodexModal(getState, playerId) {
     item.textContent = prefix + entity.name;
     item.addEventListener("click", () => {
       _selectedId = entity.id;
+      _detailPage = 0;
       render();
     });
     return item;
   }
-  function renderDetail(container, entity) {
+  function renderDetailSections(sections, entity) {
+    const container = { appendChild(el) {
+      sections.push(el);
+    } };
+    renderDetailInto(container, entity);
+  }
+  function renderDetailInto(container, entity) {
+    const attrs = entity.attributes || {};
+    const headerSection = document.createElement("div");
+    headerSection.style.marginBottom = "8px";
     const name = document.createElement("div");
     name.style.color = entityColor(entity);
     name.style.fontWeight = "bold";
     name.style.fontSize = "15px";
     name.style.marginBottom = "4px";
     name.textContent = entity.name;
-    container.appendChild(name);
+    headerSection.appendChild(name);
     if (entity.labels.length) {
       const labels = document.createElement("div");
       labels.style.color = "#6a6a78";
       labels.style.fontSize = "10px";
       labels.style.marginBottom = "8px";
       labels.textContent = entity.labels.join(" · ");
-      container.appendChild(labels);
+      headerSection.appendChild(labels);
     }
-    const attrs = entity.attributes || {};
     let summaryText = entity.summary || "";
     if (summaryText.startsWith("{")) {
       summaryText = attrs.description || attrs.personality || "";
@@ -5966,10 +6027,10 @@ function createCodexModal(getState, playerId) {
       const summary = document.createElement("div");
       summary.style.color = "#c8c8d0";
       summary.style.lineHeight = "1.5";
-      summary.style.marginBottom = "12px";
       summary.textContent = summaryText;
-      container.appendChild(summary);
+      headerSection.appendChild(summary);
     }
+    container.appendChild(headerSection);
     if (Object.keys(attrs).length > 0) {
       if (entity.type === "npc") {
         if (attrs.personality)
