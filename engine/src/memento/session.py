@@ -273,6 +273,19 @@ class SessionManager:
         except Exception:
             logger.debug("Location lookup failed for %s", player_id)
 
+        # Fallback: if no room_map found, use The Threshold's map
+        if not room_map:
+            try:
+                from memento.seed import seed_threshold, THRESHOLD_MAP
+                seed_result = seed_threshold()
+                threshold_uuid = seed_result.get("uuid", "")
+                if threshold_uuid:
+                    THRESHOLD_MAP["id"] = threshold_uuid
+                    room_map = dict(THRESHOLD_MAP)
+                    location_name = "The Threshold"
+            except Exception:
+                logger.debug("Threshold map fallback failed")
+
         # Get inventory
         inventory = []
         try:
