@@ -8,6 +8,7 @@ REDSTONE_RPC = os.getenv("REDSTONE_RPC", "http://localhost:8545")
 MUD_WORLD_ADDRESS = os.getenv("MUD_WORLD_ADDRESS", "")
 ENGINE_PRIVATE_KEY = os.getenv("ENGINE_PRIVATE_KEY", "")
 CHAIN_ENABLED = bool(MUD_WORLD_ADDRESS and ENGINE_PRIVATE_KEY)
+MUD_INDEXER_URL = os.getenv("MUD_INDEXER_URL", "http://localhost:3333")
 
 PINATA_JWT = os.getenv("PINATA_JWT", "")
 IPFS_ENABLED = bool(PINATA_JWT)
