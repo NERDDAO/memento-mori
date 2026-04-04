@@ -3,10 +3,33 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from memento.bonfires_client import get_client
 from memento.log import get_logger
 
 logger = get_logger(__name__)
+
+# World manifest — stores known entity UUIDs so we never need text search
+_WORLD_FILE = Path(__file__).parent.parent.parent.parent / "world.json"
+
+
+def _load_world() -> dict:
+    """Load world manifest from world.json."""
+    try:
+        if _WORLD_FILE.exists():
+            return json.loads(_WORLD_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _save_world(data: dict) -> None:
+    """Save world manifest to world.json."""
+    try:
+        _WORLD_FILE.write_text(json.dumps(data, indent=2) + "\n")
+    except Exception as e:
+        logger.warning("Failed to save world.json: %s", e)
 
 
 # The Threshold — the one predefined room every player starts in
@@ -54,20 +77,42 @@ THRESHOLD_MAP["tiles"][(_H - 1) * _W + 17] = "+"  # south entrance
 
 
 def seed_threshold() -> dict:
-    """Create The Threshold in the KG if it doesn't exist. Returns the entity UUID."""
+    """Create The Threshold in the KG if it doesn't exist. Returns the entity UUID.
+
+    Uses world.json to cache the UUID — no text search needed after first creation.
+    """
     client = get_client()
 
-    # Check if it already exists
-    uuid = ""
-    result = client.kg.search("The Threshold Location", num_results=5)
-    entities = result.get("entities", result.get("nodes", []))
-    for entity in entities:
-        if entity.get("name") == "The Threshold" and "Location" in entity.get("labels", []):
-            uuid = entity.get("uuid", "")
-            logger.info("The Threshold already exists: %s", uuid)
-            break
+    # 1. Check world.json for cached UUID
+    world = _load_world()
+    uuid = world.get("threshold_uuid", "")
 
-    # Create if not found
+    # 2. If cached, verify it still exists in KG
+    if uuid:
+        try:
+            entity = client.kg.get_entity(uuid)
+            if entity and entity.get("name"):
+                logger.info("The Threshold (cached): %s", uuid)
+                THRESHOLD_MAP["id"] = uuid
+                # Still need to populate NPC/item entries below
+            else:
+                uuid = ""  # Entity gone, recreate
+        except Exception:
+            uuid = ""  # Entity not found, recreate
+
+    # 3. If not cached or gone, search KG as fallback
+    if not uuid:
+        try:
+            result = client.kg.search("The Threshold Location", num_results=5)
+            for entity in result.get("entities", result.get("nodes", [])):
+                if entity.get("name") == "The Threshold" and "Location" in entity.get("labels", []):
+                    uuid = entity.get("uuid", "")
+                    logger.info("The Threshold (found via search): %s", uuid)
+                    break
+        except Exception:
+            pass
+
+    # 4. Create if still not found
     if not uuid:
         uuid = client.kg.create_entity(
             "The Threshold",
@@ -124,13 +169,36 @@ def seed_threshold() -> dict:
 
     import time
 
+    # Merge cached NPC/item UUIDs for lookup
+    cached_npcs = world.get("npcs", {})
+    cached_items = world.get("items", {})
+    cached_entities = {**cached_npcs, **cached_items}
+
     def find_or_create(name: str, labels: list, summary: str) -> str:
-        """Find entity by name or create it. Returns UUID."""
-        result = client.kg.search(name, num_results=3)
-        for e in result.get("entities", result.get("nodes", [])):
-            if e.get("name") == name:
-                logger.info("Found existing: %s (%s)", name, e["uuid"])
-                return str(e["uuid"])
+        """Find entity by cached UUID, verify it exists, or create. Returns UUID."""
+        # 1. Check world.json cache
+        cached_uuid = cached_entities.get(name, "")
+        if cached_uuid:
+            try:
+                entity = client.kg.get_entity(cached_uuid)
+                if entity and entity.get("name"):
+                    logger.info("Found existing: %s (%s)", name, cached_uuid)
+                    return cached_uuid
+            except Exception:
+                pass  # Cached UUID stale, fall through
+
+        # 2. Text search fallback (first time only)
+        try:
+            result = client.kg.search(name, num_results=3)
+            for e in result.get("entities", result.get("nodes", [])):
+                if e.get("name") == name:
+                    found_uuid = str(e["uuid"])
+                    logger.info("Found existing: %s (%s)", name, found_uuid)
+                    return found_uuid
+        except Exception:
+            pass
+
+        # 3. Create new
         time.sleep(1)
         new_uuid = client.kg.create_entity(name, labels, {"summary": summary})
         logger.info("Created: %s (%s)", name, new_uuid)
@@ -210,6 +278,12 @@ def seed_threshold() -> dict:
         "summary": THRESHOLD_MAP["npcs"][0]["name"] if THRESHOLD_MAP["npcs"] else "",
         "room_map": json.dumps(THRESHOLD_MAP),
     }))
+
+    # Save all UUIDs to world.json for future lookups
+    world["threshold_uuid"] = uuid
+    world["npcs"] = {n["name"]: n["id"] for n in npc_entries}
+    world["items"] = {i["name"]: i["id"] for i in item_entries}
+    _save_world(world)
 
     return {"uuid": uuid, "map": THRESHOLD_MAP, "created": True}
 
