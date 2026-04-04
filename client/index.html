@@ -364,6 +364,34 @@
       background: none; border: 1px solid var(--border); color: var(--text-primary);
       padding: 8px 24px; font-family: inherit; cursor: pointer; margin-top: 16px;
     }
+    /* Loading overlay */
+    #loading-overlay {
+      position: fixed; inset: 0; background: var(--bg-primary);
+      display: flex; align-items: center; justify-content: center; z-index: 200;
+      flex-direction: column; gap: 16px;
+    }
+    .loading-dots::after { content: ''; animation: dots 1.5s steps(4,end) infinite; }
+
+    /* Intro overlay */
+    #intro-overlay {
+      position: fixed; inset: 0; background: var(--bg-primary);
+      display: flex; align-items: center; justify-content: center; z-index: 200;
+    }
+    .intro-content {
+      max-width: 480px; text-align: center; padding: 32px;
+    }
+    .intro-content h2 { margin-bottom: 16px; font-size: 18px; }
+    .intro-content p { color: var(--text-dim); line-height: 1.8; font-size: 14px; }
+    .intro-nav {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 32px;
+    }
+    .intro-nav button {
+      background: none; border: 1px solid var(--border); color: var(--text-primary);
+      padding: 6px 20px; font-family: inherit; cursor: pointer;
+    }
+    .intro-nav button:hover { border-color: var(--accent); }
+    #intro-dots { letter-spacing: 4px; }
     /* Status footer */
     .status-bar {
       display: flex; justify-content: space-between; align-items: center;
@@ -441,6 +469,9 @@
     .picker-name { display: block; }
     .picker-info { font-size: 0.85em; color: var(--text-dim); }
     .picker-new { border-style: dashed; text-align: center; }
+    .picker-memorial { opacity: 0.4; cursor: default; border-color: var(--text-damage); }
+    .picker-memorial .picker-name { color: var(--text-damage); }
+    .picker-memorial .picker-info { color: var(--text-dim); font-style: italic; }
   </style>
 </head>
 <body>
@@ -496,6 +527,31 @@
     <p class="death-cause" id="death-cause"></p>
     <p id="death-stats"></p>
     <button id="death-restart-btn">Begin Again</button>
+  </div>
+  <div id="loading-overlay" class="hidden">
+    <h1 style="color: var(--accent); font-size: 24px; letter-spacing: 4px;">MEMENTO MORI</h1>
+    <p class="loading-dots" style="color: var(--text-dim);">Entering the world</p>
+  </div>
+  <div id="intro-overlay" class="hidden">
+    <div class="intro-content">
+      <div class="intro-page" data-page="0">
+        <h2 style="color: var(--accent); letter-spacing: 2px;">WELCOME TO MEMENTO MORI</h2>
+        <p>A permadeath MUD where your actions shape a living world.<br>Every choice matters. Every death is final.</p>
+      </div>
+      <div class="intro-page hidden" data-page="1">
+        <h2 style="color: var(--accent); letter-spacing: 2px;">ROUNDS & ACTIONS</h2>
+        <p>Type commands in the input bar at the bottom.<br>Actions are batched into rounds. NPCs and the world respond to what you do.<br>Watch the status bar for the current round phase.</p>
+      </div>
+      <div class="intro-page hidden" data-page="2">
+        <h2 style="color: var(--accent); letter-spacing: 2px;">PERMADEATH</h2>
+        <p>When you die, it is permanent.<br>Your character becomes a memorial — a ghost in the world's history.<br>Connect your wallet to begin a new life.</p>
+      </div>
+      <div class="intro-nav">
+        <button id="intro-skip-btn">Skip</button>
+        <span id="intro-dots" style="color: var(--text-dim);"></span>
+        <button id="intro-next-btn">Next</button>
+      </div>
+    </div>
   </div>
   <script type="module" src="app.js"></script>
 </body>

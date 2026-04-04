@@ -169,7 +169,21 @@ async function initSession(playerName, walletAddress, archetype = "") {
   localStorage.setItem("mm_player_name", playerName);
   localStorage.setItem("mm_wallet", walletAddress);
   connectWebSocket();
-  return session;
+  return data;
+}
+async function joinSession(playerId) {
+  const resp = await fetch(`${GATEWAY_URL}/api/session/join`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ player_id: playerId })
+  });
+  const data = await resp.json();
+  session.playerId = data.player_id;
+  session.sessionId = data.session_id;
+  session.currentLocation = data.location;
+  localStorage.setItem("mm_player_id", session.playerId);
+  connectWebSocket();
+  return data;
 }
 function connectWebSocket() {
   ws = new WebSocket(`${WS_URL}/${session.playerId}`);
@@ -4748,6 +4762,7 @@ function renderPresentPanel(panel, state2, onAction) {
 function renderQuestLogPanel(panel, quests) {
   const cols = panel.cols;
   const cells = [];
+  panel.clearHitRegions();
   if (!quests || quests.length === 0) {
     cells.push(textRow("No active quests", theme.colors.dim, cols));
     panel.paint(cells);
@@ -4757,6 +4772,7 @@ function renderQuestLogPanel(panel, quests) {
     const q = quests[i];
     if (i > 0)
       cells.push(emptyRow(cols));
+    const questStartRow = cells.length;
     const nameSegs = [
       { text: q.name, fg: q.completed ? theme.colors.dim : theme.colors.primary, attrs: 1 }
     ];
@@ -4783,6 +4799,14 @@ function renderQuestLogPanel(panel, quests) {
       const desc = q.description.length > 60 ? q.description.slice(0, 57) + "..." : q.description;
       cells.push(textRow(desc, theme.colors.dim, cols));
     }
+    const questEndRow = cells.length;
+    panel.registerHitRegion({
+      col: 0,
+      row: questStartRow,
+      width: cols,
+      height: questEndRow - questStartRow,
+      data: { questName: q.name }
+    });
   }
   panel.paint(cells);
 }
@@ -5156,6 +5180,38 @@ function createDialog() {
         maxWidth: DIALOG_MAX_WIDTH,
         container: body,
         charDelay: 25,
+        lineClass: "tw-line",
+        cursorClass: "tw-cursor"
+      });
+      currentTw.onComplete(() => {
+        currentTw = null;
+      });
+      currentTw.start();
+    },
+    showQuest(quest) {
+      if (currentTw)
+        currentTw.cancel();
+      const status = quest.completed ? " [COMPLETE]" : "";
+      titleBar.textContent = `─ ${quest.name}${status} ─`;
+      body.innerHTML = "";
+      backdrop.style.display = "";
+      const lines = [];
+      if (quest.giver)
+        lines.push(`Quest giver: ${quest.giver}`);
+      lines.push("");
+      lines.push(quest.description);
+      lines.push("");
+      const filled = quest.totalStages > 0 ? Math.round(quest.currentStage / quest.totalStages * 10) : 0;
+      const bar = "█".repeat(Math.min(10, filled)) + "░".repeat(10 - Math.min(10, filled));
+      lines.push(`Progress: ${bar} ${quest.currentStage}/${quest.totalStages}`);
+      const text = lines.join(`
+`);
+      currentTw = createTypewriter({
+        text,
+        font: DIALOG_FONT,
+        maxWidth: DIALOG_MAX_WIDTH,
+        container: body,
+        charDelay: 15,
         lineClass: "tw-line",
         cursorClass: "tw-cursor"
       });
@@ -5613,6 +5669,137 @@ function formatAddress(addr) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
+// src/ui/overlay.ts
+function createOverlayManager(names) {
+  const elements = new Map;
+  const callbacks = new Map;
+  let currentName = null;
+  for (const name of names) {
+    const el = document.getElementById(`${name}-overlay`);
+    if (el)
+      elements.set(name, el);
+    callbacks.set(name, []);
+  }
+  function show(name) {
+    if (currentName && currentName !== name) {
+      const prev = elements.get(currentName);
+      if (prev)
+        prev.classList.add("hidden");
+    }
+    const el = elements.get(name);
+    if (el) {
+      el.classList.remove("hidden");
+      currentName = name;
+    }
+  }
+  function dismiss(name) {
+    const el = elements.get(name);
+    if (el)
+      el.classList.add("hidden");
+    if (currentName === name)
+      currentName = null;
+    for (const cb of callbacks.get(name) || [])
+      cb();
+  }
+  function onDismiss(name, cb) {
+    const list = callbacks.get(name);
+    if (list)
+      list.push(cb);
+  }
+  return {
+    show,
+    dismiss,
+    onDismiss,
+    current: () => currentName
+  };
+}
+
+// src/flows/session-flow.ts
+async function startGame(config, overlays, callbacks) {
+  overlays.show("loading");
+  let data;
+  if (config.isReturning && config.playerId) {
+    const session2 = getSession();
+    session2.playerName = config.playerName;
+    session2.walletAddress = config.walletAddress;
+    localStorage.setItem("mm_player_name", config.playerName);
+    localStorage.setItem("mm_wallet", config.walletAddress);
+    data = await joinSession(config.playerId);
+  } else {
+    data = await initSession(config.playerName, config.walletAddress, config.archetype || "");
+  }
+  const gameState = createInitialState(config.playerName);
+  gameState.location.name = data.location;
+  if (data.archetype)
+    gameState.player.archetype = data.archetype;
+  if (data.health)
+    gameState.player.health = data.health;
+  if (data.max_health)
+    gameState.player.maxHealth = data.max_health;
+  if (data.skills)
+    gameState.player.skills = data.skills;
+  if (data.room_map)
+    applyStateUpdate(gameState, { room_map: data.room_map });
+  if (data.inventory) {
+    gameState.inventory = data.inventory.map((name) => ({ name, rarity: "common", equipped: false }));
+  }
+  await new Promise((resolve) => {
+    const session2 = getSession();
+    if (session2.connected) {
+      resolve();
+      return;
+    }
+    setConnectionHandler((connected) => {
+      if (connected)
+        resolve();
+    });
+  });
+  overlays.dismiss("loading");
+  if (!localStorage.getItem("mm_intro_seen")) {
+    overlays.show("intro");
+    await new Promise((resolve) => {
+      initIntroNav(() => {
+        localStorage.setItem("mm_intro_seen", "true");
+        overlays.dismiss("intro");
+        resolve();
+      });
+    });
+  }
+  updateRoundState({ type: "phase", phase: "ready", location: data.location });
+  callbacks.onGameReady(gameState, data.opening_narrative || (config.isReturning ? `Welcome back, ${config.playerName}.` : ""));
+}
+function initIntroNav(onDone) {
+  const pages = document.querySelectorAll(".intro-page");
+  const dotsEl = document.getElementById("intro-dots");
+  const nextBtn = document.getElementById("intro-next-btn");
+  const skipBtn = document.getElementById("intro-skip-btn");
+  let current = 0;
+  const total = pages.length;
+  function updateDots() {
+    if (dotsEl) {
+      dotsEl.textContent = Array.from({ length: total }, (_, i) => i === current ? "●" : "○").join(" ");
+    }
+  }
+  function showPage(idx) {
+    pages.forEach((p, i) => {
+      p.classList.toggle("hidden", i !== idx);
+    });
+    current = idx;
+    updateDots();
+    if (nextBtn)
+      nextBtn.textContent = idx >= total - 1 ? "Begin" : "Next";
+  }
+  nextBtn?.addEventListener("click", () => {
+    if (current >= total - 1) {
+      onDone();
+    } else {
+      showPage(current + 1);
+    }
+  });
+  skipBtn?.addEventListener("click", () => onDone());
+  showPage(0);
+}
+
 // src/app.ts
 var gameState;
 var narrative;
@@ -5631,6 +5818,7 @@ var presentWin;
 var questWin;
 var factionWin;
 var commandWin;
+var overlays;
 function registerMapEntities(map) {
   if (!map)
     return;
@@ -5660,51 +5848,6 @@ function renderAllPanels() {
     wiki.show(gameState.roomMap.id, gameState.roomMap.name);
   }
 }
-function getThresholdMap() {
-  const w = 35, h = 18;
-  const tiles = [];
-  for (let y = 0;y < h; y++) {
-    for (let x = 0;x < w; x++) {
-      if (y === 0 || y === h - 1 || x === 0 || x === w - 1)
-        tiles.push("#");
-      else if (x >= 5 && x <= 7 && y >= 3 && y <= 7)
-        tiles.push("B");
-      else if (x === 12 && (y === 4 || y === 5) || x === 20 && (y === 4 || y === 5))
-        tiles.push("T");
-      else if (x === 12 && (y === 9 || y === 10) || x === 20 && (y === 9 || y === 10))
-        tiles.push("T");
-      else if (y === 14 && x >= 14 && x <= 20)
-        tiles.push(":");
-      else
-        tiles.push(".");
-    }
-  }
-  tiles[9 * w + (w - 1)] = "+";
-  tiles[0 * w + 17] = "+";
-  tiles[(h - 1) * w + 17] = "+";
-  return {
-    id: "c800dabf-b1ef-4033-a594-b1d7f80ee316",
-    name: "The Threshold",
-    width: w,
-    height: h,
-    tiles,
-    npcs: [
-      { x: 6, y: 5, ch: "G", name: "Grumlock Stonebrow", id: "7c167ff0-d4c1-479f-b61d-22f108213575" },
-      { x: 22, y: 6, ch: "R", name: "Roric the Sly", id: "d4566673-e13a-4adc-9e35-2f6e45750664" },
-      { x: 15, y: 10, ch: "E", name: "Elara Brightwood", id: "0b3dc518-1420-4741-8fb6-72e7e75ca370" }
-    ],
-    items: [
-      { x: 13, y: 9, ch: "?", name: "Tattered Journal", id: "8fe4b8d7-f31e-4cf5-ae64-e74c566e8c4a" },
-      { x: 28, y: 3, ch: "!", name: "Dull Iron Dagger", id: "306b569d-c2d6-4c02-8ad5-e881969827b4" }
-    ],
-    exits: [
-      { x: 34, y: 9, ch: "+", direction: "east", target: "The Fog Road" },
-      { x: 17, y: 0, ch: "+", direction: "north", target: "The Skeletal Woods" },
-      { x: 17, y: 17, ch: "+", direction: "south", target: "The Wastes" }
-    ],
-    spawn: { x: 17, y: 15 }
-  };
-}
 async function handleAction(action) {
   if (!action.trim() || action.length > 500)
     return;
@@ -5712,7 +5855,6 @@ async function handleAction(action) {
   await sendAction(action);
 }
 function showDeathScreen(cause) {
-  const overlay = document.getElementById("death-overlay");
   const causeEl = document.getElementById("death-cause");
   const statsEl = document.getElementById("death-stats");
   causeEl.textContent = cause || "The world continues without you.";
@@ -5721,7 +5863,7 @@ function showDeathScreen(cause) {
     <div>Level: ${gameState.player.level}</div>
     <div>Last Location: ${gameState.location.name}</div>
   ` : "";
-  overlay.classList.remove("hidden");
+  overlays.show("death");
 }
 function handleMessage(msg) {
   switch (msg.type) {
@@ -5889,52 +6031,50 @@ async function loadArchetypes() {
     container.innerHTML = '<div style="color:var(--text-dim)">Archetypes unavailable</div>';
   }
 }
-async function enterWorld(playerName, walletAddress) {
-  const overlay = document.getElementById("char-create-overlay");
-  overlay.classList.add("hidden");
-  const session2 = await initSession(playerName, walletAddress, selectedArchetype);
-  gameState = createInitialState(playerName);
-  gameState.location.name = session2.currentLocation;
-  if (session2.archetype)
-    gameState.player.archetype = session2.archetype;
-  if (session2.health)
-    gameState.player.health = session2.health;
-  if (session2.max_health)
-    gameState.player.maxHealth = session2.max_health;
-  if (session2.skills)
-    gameState.player.skills = session2.skills;
-  if (!gameState.roomMap) {
-    applyStateUpdate(gameState, { room_map: getThresholdMap() });
-  }
-  registerMapEntities(gameState.roomMap);
-  renderAllPanels();
-  narrative.addBlock(`Welcome, ${playerName}. You find yourself at ${session2.currentLocation}.`, "system");
-  if (session2.openingNarrative) {
-    narrative.addBlock(session2.openingNarrative, "narrative");
-  }
-  updateRoundState({ type: "phase", phase: "ready", location: session2.currentLocation });
-  document.getElementById("action-input").focus();
+function enterGame(config) {
+  startGame({ ...config }, overlays, {
+    onGameReady(state2, openingNarrative) {
+      gameState = state2;
+      if (gameState.roomMap)
+        registerMapEntities(gameState.roomMap);
+      renderAllPanels();
+      if (openingNarrative) {
+        narrative.addBlock(openingNarrative, config.isReturning ? "system" : "narrative");
+      }
+      document.getElementById("action-input").focus();
+    }
+  });
 }
 function showCharacterPicker(characters, walletAddress) {
   const walletStepEl = document.getElementById("wallet-step");
   const pickerDiv = document.createElement("div");
   pickerDiv.id = "char-picker";
-  pickerDiv.innerHTML = `
-    <div class="picker-title">Your Characters</div>
-    ${characters.map((c) => `
+  const alive = characters.filter((c) => !c.is_dead);
+  const dead = characters.filter((c) => c.is_dead);
+  let html = '<div class="picker-title">Your Characters</div>';
+  for (const c of alive) {
+    html += `
       <div class="picker-card" data-player-id="${c.player_id}">
         <span class="picker-name">${c.player_name}</span>
         <span class="picker-info">${c.archetype || "Unknown"} · HP ${c.health}</span>
-      </div>
-    `).join("")}
+      </div>`;
+  }
+  for (const c of dead) {
+    html += `
+      <div class="picker-card picker-memorial">
+        <span class="picker-name">☠ ${c.player_name}</span>
+        <span class="picker-info">${c.death_cause || "Perished"} · Fell at ${c.death_location || "unknown"}</span>
+      </div>`;
+  }
+  html += `
     <div class="picker-card picker-new">
       <span class="picker-name">+ New Character</span>
-    </div>
-  `;
+    </div>`;
+  pickerDiv.innerHTML = html;
   walletStepEl.after(pickerDiv);
   pickerDiv.addEventListener("click", (e) => {
     const card = e.target.closest(".picker-card");
-    if (!card)
+    if (!card || card.classList.contains("picker-memorial"))
       return;
     if (card.classList.contains("picker-new")) {
       pickerDiv.remove();
@@ -5949,32 +6089,10 @@ function showCharacterPicker(characters, walletAddress) {
       const playerId = card.dataset.playerId;
       const playerName = card.querySelector(".picker-name").textContent || "Wanderer";
       pickerDiv.remove();
-      enterWorldExisting(playerId, playerName, walletAddress);
+      overlays.dismiss("char-create");
+      enterGame({ playerName, walletAddress, isReturning: true, playerId });
     }
   });
-}
-async function enterWorldExisting(playerId, playerName, walletAddress) {
-  const overlay = document.getElementById("char-create-overlay");
-  overlay.classList.add("hidden");
-  await fetch(`${GATEWAY_URL}/api/session/join`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ player_id: playerId })
-  });
-  const session2 = getSession();
-  session2.playerId = playerId;
-  session2.playerName = playerName;
-  session2.walletAddress = walletAddress;
-  session2.currentLocation = "The Threshold";
-  gameState = createInitialState(playerName);
-  if (!gameState.roomMap) {
-    applyStateUpdate(gameState, { room_map: getThresholdMap() });
-  }
-  registerMapEntities(gameState.roomMap);
-  renderAllPanels();
-  narrative.addBlock(`Welcome back, ${playerName}.`, "system");
-  updateRoundState({ type: "phase", phase: "ready", location: session2.currentLocation });
-  document.getElementById("action-input").focus();
 }
 function mount(mountId, el) {
   const mountEl = document.getElementById(mountId);
@@ -6007,6 +6125,7 @@ document.addEventListener("DOMContentLoaded", () => {
   mount("command-mount", commandWin.el);
   statusBar = createStatusBar();
   mount("status-mount", statusBar.el);
+  overlays = createOverlayManager(["char-create", "death", "loading", "intro"]);
   exitsWin.panel.canvas.addEventListener("panel-click", (e) => {
     const detail = e.detail;
     if (detail.action)
@@ -6016,6 +6135,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const detail = e.detail;
     if (detail.action)
       handleAction(detail.action);
+  });
+  questWin.panel.canvas.addEventListener("panel-click", (e) => {
+    const detail = e.detail;
+    if (detail.questName && gameState) {
+      const quest = gameState.quests.find((q) => q.name === detail.questName);
+      if (quest)
+        npcDialog.showQuest(quest);
+    }
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "m" && document.activeElement?.tagName !== "INPUT") {
@@ -6105,8 +6232,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   document.getElementById("death-restart-btn").addEventListener("click", () => {
-    document.getElementById("death-overlay").classList.add("hidden");
-    document.getElementById("char-create-overlay").classList.remove("hidden");
+    overlays.dismiss("death");
+    overlays.show("char-create");
     narrative = initNarrative(narrativeWin.body);
     narrative.canvas.addEventListener("narrative-entity-click", (e) => {
       const { entityId, entityName } = e.detail;
@@ -6173,15 +6300,19 @@ document.addEventListener("DOMContentLoaded", () => {
   enterBtn.addEventListener("click", () => {
     const name = nameInput.value.trim() || "Wanderer";
     const wallet = getAddress();
-    if (wallet)
-      enterWorld(name, wallet);
+    if (wallet) {
+      overlays.dismiss("char-create");
+      enterGame({ playerName: name, walletAddress: wallet, isReturning: false, archetype: selectedArchetype });
+    }
   });
   nameInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       const name = nameInput.value.trim() || "Wanderer";
       const wallet = getAddress();
-      if (wallet)
-        enterWorld(name, wallet);
+      if (wallet) {
+        overlays.dismiss("char-create");
+        enterGame({ playerName: name, walletAddress: wallet, isReturning: false, archetype: selectedArchetype });
+      }
     }
   });
 });

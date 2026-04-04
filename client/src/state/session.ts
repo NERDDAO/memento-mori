@@ -41,13 +41,26 @@ export function setMessageHandler(handler: (msg: any) => void): void {
   onMessage = handler;
 }
 
-export async function initSession(playerName: string, walletAddress: string, archetype: string = ''): Promise<Session> {
+export interface SessionCreateResponse {
+  player_id: string;
+  session_id: string;
+  location: string;
+  opening_narrative?: string;
+  archetype?: string;
+  health?: number;
+  max_health?: number;
+  skills?: Record<string, number>;
+  inventory?: string[];
+  room_map?: any;
+}
+
+export async function initSession(playerName: string, walletAddress: string, archetype: string = ''): Promise<SessionCreateResponse> {
   const resp = await fetch(`${GATEWAY_URL}/api/session/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ player_name: playerName, wallet_address: walletAddress, archetype }),
   });
-  const data = await resp.json();
+  const data: SessionCreateResponse = await resp.json();
   session.playerId = data.player_id;
   session.sessionId = data.session_id;
   session.playerName = playerName;
@@ -60,7 +73,25 @@ export async function initSession(playerName: string, walletAddress: string, arc
   localStorage.setItem('mm_wallet', walletAddress);
 
   connectWebSocket();
-  return session;
+  return data;
+}
+
+export async function joinSession(playerId: string): Promise<SessionCreateResponse> {
+  const resp = await fetch(`${GATEWAY_URL}/api/session/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ player_id: playerId }),
+  });
+  const data: SessionCreateResponse = await resp.json();
+
+  session.playerId = data.player_id;
+  session.sessionId = data.session_id;
+  session.currentLocation = data.location;
+
+  localStorage.setItem('mm_player_id', session.playerId);
+
+  connectWebSocket();
+  return data;
 }
 
 function connectWebSocket(): void {

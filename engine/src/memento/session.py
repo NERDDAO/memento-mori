@@ -154,22 +154,115 @@ class SessionManager:
             for edge in edges:
                 target = edge.get("target", {})
                 if "Player" in target.get("labels", []):
-                    characters.append({
-                        "player_id": target.get("uuid", target.get("id", "")),
+                    player_id = target.get("uuid", target.get("id", ""))
+                    char_info = {
+                        "player_id": player_id,
                         "player_name": target.get("name", "Unknown"),
                         "archetype": target.get("archetype", ""),
                         "health": int(target.get("health", 100)),
-                    })
+                        "is_dead": False,
+                        "death_cause": "",
+                        "death_location": "",
+                    }
+
+                    # Check for death status
+                    try:
+                        status_edges = client.kg.get_edges(player_id, direction="outgoing", edge_type="HAS_STATUS")
+                        for se in status_edges:
+                            label = se.get("label", "")
+                            if "DEAD" in label:
+                                char_info["is_dead"] = True
+                                char_info["death_cause"] = label.replace("DEAD. ", "")
+                                break
+                        if char_info["is_dead"]:
+                            died_edges = client.kg.get_edges(player_id, direction="outgoing", edge_type="DIED_AT")
+                            for de in died_edges:
+                                death_target = de.get("target", {})
+                                char_info["death_location"] = death_target.get("name", "unknown")
+                                break
+                    except Exception:
+                        logger.debug("Death check failed for %s", player_id)
+
+                    characters.append(char_info)
             return characters
         except Exception:
             logger.warning("Failed to query user characters", exc_info=True)
             return []
 
+    def restore_player_state(self, player_id: str) -> dict:
+        """Restore full game state for a returning player.
+
+        Returns: {player_id, player_name, location_name, health, max_health, skills, inventory, room_map}
+        """
+        client = get_client()
+
+        # Get player entity
+        try:
+            entity = client.kg.get_entity(player_id)
+        except Exception:
+            logger.warning("Failed to get player entity %s", player_id, exc_info=True)
+            return {"player_id": player_id, "location_name": "The Threshold"}
+
+        player_name = entity.get("name", "Unknown")
+        health = int(entity.get("health", 100))
+        max_health = int(entity.get("max_health", 100))
+        archetype = entity.get("archetype", "")
+        skills = {}
+        try:
+            skills = json.loads(entity.get("skills", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # Get location
+        location_name = "The Threshold"
+        room_map = None
+        try:
+            loc_edges = client.kg.get_edges(player_id, direction="outgoing", edge_type="LOCATED_IN")
+            for le in loc_edges:
+                loc_target = le.get("target", {})
+                if "Location" in loc_target.get("labels", []):
+                    location_name = loc_target.get("name", "The Threshold")
+                    loc_uuid = loc_target.get("uuid", loc_target.get("id", ""))
+                    # Try to get room_map from location entity
+                    if loc_uuid:
+                        try:
+                            loc_entity = client.kg.get_entity(loc_uuid)
+                            rm_raw = loc_entity.get("room_map")
+                            if rm_raw:
+                                room_map = json.loads(rm_raw) if isinstance(rm_raw, str) else rm_raw
+                        except Exception:
+                            pass
+                    break
+        except Exception:
+            logger.debug("Location lookup failed for %s", player_id)
+
+        # Get inventory
+        inventory = []
+        try:
+            carry_edges = client.kg.get_edges(player_id, direction="outgoing", edge_type="CARRIES")
+            for ce in carry_edges:
+                item = ce.get("target", {})
+                inventory.append(item.get("name", "Unknown Item"))
+        except Exception:
+            logger.debug("Inventory lookup failed for %s", player_id)
+
+        return {
+            "player_id": player_id,
+            "player_name": player_name,
+            "location_name": location_name,
+            "health": health,
+            "max_health": max_health,
+            "archetype": archetype,
+            "skills": skills,
+            "inventory": inventory,
+            "room_map": room_map,
+        }
+
     def _find_starting_location(self) -> str:
-        """Find an existing location or return a default.
+        """Find an existing location or seed The Threshold.
 
         Searches KG for locations, preferring ones with room_map data.
-        Falls back to The Threshold.
+        If no locations exist, auto-seeds The Threshold.
         """
         client = get_client()
         try:
@@ -179,8 +272,17 @@ class SessionManager:
                 labels = entity.get("labels", [])
                 if "Location" in labels:
                     return entity.get("name", "The Threshold")
+        except Exception:
+            pass
+
+        # No locations found — seed The Threshold
+        try:
+            from memento.seed import seed_threshold
+            seed_result = seed_threshold()
+            logger.info("Auto-seeded The Threshold: %s", seed_result.get("uuid", ""))
             return "The Threshold"
         except Exception:
+            logger.warning("Auto-seed of The Threshold failed", exc_info=True)
             return "The Threshold"
 
     def _generate_opening(self, player_name: str, location_name: str) -> str:

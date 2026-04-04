@@ -5,7 +5,7 @@
  */
 
 import { createInitialState, applyStateUpdate, type GameState } from './state/game-state';
-import { getSession, initSession, sendAction, setMessageHandler, setConnectionHandler, GATEWAY_URL } from './state/session';
+import { getSession, sendAction, setMessageHandler, setConnectionHandler, GATEWAY_URL } from './state/session';
 import { updateRoundState, type PhaseMessage } from './state/round-state';
 import { setKnownEntities } from './renderer/text-renderer';
 import { initNarrative, type NarrativeController } from './panels/narrative';
@@ -26,6 +26,8 @@ import { createWikiPanel } from './ui/wiki';
 import { createStatusBar } from './ui/status';
 import { hasProvider, connectWallet, formatAddress, getAddress } from './chain/wallet';
 import type { RoomMap } from './map/types';
+import { createOverlayManager, type OverlayManager } from './ui/overlay';
+import { startGame } from './flows/session-flow';
 
 let gameState: GameState;
 let narrative: NarrativeController;
@@ -45,6 +47,7 @@ let presentWin: ReturnType<typeof createWindow>;
 let questWin: ReturnType<typeof createWindow>;
 let factionWin: ReturnType<typeof createWindow>;
 let commandWin: ReturnType<typeof createWindow>;
+let overlays: OverlayManager;
 
 // --- Entity registration for narrative highlighting ---
 function registerMapEntities(map: import('./map/types').RoomMap | null): void {
@@ -76,49 +79,6 @@ function renderAllPanels(): void {
   }
 }
 
-// Temporary test map — remove once engine sends real maps
-function getThresholdMap(): RoomMap {
-  // The Threshold — seeded room with real KG entity UUIDs
-  const w = 35, h = 18;
-  const tiles: string[] = [];
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (y === 0 || y === h - 1 || x === 0 || x === w - 1) tiles.push('#');
-      else if (x >= 5 && x <= 7 && y >= 3 && y <= 7) tiles.push('B');
-      else if ((x === 12 && (y === 4 || y === 5)) || (x === 20 && (y === 4 || y === 5))) tiles.push('T');
-      else if ((x === 12 && (y === 9 || y === 10)) || (x === 20 && (y === 9 || y === 10))) tiles.push('T');
-      else if (y === 14 && x >= 14 && x <= 20) tiles.push(':');
-      else tiles.push('.');
-    }
-  }
-  tiles[9 * w + (w - 1)] = '+';   // east exit
-  tiles[0 * w + 17] = '+';         // north exit
-  tiles[(h - 1) * w + 17] = '+';   // south entrance
-
-  return {
-    id: 'c800dabf-b1ef-4033-a594-b1d7f80ee316',
-    name: 'The Threshold',
-    width: w,
-    height: h,
-    tiles,
-    npcs: [
-      { x: 6, y: 5, ch: 'G', name: 'Grumlock Stonebrow', id: '7c167ff0-d4c1-479f-b61d-22f108213575' },
-      { x: 22, y: 6, ch: 'R', name: 'Roric the Sly', id: 'd4566673-e13a-4adc-9e35-2f6e45750664' },
-      { x: 15, y: 10, ch: 'E', name: 'Elara Brightwood', id: '0b3dc518-1420-4741-8fb6-72e7e75ca370' },
-    ],
-    items: [
-      { x: 13, y: 9, ch: '?', name: 'Tattered Journal', id: '8fe4b8d7-f31e-4cf5-ae64-e74c566e8c4a' },
-      { x: 28, y: 3, ch: '!', name: 'Dull Iron Dagger', id: '306b569d-c2d6-4c02-8ad5-e881969827b4' },
-    ],
-    exits: [
-      { x: 34, y: 9, ch: '+', direction: 'east', target: 'The Fog Road' },
-      { x: 17, y: 0, ch: '+', direction: 'north', target: 'The Skeletal Woods' },
-      { x: 17, y: 17, ch: '+', direction: 'south', target: 'The Wastes' },
-    ],
-    spawn: { x: 17, y: 15 },
-  };
-}
-
 // --- Action handling ---
 async function handleAction(action: string): Promise<void> {
   if (!action.trim() || action.length > 500) return;
@@ -128,7 +88,6 @@ async function handleAction(action: string): Promise<void> {
 
 // --- Death screen ---
 function showDeathScreen(cause: string): void {
-  const overlay = document.getElementById('death-overlay')!;
   const causeEl = document.getElementById('death-cause')!;
   const statsEl = document.getElementById('death-stats')!;
 
@@ -139,7 +98,7 @@ function showDeathScreen(cause: string): void {
     <div>Last Location: ${gameState.location.name}</div>
   ` : '';
 
-  overlay.classList.remove('hidden');
+  overlays.show('death');
 }
 
 // --- WebSocket message handling ---
@@ -323,33 +282,27 @@ async function loadArchetypes(): Promise<void> {
   }
 }
 
-// --- Character creation ---
-async function enterWorld(playerName: string, walletAddress: string): Promise<void> {
-  const overlay = document.getElementById('char-create-overlay')!;
-  overlay.classList.add('hidden');
-
-  const session = await initSession(playerName, walletAddress, selectedArchetype);
-  gameState = createInitialState(playerName);
-  gameState.location.name = session.currentLocation;
-  // Apply archetype data from session response
-  if ((session as any).archetype) gameState.player.archetype = (session as any).archetype;
-  if ((session as any).health) gameState.player.health = (session as any).health;
-  if ((session as any).max_health) gameState.player.maxHealth = (session as any).max_health;
-  if ((session as any).skills) gameState.player.skills = (session as any).skills;
-
-  if (!gameState.roomMap) {
-    applyStateUpdate(gameState, { room_map: getThresholdMap() });
-  }
-  registerMapEntities(gameState.roomMap);
-  renderAllPanels();
-  narrative.addBlock(`Welcome, ${playerName}. You find yourself at ${session.currentLocation}.`, 'system');
-
-  if (session.openingNarrative) {
-    narrative.addBlock(session.openingNarrative, 'narrative');
-  }
-
-  updateRoundState({ type: 'phase', phase: 'ready', location: session.currentLocation });
-  (document.getElementById('action-input') as HTMLInputElement).focus();
+// --- Enter game (new or returning) ---
+function enterGame(config: { playerName: string; walletAddress: string; isReturning: boolean; playerId?: string; archetype?: string }): void {
+  startGame(
+    { ...config },
+    overlays,
+    {
+      onGameReady(state, openingNarrative) {
+        gameState = state;
+        if (gameState.roomMap) registerMapEntities(gameState.roomMap);
+        renderAllPanels();
+        if (openingNarrative) {
+          narrative.addBlock(openingNarrative, config.isReturning ? 'system' : 'narrative');
+        }
+        (document.getElementById('action-input') as HTMLInputElement).focus();
+      },
+    },
+  ).catch((err) => {
+    console.error('startGame failed:', err);
+    overlays.dismiss('loading');
+    overlays.show('char-create');
+  });
 }
 
 // --- Character picker (returning players) ---
@@ -357,23 +310,41 @@ function showCharacterPicker(characters: any[], walletAddress: string): void {
   const walletStepEl = document.getElementById('wallet-step')!;
   const pickerDiv = document.createElement('div');
   pickerDiv.id = 'char-picker';
-  pickerDiv.innerHTML = `
-    <div class="picker-title">Your Characters</div>
-    ${characters.map((c: any) => `
+
+  const alive = characters.filter((c: any) => !c.is_dead);
+  const dead = characters.filter((c: any) => c.is_dead);
+
+  let html = '<div class="picker-title">Your Characters</div>';
+
+  // Living characters
+  for (const c of alive) {
+    html += `
       <div class="picker-card" data-player-id="${c.player_id}">
         <span class="picker-name">${c.player_name}</span>
         <span class="picker-info">${c.archetype || 'Unknown'} \u00B7 HP ${c.health}</span>
-      </div>
-    `).join('')}
+      </div>`;
+  }
+
+  // Memorial (dead) characters
+  for (const c of dead) {
+    html += `
+      <div class="picker-card picker-memorial">
+        <span class="picker-name">\u2620 ${c.player_name}</span>
+        <span class="picker-info">${c.death_cause || 'Perished'} \u00B7 Fell at ${c.death_location || 'unknown'}</span>
+      </div>`;
+  }
+
+  html += `
     <div class="picker-card picker-new">
       <span class="picker-name">+ New Character</span>
-    </div>
-  `;
+    </div>`;
+
+  pickerDiv.innerHTML = html;
   walletStepEl.after(pickerDiv);
 
   pickerDiv.addEventListener('click', (e: MouseEvent) => {
     const card = (e.target as HTMLElement).closest('.picker-card') as HTMLElement | null;
-    if (!card) return;
+    if (!card || card.classList.contains('picker-memorial')) return;
     if (card.classList.contains('picker-new')) {
       pickerDiv.remove();
       const archStep = document.getElementById('archetype-step');
@@ -387,36 +358,10 @@ function showCharacterPicker(characters: any[], walletAddress: string): void {
       const playerId = card.dataset.playerId!;
       const playerName = card.querySelector('.picker-name')!.textContent || 'Wanderer';
       pickerDiv.remove();
-      enterWorldExisting(playerId, playerName, walletAddress);
+      overlays.dismiss('char-create');
+      enterGame({ playerName, walletAddress, isReturning: true, playerId });
     }
   });
-}
-
-async function enterWorldExisting(playerId: string, playerName: string, walletAddress: string): Promise<void> {
-  const overlay = document.getElementById('char-create-overlay')!;
-  overlay.classList.add('hidden');
-
-  await fetch(`${GATEWAY_URL}/api/session/join`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ player_id: playerId }),
-  });
-
-  const session = getSession();
-  session.playerId = playerId;
-  session.playerName = playerName;
-  session.walletAddress = walletAddress;
-  session.currentLocation = 'The Threshold';
-
-  gameState = createInitialState(playerName);
-  if (!gameState.roomMap) {
-    applyStateUpdate(gameState, { room_map: getThresholdMap() });
-  }
-  registerMapEntities(gameState.roomMap);
-  renderAllPanels();
-  narrative.addBlock(`Welcome back, ${playerName}.`, 'system');
-  updateRoundState({ type: 'phase', phase: 'ready', location: session.currentLocation });
-  (document.getElementById('action-input') as HTMLInputElement).focus();
 }
 
 // --- Helper: replace a mount div with a component element ---
@@ -461,6 +406,9 @@ document.addEventListener('DOMContentLoaded', () => {
   statusBar = createStatusBar();
   mount('status-mount', statusBar.el);
 
+  // Overlay manager
+  overlays = createOverlayManager(['char-create', 'death', 'loading', 'intro']);
+
   // Wire up panel-click events for interactive panels
   exitsWin.panel!.canvas.addEventListener('panel-click', (e: Event) => {
     const detail = (e as CustomEvent).detail;
@@ -469,6 +417,13 @@ document.addEventListener('DOMContentLoaded', () => {
   presentWin.panel!.canvas.addEventListener('panel-click', (e: Event) => {
     const detail = (e as CustomEvent).detail;
     if (detail.action) handleAction(detail.action);
+  });
+  questWin.panel!.canvas.addEventListener('panel-click', (e: Event) => {
+    const detail = (e as CustomEvent).detail;
+    if (detail.questName && gameState) {
+      const quest = gameState.quests.find(q => q.name === detail.questName);
+      if (quest) npcDialog.showQuest(quest);
+    }
   });
 
   // 4. Map toggle with 'm' key (not when input focused)
@@ -579,9 +534,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 10. Death screen — new character button
   document.getElementById('death-restart-btn')!.addEventListener('click', () => {
-    document.getElementById('death-overlay')!.classList.add('hidden');
-    document.getElementById('char-create-overlay')!.classList.remove('hidden');
-    // Reinitialize narrative canvas for new character
+    overlays.dismiss('death');
+    overlays.show('char-create');
     narrative = initNarrative(narrativeWin.body);
     narrative.canvas.addEventListener('narrative-entity-click', (e: Event) => {
       const { entityId, entityName } = (e as CustomEvent).detail;
@@ -658,14 +612,20 @@ document.addEventListener('DOMContentLoaded', () => {
   enterBtn.addEventListener('click', () => {
     const name = nameInput.value.trim() || 'Wanderer';
     const wallet = getAddress();
-    if (wallet) enterWorld(name, wallet);
+    if (wallet) {
+      overlays.dismiss('char-create');
+      enterGame({ playerName: name, walletAddress: wallet, isReturning: false, archetype: selectedArchetype });
+    }
   });
 
   nameInput.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Enter') {
       const name = nameInput.value.trim() || 'Wanderer';
       const wallet = getAddress();
-      if (wallet) enterWorld(name, wallet);
+      if (wallet) {
+        overlays.dismiss('char-create');
+        enterGame({ playerName: name, walletAddress: wallet, isReturning: false, archetype: selectedArchetype });
+      }
     }
   });
 });
