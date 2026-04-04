@@ -312,7 +312,6 @@ class SessionManager:
             logger.warning("seed_threshold failed", exc_info=True)
 
         return "The Threshold", None
-            return "The Threshold"
 
     def _generate_opening(self, player_name: str, location_name: str) -> str:
         """Generate opening narration for a new player."""
