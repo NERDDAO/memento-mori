@@ -83,14 +83,16 @@ def get_inventory_manifest(player_uuid: str) -> dict[str, Any]:
         logger.warning("Failed to query CARRIES edges for %s", player_uuid)
         return _empty_manifest()
 
+    seen_item_ids: set[str] = set()
     for edge in edges:
         if _is_expired(edge):
             continue
 
         target = edge.get("target", {})
         item_uuid = target.get("uuid", target.get("id", ""))
-        if not item_uuid:
+        if not item_uuid or item_uuid in seen_item_ids:
             continue
+        seen_item_ids.add(item_uuid)
 
         # Fetch full entity for metadata
         try:
@@ -111,7 +113,7 @@ def get_inventory_manifest(player_uuid: str) -> dict[str, Any]:
         if not slot_type:
             if labels & {"Weapon"}:
                 slot_type = "weapon"
-            elif labels & {"Armor"}:
+            elif labels & {"Armor", "Shield"}:
                 slot_type = "armor"
             elif labels & {"Scroll", "Amulet"}:
                 slot_type = "accessory"
