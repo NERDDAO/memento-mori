@@ -147,49 +147,25 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
       _codexData = null;
     }
 
-    // Build flat entity list with type annotations
+    // Build flat entity list — room entities only (no player inventory)
     _allEntities = [];
+    const seen = new Set<string>();
     if (_codexData) {
       for (const npc of (_codexData.npcs || [])) {
-        _allEntities.push({ ...npc, type: 'npc' });
+        if (!seen.has(npc.id)) { seen.add(npc.id); _allEntities.push({ ...npc, type: 'npc' }); }
       }
       for (const gi of (_codexData.ground_items || [])) {
-        _allEntities.push({ ...gi, type: 'item' });
-      }
-      for (const inv of (_codexData.inventory || [])) {
-        _allEntities.push({ ...inv, type: 'item' });
+        if (!seen.has(gi.id)) { seen.add(gi.id); _allEntities.push({ ...gi, type: 'item' }); }
       }
       for (const loc of (_codexData.locations || [])) {
-        _allEntities.push({ ...loc, type: 'location', labels: loc.labels || ['Location'] });
+        if (!seen.has(loc.id)) { seen.add(loc.id); _allEntities.push({ ...loc, type: 'location', labels: loc.labels || ['Location'] }); }
       }
-    }
-
-    // Also include inventory + ground items from game state as fallback entities
-    const state = getState();
-    if (state) {
-      for (const inv of state.inventory) {
-        if (!_allEntities.find(e => e.id === inv.id)) {
-          _allEntities.push({
-            id: inv.id,
-            name: inv.name,
-            type: 'item',
-            labels: [inv.rarity, inv.slot_type].filter(Boolean),
-            summary: inv.effects.join(', ') || '',
-            relationships: [],
-            rarity: inv.rarity,
-          });
-        }
-      }
-      for (const gi of state.location.items) {
-        if (!_allEntities.find(e => e.id === gi.id)) {
-          _allEntities.push({
-            id: gi.id,
-            name: gi.name,
-            type: 'item',
-            labels: [],
-            summary: '',
-            relationships: [],
-          });
+      // Player entity (without inventory items)
+      if (_codexData.player) {
+        const p = _codexData.player;
+        if (!seen.has(p.id)) {
+          seen.add(p.id);
+          _allEntities.push({ id: p.id, name: p.name, type: 'player', labels: [p.archetype || 'Player'], summary: '' });
         }
       }
     }
@@ -301,11 +277,6 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
       const playerHeader = createSectionHeader(`\u2663 ${playerData.name}`, TYPE_COLORS.player, true);
       playerHeader.addEventListener('click', () => { _selectedId = playerData.id; render(); });
       sidebar.appendChild(playerHeader);
-
-      for (const item of invItems) {
-        const prefix = item.equipped ? '\u2694 ' : '  ';
-        sidebar.appendChild(createSidebarItem(item, itemColor(item), prefix));
-      }
     }
 
     // Right detail panel
@@ -412,30 +383,6 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
           <div>Archetype: <span style="color:#8b5cf6">${esc(playerData.archetype || 'Unknown')}</span></div>
         `;
         container.appendChild(statsDiv);
-      }
-
-      const invItems = _codexData?.inventory || [];
-      if (invItems.length) {
-        const invHeader = document.createElement('div');
-        invHeader.style.color = '#6a6a78';
-        invHeader.style.fontSize = '10px';
-        invHeader.style.letterSpacing = '1px';
-        invHeader.style.marginBottom = '4px';
-        invHeader.textContent = `INVENTORY (${invItems.length})`;
-        container.appendChild(invHeader);
-
-        for (const item of invItems) {
-          const row = document.createElement('div');
-          row.style.cursor = 'pointer';
-          row.style.marginBottom = '2px';
-          const eqBadge = item.equipped ? ` <span style="color:#50c878">[E:${item.slot_type || '?'}]</span>` : '';
-          row.innerHTML = `<span style="color:${itemColor(item)}">${esc(item.name)}</span>${eqBadge}`;
-          if (item.effects?.length) {
-            row.innerHTML += ` <span style="color:#6a6a78;font-size:10px">${esc(item.effects[0])}</span>`;
-          }
-          row.addEventListener('click', () => { _selectedId = item.id; render(); });
-          container.appendChild(row);
-        }
       }
 
       const spacer = document.createElement('div');

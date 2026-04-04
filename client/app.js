@@ -5759,8 +5759,8 @@ function createCodexModal(getState, playerId) {
     win.appendChild(loading);
     try {
       const pid = playerId();
-      const state3 = getState();
-      const locId = state3?.roomMap?.id || "";
+      const state2 = getState();
+      const locId = state2?.roomMap?.id || "";
       const url = locId ? `/api/codex/${pid}?location_uuid=${locId}` : `/api/codex/${pid}`;
       const resp = await fetch(url);
       _codexData = await resp.json();
@@ -5768,45 +5768,31 @@ function createCodexModal(getState, playerId) {
       _codexData = null;
     }
     _allEntities = [];
+    const seen = new Set;
     if (_codexData) {
       for (const npc of _codexData.npcs || []) {
-        _allEntities.push({ ...npc, type: "npc" });
-      }
-      for (const gi of _codexData.ground_items || []) {
-        _allEntities.push({ ...gi, type: "item" });
-      }
-      for (const inv of _codexData.inventory || []) {
-        _allEntities.push({ ...inv, type: "item" });
-      }
-      for (const loc of _codexData.locations || []) {
-        _allEntities.push({ ...loc, type: "location", labels: loc.labels || ["Location"] });
-      }
-    }
-    const state2 = getState();
-    if (state2) {
-      for (const inv of state2.inventory) {
-        if (!_allEntities.find((e) => e.id === inv.id)) {
-          _allEntities.push({
-            id: inv.id,
-            name: inv.name,
-            type: "item",
-            labels: [inv.rarity, inv.slot_type].filter(Boolean),
-            summary: inv.effects.join(", ") || "",
-            relationships: [],
-            rarity: inv.rarity
-          });
+        if (!seen.has(npc.id)) {
+          seen.add(npc.id);
+          _allEntities.push({ ...npc, type: "npc" });
         }
       }
-      for (const gi of state2.location.items) {
-        if (!_allEntities.find((e) => e.id === gi.id)) {
-          _allEntities.push({
-            id: gi.id,
-            name: gi.name,
-            type: "item",
-            labels: [],
-            summary: "",
-            relationships: []
-          });
+      for (const gi of _codexData.ground_items || []) {
+        if (!seen.has(gi.id)) {
+          seen.add(gi.id);
+          _allEntities.push({ ...gi, type: "item" });
+        }
+      }
+      for (const loc of _codexData.locations || []) {
+        if (!seen.has(loc.id)) {
+          seen.add(loc.id);
+          _allEntities.push({ ...loc, type: "location", labels: loc.labels || ["Location"] });
+        }
+      }
+      if (_codexData.player) {
+        const p = _codexData.player;
+        if (!seen.has(p.id)) {
+          seen.add(p.id);
+          _allEntities.push({ id: p.id, name: p.name, type: "player", labels: [p.archetype || "Player"], summary: "" });
         }
       }
     }
@@ -5900,10 +5886,6 @@ function createCodexModal(getState, playerId) {
         render();
       });
       sidebar.appendChild(playerHeader);
-      for (const item of invItems) {
-        const prefix = item.equipped ? "⚔ " : "  ";
-        sidebar.appendChild(createSidebarItem(item, itemColor(item), prefix));
-      }
     }
     const detail = document.createElement("div");
     detail.style.flex = "1";
@@ -5992,31 +5974,6 @@ function createCodexModal(getState, playerId) {
           <div>Archetype: <span style="color:#8b5cf6">${esc(playerData.archetype || "Unknown")}</span></div>
         `;
         container.appendChild(statsDiv);
-      }
-      const invItems = _codexData?.inventory || [];
-      if (invItems.length) {
-        const invHeader = document.createElement("div");
-        invHeader.style.color = "#6a6a78";
-        invHeader.style.fontSize = "10px";
-        invHeader.style.letterSpacing = "1px";
-        invHeader.style.marginBottom = "4px";
-        invHeader.textContent = `INVENTORY (${invItems.length})`;
-        container.appendChild(invHeader);
-        for (const item of invItems) {
-          const row = document.createElement("div");
-          row.style.cursor = "pointer";
-          row.style.marginBottom = "2px";
-          const eqBadge = item.equipped ? ` <span style="color:#50c878">[E:${item.slot_type || "?"}]</span>` : "";
-          row.innerHTML = `<span style="color:${itemColor(item)}">${esc(item.name)}</span>${eqBadge}`;
-          if (item.effects?.length) {
-            row.innerHTML += ` <span style="color:#6a6a78;font-size:10px">${esc(item.effects[0])}</span>`;
-          }
-          row.addEventListener("click", () => {
-            _selectedId = item.id;
-            render();
-          });
-          container.appendChild(row);
-        }
       }
       const spacer = document.createElement("div");
       spacer.style.marginTop = "12px";
