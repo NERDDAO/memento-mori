@@ -6,7 +6,4 @@ pragma solidity >=0.8.24;
 import { Characters, CharactersData } from "./tables/Characters.sol";
 import { Deaths, DeathsData } from "./tables/Deaths.sol";
 import { Items, ItemsData } from "./tables/Items.sol";
-import { Locations, LocationsData } from "./tables/Locations.sol";
-import { WorldEvents, WorldEventsData } from "./tables/WorldEvents.sol";
-import { Episodes, EpisodesData } from "./tables/Episodes.sol";
-import { Reputation } from "./tables/Reputation.sol";
+import { Epochs, EpochsData } from "./tables/Epochs.sol";

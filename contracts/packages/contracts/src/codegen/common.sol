@@ -12,13 +12,3 @@ enum EntityType {
   Quest,
   Faction
 }
-
-enum EventType {
-  CombatOutcome,
-  QuestComplete,
-  NPCDeath,
-  Discovery,
-  FactionChange,
-  Death,
-  GameEvent
-}

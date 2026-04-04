@@ -186,6 +186,10 @@ async function joinSession(playerId) {
   return data;
 }
 function connectWebSocket() {
+  if (ws) {
+    ws.onclose = null;
+    ws.close();
+  }
   ws = new WebSocket(`${WS_URL}/${session.playerId}`);
   ws.onopen = () => {
     session.connected = true;
@@ -5743,17 +5747,22 @@ async function startGame(config, overlays, callbacks) {
   if (data.inventory) {
     gameState.inventory = data.inventory.map((name) => ({ name, rarity: "common", equipped: false }));
   }
-  await new Promise((resolve) => {
-    const session2 = getSession();
-    if (session2.connected) {
-      resolve();
-      return;
-    }
-    setConnectionHandler((connected) => {
-      if (connected)
-        resolve();
-    });
-  });
+  if (!getSession().connected) {
+    await Promise.race([
+      new Promise((resolve) => {
+        if (getSession().connected) {
+          resolve();
+          return;
+        }
+        const prev = null;
+        setConnectionHandler((connected) => {
+          if (connected)
+            resolve();
+        });
+      }),
+      new Promise((resolve) => setTimeout(resolve, 1e4))
+    ]);
+  }
   overlays.dismiss("loading");
   if (!localStorage.getItem("mm_intro_seen")) {
     overlays.show("intro");
@@ -6043,6 +6052,10 @@ function enterGame(config) {
       }
       document.getElementById("action-input").focus();
     }
+  }).catch((err) => {
+    console.error("startGame failed:", err);
+    overlays.dismiss("loading");
+    overlays.show("char-create");
   });
 }
 function showCharacterPicker(characters, walletAddress) {

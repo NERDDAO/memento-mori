@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import nio
 
 from memento.config import load_config
 from memento.core import LLM
@@ -99,7 +102,7 @@ class RoundController:
         calls from the worker thread).
     room_id : str
         Matrix room ID for phase emissions.
-    matrix_client : Any
+    matrix_client : nio.AsyncClient | None
         The ``nio.AsyncClient`` instance (or None during tests).
     npc_wait : float
         Seconds to wait for NPC responses before narrating (default 15).
@@ -112,7 +115,7 @@ class RoundController:
         *,
         loop: asyncio.AbstractEventLoop | None = None,
         room_id: str = "",
-        matrix_client: Any = None,
+        matrix_client: nio.AsyncClient | None = None,
         npc_wait: float = 15.0,
         location_uuid: str = "",
     ) -> None:
@@ -468,7 +471,7 @@ class RoundController:
     # Quest persistence (ported from GameTurnFlow)
     # ------------------------------------------------------------------
 
-    def _persist_quest(self, quest_flow: Any) -> None:
+    def _persist_quest(self, quest_flow: QuestFlow) -> None:
         """Persist quest data to KG and link to player."""
         try:
             from memento.bonfires_client import get_client

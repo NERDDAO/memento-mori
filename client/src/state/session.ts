@@ -27,7 +27,7 @@ const session: Session = {
 };
 
 let ws: WebSocket | null = null;
-let onMessage: ((msg: any) => void) | null = null;
+let onMessage: ((msg: import('../types/ws-messages').WsMessage) => void) | null = null;
 let onConnectionChange: ((connected: boolean) => void) | null = null;
 
 export function setConnectionHandler(handler: (connected: boolean) => void): void {
@@ -38,7 +38,7 @@ export function getSession(): Session {
   return session;
 }
 
-export function setMessageHandler(handler: (msg: any) => void): void {
+export function setMessageHandler(handler: (msg: import('../types/ws-messages').WsMessage) => void): void {
   onMessage = handler;
 }
 
@@ -52,7 +52,7 @@ export interface SessionCreateResponse {
   max_health?: number;
   skills?: Record<string, number>;
   inventory?: Array<string | InventoryItemUpdate>;
-  room_map?: any;
+  room_map?: import('../types/schema.generated').RoomMapUpdate;
 }
 
 export async function initSession(playerName: string, walletAddress: string, archetype: string = ''): Promise<SessionCreateResponse> {

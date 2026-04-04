@@ -16,24 +16,26 @@ import { Schema } from "@latticexyz/store/src/Schema.sol";
 import { EncodedLengths, EncodedLengthsLib } from "@latticexyz/store/src/EncodedLengths.sol";
 import { ResourceId } from "@latticexyz/store/src/ResourceId.sol";
 
-struct LocationsData {
-  address discoveredBy;
-  uint256 discoveredAt;
-  string name;
-  string region;
+struct EpochsData {
+  bytes32 stateRoot;
+  uint256 tick;
+  uint256 timestamp;
+  uint32 entityCount;
+  string ipfsCid;
+  string metadata;
 }
 
-library Locations {
-  // Hex below is the result of `WorldResourceIdLib.encode({ namespace: "memento", name: "Locations", typeId: RESOURCE_TABLE });`
-  ResourceId constant _tableId = ResourceId.wrap(0x74626d656d656e746f000000000000004c6f636174696f6e7300000000000000);
+library Epochs {
+  // Hex below is the result of `WorldResourceIdLib.encode({ namespace: "memento", name: "Epochs", typeId: RESOURCE_TABLE });`
+  ResourceId constant _tableId = ResourceId.wrap(0x74626d656d656e746f0000000000000045706f63687300000000000000000000);
 
   FieldLayout constant _fieldLayout =
-    FieldLayout.wrap(0x0034020214200000000000000000000000000000000000000000000000000000);
+    FieldLayout.wrap(0x0064040220202004000000000000000000000000000000000000000000000000);
 
   // Hex-encoded key schema of (bytes32)
   Schema constant _keySchema = Schema.wrap(0x002001005f000000000000000000000000000000000000000000000000000000);
-  // Hex-encoded value schema of (address, uint256, string, string)
-  Schema constant _valueSchema = Schema.wrap(0x00340202611fc5c5000000000000000000000000000000000000000000000000);
+  // Hex-encoded value schema of (bytes32, uint256, uint256, uint32, string, string)
+  Schema constant _valueSchema = Schema.wrap(0x006404025f1f1f03c5c500000000000000000000000000000000000000000000);
 
   /**
    * @notice Get the table's key field names.
@@ -49,11 +51,13 @@ library Locations {
    * @return fieldNames An array of strings with the names of value fields.
    */
   function getFieldNames() internal pure returns (string[] memory fieldNames) {
-    fieldNames = new string[](4);
-    fieldNames[0] = "discoveredBy";
-    fieldNames[1] = "discoveredAt";
-    fieldNames[2] = "name";
-    fieldNames[3] = "region";
+    fieldNames = new string[](6);
+    fieldNames[0] = "stateRoot";
+    fieldNames[1] = "tick";
+    fieldNames[2] = "timestamp";
+    fieldNames[3] = "entityCount";
+    fieldNames[4] = "ipfsCid";
+    fieldNames[5] = "metadata";
   }
 
   /**
@@ -71,51 +75,51 @@ library Locations {
   }
 
   /**
-   * @notice Get discoveredBy.
+   * @notice Get stateRoot.
    */
-  function getDiscoveredBy(bytes32 id) internal view returns (address discoveredBy) {
+  function getStateRoot(bytes32 id) internal view returns (bytes32 stateRoot) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
     bytes32 _blob = StoreSwitch.getStaticField(_tableId, _keyTuple, 0, _fieldLayout);
-    return (address(bytes20(_blob)));
+    return (bytes32(_blob));
   }
 
   /**
-   * @notice Get discoveredBy.
+   * @notice Get stateRoot.
    */
-  function _getDiscoveredBy(bytes32 id) internal view returns (address discoveredBy) {
+  function _getStateRoot(bytes32 id) internal view returns (bytes32 stateRoot) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
     bytes32 _blob = StoreCore.getStaticField(_tableId, _keyTuple, 0, _fieldLayout);
-    return (address(bytes20(_blob)));
+    return (bytes32(_blob));
   }
 
   /**
-   * @notice Set discoveredBy.
+   * @notice Set stateRoot.
    */
-  function setDiscoveredBy(bytes32 id, address discoveredBy) internal {
+  function setStateRoot(bytes32 id, bytes32 stateRoot) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
-    StoreSwitch.setStaticField(_tableId, _keyTuple, 0, abi.encodePacked((discoveredBy)), _fieldLayout);
+    StoreSwitch.setStaticField(_tableId, _keyTuple, 0, abi.encodePacked((stateRoot)), _fieldLayout);
   }
 
   /**
-   * @notice Set discoveredBy.
+   * @notice Set stateRoot.
    */
-  function _setDiscoveredBy(bytes32 id, address discoveredBy) internal {
+  function _setStateRoot(bytes32 id, bytes32 stateRoot) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
-    StoreCore.setStaticField(_tableId, _keyTuple, 0, abi.encodePacked((discoveredBy)), _fieldLayout);
+    StoreCore.setStaticField(_tableId, _keyTuple, 0, abi.encodePacked((stateRoot)), _fieldLayout);
   }
 
   /**
-   * @notice Get discoveredAt.
+   * @notice Get tick.
    */
-  function getDiscoveredAt(bytes32 id) internal view returns (uint256 discoveredAt) {
+  function getTick(bytes32 id) internal view returns (uint256 tick) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -124,9 +128,9 @@ library Locations {
   }
 
   /**
-   * @notice Get discoveredAt.
+   * @notice Get tick.
    */
-  function _getDiscoveredAt(bytes32 id) internal view returns (uint256 discoveredAt) {
+  function _getTick(bytes32 id) internal view returns (uint256 tick) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -135,29 +139,113 @@ library Locations {
   }
 
   /**
-   * @notice Set discoveredAt.
+   * @notice Set tick.
    */
-  function setDiscoveredAt(bytes32 id, uint256 discoveredAt) internal {
+  function setTick(bytes32 id, uint256 tick) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
-    StoreSwitch.setStaticField(_tableId, _keyTuple, 1, abi.encodePacked((discoveredAt)), _fieldLayout);
+    StoreSwitch.setStaticField(_tableId, _keyTuple, 1, abi.encodePacked((tick)), _fieldLayout);
   }
 
   /**
-   * @notice Set discoveredAt.
+   * @notice Set tick.
    */
-  function _setDiscoveredAt(bytes32 id, uint256 discoveredAt) internal {
+  function _setTick(bytes32 id, uint256 tick) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
-    StoreCore.setStaticField(_tableId, _keyTuple, 1, abi.encodePacked((discoveredAt)), _fieldLayout);
+    StoreCore.setStaticField(_tableId, _keyTuple, 1, abi.encodePacked((tick)), _fieldLayout);
   }
 
   /**
-   * @notice Get name.
+   * @notice Get timestamp.
    */
-  function getName(bytes32 id) internal view returns (string memory name) {
+  function getTimestamp(bytes32 id) internal view returns (uint256 timestamp) {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    bytes32 _blob = StoreSwitch.getStaticField(_tableId, _keyTuple, 2, _fieldLayout);
+    return (uint256(bytes32(_blob)));
+  }
+
+  /**
+   * @notice Get timestamp.
+   */
+  function _getTimestamp(bytes32 id) internal view returns (uint256 timestamp) {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    bytes32 _blob = StoreCore.getStaticField(_tableId, _keyTuple, 2, _fieldLayout);
+    return (uint256(bytes32(_blob)));
+  }
+
+  /**
+   * @notice Set timestamp.
+   */
+  function setTimestamp(bytes32 id, uint256 timestamp) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    StoreSwitch.setStaticField(_tableId, _keyTuple, 2, abi.encodePacked((timestamp)), _fieldLayout);
+  }
+
+  /**
+   * @notice Set timestamp.
+   */
+  function _setTimestamp(bytes32 id, uint256 timestamp) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    StoreCore.setStaticField(_tableId, _keyTuple, 2, abi.encodePacked((timestamp)), _fieldLayout);
+  }
+
+  /**
+   * @notice Get entityCount.
+   */
+  function getEntityCount(bytes32 id) internal view returns (uint32 entityCount) {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    bytes32 _blob = StoreSwitch.getStaticField(_tableId, _keyTuple, 3, _fieldLayout);
+    return (uint32(bytes4(_blob)));
+  }
+
+  /**
+   * @notice Get entityCount.
+   */
+  function _getEntityCount(bytes32 id) internal view returns (uint32 entityCount) {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    bytes32 _blob = StoreCore.getStaticField(_tableId, _keyTuple, 3, _fieldLayout);
+    return (uint32(bytes4(_blob)));
+  }
+
+  /**
+   * @notice Set entityCount.
+   */
+  function setEntityCount(bytes32 id, uint32 entityCount) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    StoreSwitch.setStaticField(_tableId, _keyTuple, 3, abi.encodePacked((entityCount)), _fieldLayout);
+  }
+
+  /**
+   * @notice Set entityCount.
+   */
+  function _setEntityCount(bytes32 id, uint32 entityCount) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    StoreCore.setStaticField(_tableId, _keyTuple, 3, abi.encodePacked((entityCount)), _fieldLayout);
+  }
+
+  /**
+   * @notice Get ipfsCid.
+   */
+  function getIpfsCid(bytes32 id) internal view returns (string memory ipfsCid) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -166,9 +254,9 @@ library Locations {
   }
 
   /**
-   * @notice Get name.
+   * @notice Get ipfsCid.
    */
-  function _getName(bytes32 id) internal view returns (string memory name) {
+  function _getIpfsCid(bytes32 id) internal view returns (string memory ipfsCid) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -177,29 +265,29 @@ library Locations {
   }
 
   /**
-   * @notice Set name.
+   * @notice Set ipfsCid.
    */
-  function setName(bytes32 id, string memory name) internal {
+  function setIpfsCid(bytes32 id, string memory ipfsCid) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
-    StoreSwitch.setDynamicField(_tableId, _keyTuple, 0, bytes((name)));
+    StoreSwitch.setDynamicField(_tableId, _keyTuple, 0, bytes((ipfsCid)));
   }
 
   /**
-   * @notice Set name.
+   * @notice Set ipfsCid.
    */
-  function _setName(bytes32 id, string memory name) internal {
+  function _setIpfsCid(bytes32 id, string memory ipfsCid) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
-    StoreCore.setDynamicField(_tableId, _keyTuple, 0, bytes((name)));
+    StoreCore.setDynamicField(_tableId, _keyTuple, 0, bytes((ipfsCid)));
   }
 
   /**
-   * @notice Get the length of name.
+   * @notice Get the length of ipfsCid.
    */
-  function lengthName(bytes32 id) internal view returns (uint256) {
+  function lengthIpfsCid(bytes32 id) internal view returns (uint256) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -210,9 +298,9 @@ library Locations {
   }
 
   /**
-   * @notice Get the length of name.
+   * @notice Get the length of ipfsCid.
    */
-  function _lengthName(bytes32 id) internal view returns (uint256) {
+  function _lengthIpfsCid(bytes32 id) internal view returns (uint256) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -223,10 +311,10 @@ library Locations {
   }
 
   /**
-   * @notice Get an item of name.
+   * @notice Get an item of ipfsCid.
    * @dev Reverts with Store_IndexOutOfBounds if `_index` is out of bounds for the array.
    */
-  function getItemName(bytes32 id, uint256 _index) internal view returns (string memory) {
+  function getItemIpfsCid(bytes32 id, uint256 _index) internal view returns (string memory) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -237,10 +325,10 @@ library Locations {
   }
 
   /**
-   * @notice Get an item of name.
+   * @notice Get an item of ipfsCid.
    * @dev Reverts with Store_IndexOutOfBounds if `_index` is out of bounds for the array.
    */
-  function _getItemName(bytes32 id, uint256 _index) internal view returns (string memory) {
+  function _getItemIpfsCid(bytes32 id, uint256 _index) internal view returns (string memory) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -251,9 +339,9 @@ library Locations {
   }
 
   /**
-   * @notice Push a slice to name.
+   * @notice Push a slice to ipfsCid.
    */
-  function pushName(bytes32 id, string memory _slice) internal {
+  function pushIpfsCid(bytes32 id, string memory _slice) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -261,9 +349,9 @@ library Locations {
   }
 
   /**
-   * @notice Push a slice to name.
+   * @notice Push a slice to ipfsCid.
    */
-  function _pushName(bytes32 id, string memory _slice) internal {
+  function _pushIpfsCid(bytes32 id, string memory _slice) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -271,9 +359,9 @@ library Locations {
   }
 
   /**
-   * @notice Pop a slice from name.
+   * @notice Pop a slice from ipfsCid.
    */
-  function popName(bytes32 id) internal {
+  function popIpfsCid(bytes32 id) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -281,9 +369,9 @@ library Locations {
   }
 
   /**
-   * @notice Pop a slice from name.
+   * @notice Pop a slice from ipfsCid.
    */
-  function _popName(bytes32 id) internal {
+  function _popIpfsCid(bytes32 id) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -291,9 +379,9 @@ library Locations {
   }
 
   /**
-   * @notice Update a slice of name at `_index`.
+   * @notice Update a slice of ipfsCid at `_index`.
    */
-  function updateName(bytes32 id, uint256 _index, string memory _slice) internal {
+  function updateIpfsCid(bytes32 id, uint256 _index, string memory _slice) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -304,9 +392,9 @@ library Locations {
   }
 
   /**
-   * @notice Update a slice of name at `_index`.
+   * @notice Update a slice of ipfsCid at `_index`.
    */
-  function _updateName(bytes32 id, uint256 _index, string memory _slice) internal {
+  function _updateIpfsCid(bytes32 id, uint256 _index, string memory _slice) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -317,9 +405,9 @@ library Locations {
   }
 
   /**
-   * @notice Get region.
+   * @notice Get metadata.
    */
-  function getRegion(bytes32 id) internal view returns (string memory region) {
+  function getMetadata(bytes32 id) internal view returns (string memory metadata) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -328,9 +416,9 @@ library Locations {
   }
 
   /**
-   * @notice Get region.
+   * @notice Get metadata.
    */
-  function _getRegion(bytes32 id) internal view returns (string memory region) {
+  function _getMetadata(bytes32 id) internal view returns (string memory metadata) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -339,29 +427,29 @@ library Locations {
   }
 
   /**
-   * @notice Set region.
+   * @notice Set metadata.
    */
-  function setRegion(bytes32 id, string memory region) internal {
+  function setMetadata(bytes32 id, string memory metadata) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
-    StoreSwitch.setDynamicField(_tableId, _keyTuple, 1, bytes((region)));
+    StoreSwitch.setDynamicField(_tableId, _keyTuple, 1, bytes((metadata)));
   }
 
   /**
-   * @notice Set region.
+   * @notice Set metadata.
    */
-  function _setRegion(bytes32 id, string memory region) internal {
+  function _setMetadata(bytes32 id, string memory metadata) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
-    StoreCore.setDynamicField(_tableId, _keyTuple, 1, bytes((region)));
+    StoreCore.setDynamicField(_tableId, _keyTuple, 1, bytes((metadata)));
   }
 
   /**
-   * @notice Get the length of region.
+   * @notice Get the length of metadata.
    */
-  function lengthRegion(bytes32 id) internal view returns (uint256) {
+  function lengthMetadata(bytes32 id) internal view returns (uint256) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -372,9 +460,9 @@ library Locations {
   }
 
   /**
-   * @notice Get the length of region.
+   * @notice Get the length of metadata.
    */
-  function _lengthRegion(bytes32 id) internal view returns (uint256) {
+  function _lengthMetadata(bytes32 id) internal view returns (uint256) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -385,10 +473,10 @@ library Locations {
   }
 
   /**
-   * @notice Get an item of region.
+   * @notice Get an item of metadata.
    * @dev Reverts with Store_IndexOutOfBounds if `_index` is out of bounds for the array.
    */
-  function getItemRegion(bytes32 id, uint256 _index) internal view returns (string memory) {
+  function getItemMetadata(bytes32 id, uint256 _index) internal view returns (string memory) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -399,10 +487,10 @@ library Locations {
   }
 
   /**
-   * @notice Get an item of region.
+   * @notice Get an item of metadata.
    * @dev Reverts with Store_IndexOutOfBounds if `_index` is out of bounds for the array.
    */
-  function _getItemRegion(bytes32 id, uint256 _index) internal view returns (string memory) {
+  function _getItemMetadata(bytes32 id, uint256 _index) internal view returns (string memory) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -413,9 +501,9 @@ library Locations {
   }
 
   /**
-   * @notice Push a slice to region.
+   * @notice Push a slice to metadata.
    */
-  function pushRegion(bytes32 id, string memory _slice) internal {
+  function pushMetadata(bytes32 id, string memory _slice) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -423,9 +511,9 @@ library Locations {
   }
 
   /**
-   * @notice Push a slice to region.
+   * @notice Push a slice to metadata.
    */
-  function _pushRegion(bytes32 id, string memory _slice) internal {
+  function _pushMetadata(bytes32 id, string memory _slice) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -433,9 +521,9 @@ library Locations {
   }
 
   /**
-   * @notice Pop a slice from region.
+   * @notice Pop a slice from metadata.
    */
-  function popRegion(bytes32 id) internal {
+  function popMetadata(bytes32 id) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -443,9 +531,9 @@ library Locations {
   }
 
   /**
-   * @notice Pop a slice from region.
+   * @notice Pop a slice from metadata.
    */
-  function _popRegion(bytes32 id) internal {
+  function _popMetadata(bytes32 id) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -453,9 +541,9 @@ library Locations {
   }
 
   /**
-   * @notice Update a slice of region at `_index`.
+   * @notice Update a slice of metadata at `_index`.
    */
-  function updateRegion(bytes32 id, uint256 _index, string memory _slice) internal {
+  function updateMetadata(bytes32 id, uint256 _index, string memory _slice) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -466,9 +554,9 @@ library Locations {
   }
 
   /**
-   * @notice Update a slice of region at `_index`.
+   * @notice Update a slice of metadata at `_index`.
    */
-  function _updateRegion(bytes32 id, uint256 _index, string memory _slice) internal {
+  function _updateMetadata(bytes32 id, uint256 _index, string memory _slice) internal {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -481,7 +569,7 @@ library Locations {
   /**
    * @notice Get the full data.
    */
-  function get(bytes32 id) internal view returns (LocationsData memory _table) {
+  function get(bytes32 id) internal view returns (EpochsData memory _table) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -496,7 +584,7 @@ library Locations {
   /**
    * @notice Get the full data.
    */
-  function _get(bytes32 id) internal view returns (LocationsData memory _table) {
+  function _get(bytes32 id) internal view returns (EpochsData memory _table) {
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
 
@@ -513,15 +601,17 @@ library Locations {
    */
   function set(
     bytes32 id,
-    address discoveredBy,
-    uint256 discoveredAt,
-    string memory name,
-    string memory region
+    bytes32 stateRoot,
+    uint256 tick,
+    uint256 timestamp,
+    uint32 entityCount,
+    string memory ipfsCid,
+    string memory metadata
   ) internal {
-    bytes memory _staticData = encodeStatic(discoveredBy, discoveredAt);
+    bytes memory _staticData = encodeStatic(stateRoot, tick, timestamp, entityCount);
 
-    EncodedLengths _encodedLengths = encodeLengths(name, region);
-    bytes memory _dynamicData = encodeDynamic(name, region);
+    EncodedLengths _encodedLengths = encodeLengths(ipfsCid, metadata);
+    bytes memory _dynamicData = encodeDynamic(ipfsCid, metadata);
 
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
@@ -534,15 +624,17 @@ library Locations {
    */
   function _set(
     bytes32 id,
-    address discoveredBy,
-    uint256 discoveredAt,
-    string memory name,
-    string memory region
+    bytes32 stateRoot,
+    uint256 tick,
+    uint256 timestamp,
+    uint32 entityCount,
+    string memory ipfsCid,
+    string memory metadata
   ) internal {
-    bytes memory _staticData = encodeStatic(discoveredBy, discoveredAt);
+    bytes memory _staticData = encodeStatic(stateRoot, tick, timestamp, entityCount);
 
-    EncodedLengths _encodedLengths = encodeLengths(name, region);
-    bytes memory _dynamicData = encodeDynamic(name, region);
+    EncodedLengths _encodedLengths = encodeLengths(ipfsCid, metadata);
+    bytes memory _dynamicData = encodeDynamic(ipfsCid, metadata);
 
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
@@ -553,11 +645,11 @@ library Locations {
   /**
    * @notice Set the full data using the data struct.
    */
-  function set(bytes32 id, LocationsData memory _table) internal {
-    bytes memory _staticData = encodeStatic(_table.discoveredBy, _table.discoveredAt);
+  function set(bytes32 id, EpochsData memory _table) internal {
+    bytes memory _staticData = encodeStatic(_table.stateRoot, _table.tick, _table.timestamp, _table.entityCount);
 
-    EncodedLengths _encodedLengths = encodeLengths(_table.name, _table.region);
-    bytes memory _dynamicData = encodeDynamic(_table.name, _table.region);
+    EncodedLengths _encodedLengths = encodeLengths(_table.ipfsCid, _table.metadata);
+    bytes memory _dynamicData = encodeDynamic(_table.ipfsCid, _table.metadata);
 
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
@@ -568,11 +660,11 @@ library Locations {
   /**
    * @notice Set the full data using the data struct.
    */
-  function _set(bytes32 id, LocationsData memory _table) internal {
-    bytes memory _staticData = encodeStatic(_table.discoveredBy, _table.discoveredAt);
+  function _set(bytes32 id, EpochsData memory _table) internal {
+    bytes memory _staticData = encodeStatic(_table.stateRoot, _table.tick, _table.timestamp, _table.entityCount);
 
-    EncodedLengths _encodedLengths = encodeLengths(_table.name, _table.region);
-    bytes memory _dynamicData = encodeDynamic(_table.name, _table.region);
+    EncodedLengths _encodedLengths = encodeLengths(_table.ipfsCid, _table.metadata);
+    bytes memory _dynamicData = encodeDynamic(_table.ipfsCid, _table.metadata);
 
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
@@ -583,10 +675,16 @@ library Locations {
   /**
    * @notice Decode the tightly packed blob of static data using this table's field layout.
    */
-  function decodeStatic(bytes memory _blob) internal pure returns (address discoveredBy, uint256 discoveredAt) {
-    discoveredBy = (address(Bytes.getBytes20(_blob, 0)));
+  function decodeStatic(
+    bytes memory _blob
+  ) internal pure returns (bytes32 stateRoot, uint256 tick, uint256 timestamp, uint32 entityCount) {
+    stateRoot = (Bytes.getBytes32(_blob, 0));
 
-    discoveredAt = (uint256(Bytes.getBytes32(_blob, 20)));
+    tick = (uint256(Bytes.getBytes32(_blob, 32)));
+
+    timestamp = (uint256(Bytes.getBytes32(_blob, 64)));
+
+    entityCount = (uint32(Bytes.getBytes4(_blob, 96)));
   }
 
   /**
@@ -595,19 +693,19 @@ library Locations {
   function decodeDynamic(
     EncodedLengths _encodedLengths,
     bytes memory _blob
-  ) internal pure returns (string memory name, string memory region) {
+  ) internal pure returns (string memory ipfsCid, string memory metadata) {
     uint256 _start;
     uint256 _end;
     unchecked {
       _end = _encodedLengths.atIndex(0);
     }
-    name = (string(SliceLib.getSubslice(_blob, _start, _end).toBytes()));
+    ipfsCid = (string(SliceLib.getSubslice(_blob, _start, _end).toBytes()));
 
     _start = _end;
     unchecked {
       _end += _encodedLengths.atIndex(1);
     }
-    region = (string(SliceLib.getSubslice(_blob, _start, _end).toBytes()));
+    metadata = (string(SliceLib.getSubslice(_blob, _start, _end).toBytes()));
   }
 
   /**
@@ -620,10 +718,10 @@ library Locations {
     bytes memory _staticData,
     EncodedLengths _encodedLengths,
     bytes memory _dynamicData
-  ) internal pure returns (LocationsData memory _table) {
-    (_table.discoveredBy, _table.discoveredAt) = decodeStatic(_staticData);
+  ) internal pure returns (EpochsData memory _table) {
+    (_table.stateRoot, _table.tick, _table.timestamp, _table.entityCount) = decodeStatic(_staticData);
 
-    (_table.name, _table.region) = decodeDynamic(_encodedLengths, _dynamicData);
+    (_table.ipfsCid, _table.metadata) = decodeDynamic(_encodedLengths, _dynamicData);
   }
 
   /**
@@ -650,8 +748,13 @@ library Locations {
    * @notice Tightly pack static (fixed length) data using this table's schema.
    * @return The static data, encoded into a sequence of bytes.
    */
-  function encodeStatic(address discoveredBy, uint256 discoveredAt) internal pure returns (bytes memory) {
-    return abi.encodePacked(discoveredBy, discoveredAt);
+  function encodeStatic(
+    bytes32 stateRoot,
+    uint256 tick,
+    uint256 timestamp,
+    uint32 entityCount
+  ) internal pure returns (bytes memory) {
+    return abi.encodePacked(stateRoot, tick, timestamp, entityCount);
   }
 
   /**
@@ -659,12 +762,12 @@ library Locations {
    * @return _encodedLengths The lengths of the dynamic fields (packed into a single bytes32 value).
    */
   function encodeLengths(
-    string memory name,
-    string memory region
+    string memory ipfsCid,
+    string memory metadata
   ) internal pure returns (EncodedLengths _encodedLengths) {
     // Lengths are effectively checked during copy by 2**40 bytes exceeding gas limits
     unchecked {
-      _encodedLengths = EncodedLengthsLib.pack(bytes(name).length, bytes(region).length);
+      _encodedLengths = EncodedLengthsLib.pack(bytes(ipfsCid).length, bytes(metadata).length);
     }
   }
 
@@ -672,8 +775,8 @@ library Locations {
    * @notice Tightly pack dynamic (variable length) data using this table's schema.
    * @return The dynamic data, encoded into a sequence of bytes.
    */
-  function encodeDynamic(string memory name, string memory region) internal pure returns (bytes memory) {
-    return abi.encodePacked(bytes((name)), bytes((region)));
+  function encodeDynamic(string memory ipfsCid, string memory metadata) internal pure returns (bytes memory) {
+    return abi.encodePacked(bytes((ipfsCid)), bytes((metadata)));
   }
 
   /**
@@ -683,15 +786,17 @@ library Locations {
    * @return The dynamic (variable length) data, encoded into a sequence of bytes.
    */
   function encode(
-    address discoveredBy,
-    uint256 discoveredAt,
-    string memory name,
-    string memory region
+    bytes32 stateRoot,
+    uint256 tick,
+    uint256 timestamp,
+    uint32 entityCount,
+    string memory ipfsCid,
+    string memory metadata
   ) internal pure returns (bytes memory, EncodedLengths, bytes memory) {
-    bytes memory _staticData = encodeStatic(discoveredBy, discoveredAt);
+    bytes memory _staticData = encodeStatic(stateRoot, tick, timestamp, entityCount);
 
-    EncodedLengths _encodedLengths = encodeLengths(name, region);
-    bytes memory _dynamicData = encodeDynamic(name, region);
+    EncodedLengths _encodedLengths = encodeLengths(ipfsCid, metadata);
+    bytes memory _dynamicData = encodeDynamic(ipfsCid, metadata);
 
     return (_staticData, _encodedLengths, _dynamicData);
   }
