@@ -151,10 +151,12 @@ class SessionManager:
         """Find or create a User entity for this wallet. Returns user_uuid."""
         client = get_client()
         try:
-            result = client.kg.search(f"wallet {wallet_address}", num_results=5)
+            result = client.kg.search(f"User {wallet_address[:10]}", num_results=10)
             for entity in result.get("entities", result.get("nodes", [])):
-                if "User" in entity.get("labels", []) and entity.get("wallet") == wallet_address:
-                    return entity.get("uuid", entity.get("id", ""))
+                if "User" in entity.get("labels", []):
+                    wallet = _extract_entity_attr(entity, "wallet") or entity.get("wallet")
+                    if wallet == wallet_address:
+                        return entity.get("uuid", entity.get("id", ""))
         except Exception:
             logger.debug("User search failed", exc_info=True)
 
@@ -170,13 +172,15 @@ class SessionManager:
         """Return all Player characters owned by this wallet."""
         client = get_client()
         try:
-            result = client.kg.search(f"wallet {wallet_address}", num_results=5)
+            result = client.kg.search(f"User {wallet_address[:10]}", num_results=10)
             entities = result.get("entities", result.get("nodes", []))
             user_uuid = None
             for entity in entities:
-                if "User" in entity.get("labels", []) and entity.get("wallet") == wallet_address:
-                    user_uuid = entity.get("uuid", entity.get("id", ""))
-                    break
+                if "User" in entity.get("labels", []):
+                    wallet = _extract_entity_attr(entity, "wallet") or entity.get("wallet")
+                    if wallet == wallet_address:
+                        user_uuid = entity.get("uuid", entity.get("id", ""))
+                        break
             if not user_uuid:
                 return []
 
@@ -189,8 +193,8 @@ class SessionManager:
                     char_info = {
                         "player_id": player_id,
                         "player_name": target.get("name", "Unknown"),
-                        "archetype": target.get("archetype", ""),
-                        "health": int(target.get("health", 100)),
+                        "archetype": str(_extract_entity_attr(target, "archetype") or ""),
+                        "health": int(str(_extract_entity_attr(target, "health") or 100)),
                         "is_dead": False,
                         "death_cause": "",
                         "death_location": "",
