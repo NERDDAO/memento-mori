@@ -6261,12 +6261,15 @@ function createStatusBar() {
   el.className = "status-bar";
   el.innerHTML = `
     <span class="status-phase">✓ Ready</span>
+    <span class="status-activity"></span>
     <span class="status-chain">◇ Redstone: offline</span>
     <span class="status-tick">☽ Tick 0</span>
   `;
   const phaseEl = el.querySelector(".status-phase");
+  const activityEl = el.querySelector(".status-activity");
   const chainEl = el.querySelector(".status-chain");
   const tickEl = el.querySelector(".status-tick");
+  let activityTimer = null;
   function renderPhase(rs) {
     switch (rs.phase) {
       case "ready":
@@ -6301,6 +6304,20 @@ function createStatusBar() {
     },
     setTick(tick) {
       tickEl.textContent = `☽ Tick ${tick}`;
+    },
+    setActivity(text) {
+      if (activityTimer)
+        clearTimeout(activityTimer);
+      if (text) {
+        activityEl.textContent = `✨ ${text}`;
+        activityEl.style.color = "#8b5cf6";
+        activityTimer = setTimeout(() => {
+          activityEl.textContent = "";
+          activityTimer = null;
+        }, 5000);
+      } else {
+        activityEl.textContent = "";
+      }
     }
   };
 }
@@ -6653,6 +6670,8 @@ function handleMessage(msg) {
         statusBar.setTick(msg.tick);
       if (msg.chain != null)
         statusBar.setChain(msg.chain);
+      if (msg.activity)
+        statusBar.setActivity(msg.activity);
       break;
     case "player_joined": {
       if (gameState) {

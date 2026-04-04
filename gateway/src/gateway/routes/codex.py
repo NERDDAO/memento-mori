@@ -253,12 +253,38 @@ async def get_codex(player_id: str, location_uuid: str | None = None):
     import threading
 
     def _bg_enrich():
+        import asyncio as _aio
         try:
             from memento.flows.enrichment import enrich_room_entities
-            if location_uuid:
-                enrich_room_entities(location_uuid)
+            from gateway.app import ws_hub as _hub
+            if not location_uuid:
+                return
+
+            # Notify client that enrichment is starting
+            if _hub:
+                loop = _aio.new_event_loop()
+                loop.run_until_complete(
+                    _hub.send_to_player(player_id, {
+                        "type": "status",
+                        "activity": "Enriching entities...",
+                    })
+                )
+                loop.close()
+
+            enrich_room_entities(location_uuid)
+
+            # Notify client that enrichment is done
+            if _hub:
+                loop = _aio.new_event_loop()
+                loop.run_until_complete(
+                    _hub.send_to_player(player_id, {
+                        "type": "status",
+                        "activity": "Codex updated",
+                    })
+                )
+                loop.close()
         except Exception:
-            pass
+            logger.debug("Background enrichment failed", exc_info=True)
 
     threading.Thread(target=_bg_enrich, daemon=True).start()
 

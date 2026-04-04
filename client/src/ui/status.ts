@@ -9,6 +9,7 @@ export interface StatusBar {
   el: HTMLElement;
   setChain(connected: boolean): void;
   setTick(tick: number): void;
+  setActivity(text: string): void;
 }
 
 export function createStatusBar(): StatusBar {
@@ -16,13 +17,16 @@ export function createStatusBar(): StatusBar {
   el.className = 'status-bar';
   el.innerHTML = `
     <span class="status-phase">\u2713 Ready</span>
+    <span class="status-activity"></span>
     <span class="status-chain">\u25C7 Redstone: offline</span>
     <span class="status-tick">\u263D Tick 0</span>
   `;
 
   const phaseEl = el.querySelector('.status-phase') as HTMLElement;
+  const activityEl = el.querySelector('.status-activity') as HTMLElement;
   const chainEl = el.querySelector('.status-chain') as HTMLElement;
   const tickEl = el.querySelector('.status-tick') as HTMLElement;
+  let activityTimer: ReturnType<typeof setTimeout> | null = null;
 
   function renderPhase(rs: RoundState): void {
     switch (rs.phase) {
@@ -68,6 +72,20 @@ export function createStatusBar(): StatusBar {
     },
     setTick(tick: number) {
       tickEl.textContent = `\u263D Tick ${tick}`;
+    },
+    setActivity(text: string) {
+      if (activityTimer) clearTimeout(activityTimer);
+      if (text) {
+        activityEl.textContent = `\u2728 ${text}`;
+        activityEl.style.color = '#8b5cf6';
+        // Auto-clear after 5 seconds
+        activityTimer = setTimeout(() => {
+          activityEl.textContent = '';
+          activityTimer = null;
+        }, 5000);
+      } else {
+        activityEl.textContent = '';
+      }
     },
   };
 }

@@ -219,6 +219,7 @@ function handleMessage(msg: WsMessage): void {
     case 'status':
       if (msg.tick != null) statusBar.setTick(msg.tick);
       if (msg.chain != null) statusBar.setChain(msg.chain);
+      if (msg.activity) statusBar.setActivity(msg.activity);
       break;
     case 'player_joined': {
       if (gameState) {
