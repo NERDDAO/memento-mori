@@ -53,13 +53,14 @@ async def health():
 
 
 # Include routes
-from gateway.routes import action, session, state, entity, chain, engine
+from gateway.routes import action, session, state, entity, chain, engine, inventory
 app.include_router(action.router, prefix="/api")
 app.include_router(session.router, prefix="/api")
 app.include_router(state.router, prefix="/api")
 app.include_router(entity.router, prefix="/api")
 app.include_router(chain.router, prefix="/api")
 app.include_router(engine.router, prefix="/api")
+app.include_router(inventory.router, prefix="/api")
 
 # WebSocket endpoint
 from fastapi import WebSocket, WebSocketDisconnect

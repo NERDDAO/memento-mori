@@ -570,3 +570,72 @@ async def room_manifest(req: RoomManifestRequest):
     from memento.room_manifest import get_room_manifest
     result = await asyncio.to_thread(get_room_manifest, req.location_uuid)
     return result
+
+
+# ── Inventory Tools (NPC agents use these for trade, loot inspection) ──
+
+class InventoryQueryRequest(BaseModel):
+    entity_id: str = Field(..., max_length=64, description="Player or NPC UUID")
+    npc_id: str = Field("", max_length=64)
+
+
+class InventoryTransferRequest(BaseModel):
+    item_id: str = Field(..., max_length=64)
+    from_entity: str = Field(..., max_length=64, description="Current owner UUID")
+    to_entity: str = Field(..., max_length=64, description="New owner UUID")
+    quantity: int = Field(1, ge=1)
+    npc_id: str = Field("", max_length=64)
+
+
+@router.post("/engine/inventory")
+async def get_entity_inventory(req: InventoryQueryRequest):
+    """Get inventory for any entity (player or NPC). Used by merchant NPCs."""
+    await check_tool_access(req.npc_id, "mm_inventory")
+    from memento.inventory_manifest import get_inventory_manifest
+    manifest = await asyncio.to_thread(get_inventory_manifest, req.entity_id)
+    return manifest
+
+
+@router.post("/engine/inventory/transfer")
+async def transfer_item(req: InventoryTransferRequest):
+    """Transfer an item between entities. Used for NPC trade resolution."""
+    await check_tool_access(req.npc_id, "mm_inventory_transfer")
+
+    from memento.bonfires_client import get_client
+    from memento.tools import chain as _chain
+
+    client = await asyncio.to_thread(get_client)
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Expire CARRIES from old owner
+    try:
+        edges = await asyncio.to_thread(
+            client.kg.get_edges, req.from_entity,
+            direction="outgoing", edge_type="CARRIES",
+        )
+        for edge in edges:
+            target = edge.get("target", {})
+            tid = target.get("uuid", target.get("id", ""))
+            if tid == req.item_id and not (edge.get("expired_at") or edge.get("invalid_at")):
+                edge_uuid = edge.get("uuid", edge.get("id", ""))
+                if edge_uuid:
+                    await asyncio.to_thread(
+                        client.kg.update_edge, edge_uuid, {"expired_at": now},
+                    )
+                    break
+    except Exception:
+        pass
+
+    # Create CARRIES to new owner
+    await asyncio.to_thread(
+        client.kg.create_edge,
+        req.to_entity, req.item_id, "CARRIES",
+        f"Traded item",
+    )
+
+    # Chain update
+    _chain.transfer_item(req.item_id, req.to_entity)
+
+    return {"status": "ok", "item_id": req.item_id,
+            "from": req.from_entity, "to": req.to_entity}

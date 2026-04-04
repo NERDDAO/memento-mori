@@ -38,6 +38,8 @@ export default defineWorld({
         locationId: "bytes32",
         name: "string",
         rarity: "string",
+        slotType: "string",
+        quantity: "uint32",
       },
       key: ["id"],
     },

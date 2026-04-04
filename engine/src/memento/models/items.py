@@ -11,3 +11,4 @@ class Item(BaseModel):
     effects: list[str] = []
     is_consumable: bool = False
     is_quest_item: bool = False
+    stackable: bool = False
