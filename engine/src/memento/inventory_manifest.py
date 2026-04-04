@@ -106,13 +106,30 @@ def get_inventory_manifest(player_uuid: str) -> dict[str, Any]:
         meta = _parse_entity_metadata(entity)
         item_name = entity.get("name", "Unknown")
 
+        # Infer slot_type from KG labels if not in metadata
+        slot_type = meta.get("slot_type", "")
+        if not slot_type:
+            if labels & {"Weapon"}:
+                slot_type = "weapon"
+            elif labels & {"Armor"}:
+                slot_type = "armor"
+            elif labels & {"Scroll", "Amulet"}:
+                slot_type = "accessory"
+            elif labels & {"Ring"}:
+                slot_type = "ring"
+
+        # Infer consumable from labels
+        is_consumable = bool(meta.get("is_consumable", False))
+        if not is_consumable and labels & {"Consumable", "Potion"}:
+            is_consumable = True
+
         item = {
             "id": item_uuid,
             "name": item_name,
             "rarity": meta.get("rarity", "common"),
-            "slot_type": meta.get("slot_type", ""),
+            "slot_type": slot_type,
             "equipped": bool(meta.get("equipped", False)),
-            "is_consumable": bool(meta.get("is_consumable", False)),
+            "is_consumable": is_consumable,
             "is_quest_item": bool(meta.get("is_quest_item", False)),
             "effects": meta.get("effects", []),
             "stackable": bool(meta.get("stackable", False)),
