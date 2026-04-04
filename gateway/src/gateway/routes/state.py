@@ -2,6 +2,7 @@
 
 import asyncio
 from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
 from gateway.log import get_logger
 
@@ -120,3 +121,18 @@ async def get_world_map():
     except Exception:
         logger.error("World map query failed", exc_info=True)
         return {"rooms": [], "connections": []}
+
+
+class ManifestRequest(BaseModel):
+    location_uuid: str
+
+
+@router.post("/room-manifest")
+async def room_manifest(req: ManifestRequest):
+    """Get complete room manifest — all NPCs, items, players, exits, tile map.
+
+    Public endpoint (no auth) — used by client session flow.
+    """
+    from memento.room_manifest import get_room_manifest
+    result = await asyncio.to_thread(get_room_manifest, req.location_uuid)
+    return result
