@@ -147,7 +147,7 @@ class AgentController:
             try:
                 from memento.tools.kg import update_entity
                 labels_str = ",".join(["NPC", *npc_labels])
-                update_entity(name, new_labels=labels_str)
+                update_entity.run(name=name, new_labels=labels_str)
             except Exception:
                 logger.warning("Failed to set labels for NPC %s", name, exc_info=True)
 

@@ -109,10 +109,12 @@ def _get_abi() -> list[dict]:
     try:
         with open(abi_path) as f:
             data = json.load(f)
-            _world_abi = data.get("abi", data)
+            _world_abi = data.get("abi") or data
+            if not isinstance(_world_abi, list):
+                _world_abi = []
             return _world_abi
     except FileNotFoundError:
-        logger.warning(f"IWorld ABI not found at {abi_path}, chain calls will fail")
+        logger.warning("IWorld ABI not found at %s, chain calls will fail", abi_path)
         return []
 
 

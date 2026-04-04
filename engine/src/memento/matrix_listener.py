@@ -56,8 +56,8 @@ class EngineMatrixListener:
         await asyncio.to_thread(self._reconcile_npcs)
 
         # Auto-join on invite
-        self.client.add_event_callback(self._on_invite, InviteMemberEvent)
-        self.client.add_event_callback(self._on_action, RoomMessageText)
+        self.client.add_event_callback(self._on_invite, InviteMemberEvent)  # type: ignore[arg-type]
+        self.client.add_event_callback(self._on_action, RoomMessageText)  # type: ignore[arg-type]
         logger.info("Listening for player actions...")
         await self.client.sync_forever(timeout=30000)
 

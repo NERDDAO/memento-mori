@@ -22,7 +22,8 @@ def load_archetypes() -> dict[str, Any]:
     with open(path) as f:
         data = yaml.safe_load(f)
 
-    _ARCHETYPES = data.get("archetypes", {})
+    result = data.get("archetypes")
+    _ARCHETYPES = result if isinstance(result, dict) else {}
     return _ARCHETYPES
 
 

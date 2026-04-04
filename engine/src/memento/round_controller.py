@@ -27,6 +27,7 @@ from memento.models.state_update import (
     EventSummary,
     QuestSummary,
     StateUpdate,
+    WorldTimeDisplay,
 )
 from memento.tools.time import advance_time
 
@@ -409,7 +410,7 @@ class RoundController:
 
         state_update = StateUpdate(
             location=self.location,
-            world_time=self.world_time if isinstance(self.world_time, dict) and self.world_time else None,
+            world_time=WorldTimeDisplay(**self.world_time) if isinstance(self.world_time, dict) and self.world_time else None,
             events=events_summary,
             active_quests=active_quests,
             subsystem_warnings=self.subsystem_warnings,
