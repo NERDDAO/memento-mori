@@ -558,3 +558,15 @@ async def npc_memory(req: RememberRequest):
     from memento.tools.kg import remember_event as _remember
     result = await asyncio.to_thread(_remember, req.summary)
     return {"result": result}
+
+
+class RoomManifestRequest(BaseModel):
+    location_uuid: str
+
+
+@router.post("/engine/room-manifest")
+async def room_manifest(req: RoomManifestRequest):
+    """Get complete room manifest — all NPCs, items, players, exits, tile map."""
+    from memento.room_manifest import get_room_manifest
+    result = await asyncio.to_thread(get_room_manifest, req.location_uuid)
+    return result
