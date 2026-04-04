@@ -120,11 +120,13 @@ def _get_abi() -> list[dict]:
 
 def register_character(uuid: str, name: str, wallet: str) -> None:
     """Register a character onchain."""
+    from web3 import Web3
+    checksum_wallet = Web3.to_checksum_address(wallet) if wallet else "0x0000000000000000000000000000000000000000"
     _send_tx(
         "registerCharacter",
         _uuid_to_bytes32(uuid),
         name,
-        wallet or "0x0000000000000000000000000000000000000000",
+        checksum_wallet,
         0,  # EntityType.Character
     )
 
