@@ -226,51 +226,44 @@ class AgentController:
 
         return True
 
-    def reconcile_location(self, location_name: str) -> list[NPCAgent]:
+    def reconcile_location(self, location_name: str, location_uuid: str = "") -> list[NPCAgent]:
         """Ensure all NPCs at a location have Bonfires agents.
 
-        Queries the KG for NPCs at this location, checks which already have
-        agents (locally tracked or via API), and spawns missing ones.
+        Uses get_room_manifest for UUID-based lookup of NPCs at the location.
+        Falls back to text search if no UUID is provided.
 
         Returns list of newly spawned agents.
         """
         spawned: list[NPCAgent] = []
 
-        # Find NPCs at this location — try entity search first, fall back to KG search
+        # Get NPCs via room manifest (UUID-based) or text search fallback
         npcs: list[dict[str, Any]] = []
         try:
-            client = get_client()
-            # Direct entity search for the location, then get neighbors
-            loc_entity = client.kg.get_entity_or_none(location_name)
-            if not loc_entity:
-                # Try search by name
-                result = client.kg.search(location_name, num_results=1)
-                loc_entities = result.get("entities", result.get("nodes", []))
-                loc_entity = loc_entities[0] if loc_entities else None
+            if not location_uuid:
+                # Resolve UUID from name (fallback — callers should provide UUID)
+                from memento.tools.kg import _resolve_entity_uuid
+                location_uuid = _resolve_entity_uuid(location_name) or ""
 
-            if loc_entity:
-                loc_uuid = loc_entity.get("uuid", "")
-                if loc_uuid:
-                    # Get neighbors — includes NPCs LOCATED_IN this location
-                    neighbors = client.kg.get_node_episodes(loc_uuid)
-                    # Also search for entities connected to this location
-                    result = client.kg.search(location_name, num_results=20)
-                    all_entities = result.get("entities", result.get("nodes", []))
-                    npcs = [e for e in all_entities if "NPC" in e.get("labels", [])]
-
-            if not npcs:
-                # Fallback: broader search
-                result = client.kg.search(f"{location_name} NPC", num_results=20)
-                all_entities = result.get("entities", result.get("nodes", []))
-                npcs = [e for e in all_entities if "NPC" in e.get("labels", [])]
+            if location_uuid:
+                from memento.room_manifest import get_room_manifest
+                manifest = get_room_manifest(location_uuid)
+                # Convert manifest NPCs to the format expected below
+                for npc in manifest.get("npcs", []):
+                    npcs.append({
+                        "uuid": npc.get("id", ""),
+                        "name": npc.get("name", "Unknown"),
+                        "labels": ["NPC"],
+                        "summary": "",
+                    })
         except Exception:
-            logger.warning("reconcile_location: entity search failed for %s", location_name, exc_info=True)
+            logger.warning("reconcile_location: manifest lookup failed for %s", location_name, exc_info=True)
             return spawned
         if not npcs:
             logger.info("reconcile_location: no NPCs found at %s", location_name)
             return spawned
 
         # Check which already have agents
+        client = get_client()
         existing_agents: set[str] = set()
         try:
             all_agents = client.agents.list()

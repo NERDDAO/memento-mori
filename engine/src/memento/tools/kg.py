@@ -169,3 +169,41 @@ def get_neighbors(entity_name: str) -> str:
     client = get_client()
     result = client.kg.search(entity_name, num_results=15)
     return _format_search_results(result)
+
+
+@tool("Get Room Manifest")
+def get_room_manifest_tool(location_name: str) -> str:
+    """Get a complete manifest of a room — all NPCs, items, players, exits, and tile map.
+    Use this to understand what's in a location before acting or moving."""
+    import json
+    from memento.room_manifest import get_room_manifest
+    uuid = _resolve_entity_uuid(location_name)
+    if not uuid:
+        return f"Location '{location_name}' not found."
+    manifest = get_room_manifest(uuid)
+    # Return a readable summary, not raw JSON
+    lines = [f"=== {manifest.get('name', 'Unknown')} ==="]
+    if manifest.get("summary"):
+        lines.append(manifest["summary"])
+    lines.append("")
+    npcs = manifest.get("npcs", [])
+    if npcs:
+        lines.append(f"NPCs ({len(npcs)}):")
+        for n in npcs:
+            lines.append(f"  - {n.get('name', '?')}")
+    items = manifest.get("items", [])
+    if items:
+        lines.append(f"Items ({len(items)}):")
+        for i in items:
+            lines.append(f"  - {i.get('name', '?')}")
+    players = manifest.get("players", [])
+    if players:
+        lines.append(f"Players ({len(players)}):")
+        for p in players:
+            lines.append(f"  - {p.get('name', '?')}")
+    exits = manifest.get("exits", [])
+    if exits:
+        lines.append(f"Exits ({len(exits)}):")
+        for e in exits:
+            lines.append(f"  - {e.get('direction', '?')} → {e.get('target', '?')}")
+    return "\n".join(lines)
