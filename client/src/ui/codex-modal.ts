@@ -38,9 +38,15 @@ interface CodexEntity {
   type: string;       // 'npc' | 'item' | 'location' | 'player'
   labels: string[];
   summary: string;
-  relationships: CodexRelationship[];
+  relationships?: CodexRelationship[];
   chain_data?: CodexChainData | null;
   rarity?: string;
+  equipped?: boolean;
+  slot_type?: string;
+  effects?: string[];
+  exits?: Array<{ direction: string; target: string }>;
+  current?: boolean;
+  direction?: string;
 }
 
 interface CodexResponse {
@@ -279,12 +285,25 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
       }
     }
 
-    // Player inventory (separate section)
-    if (invItems.length) {
-      const invHeader = createSectionHeader(`INVENTORY (${invItems.length})`, '#6a6a78');
-      sidebar.appendChild(invHeader);
+    // Player section — player name with inventory nested under it
+    const playerData = _codexData?.player;
+    if (playerData) {
+      // Add player entity to _allEntities if not there
+      if (!_allEntities.find(e => e.id === playerData.id)) {
+        _allEntities.push({
+          id: playerData.id,
+          name: playerData.name,
+          type: 'player',
+          labels: [playerData.archetype || 'Player'],
+          summary: '',
+        });
+      }
+      const playerHeader = createSectionHeader(`\u2663 ${playerData.name}`, TYPE_COLORS.player, true);
+      playerHeader.addEventListener('click', () => { _selectedId = playerData.id; render(); });
+      sidebar.appendChild(playerHeader);
+
       for (const item of invItems) {
-        const prefix = item.equipped ? '\u2022 ' : '  ';
+        const prefix = item.equipped ? '\u2694 ' : '  ';
         sidebar.appendChild(createSidebarItem(item, itemColor(item), prefix));
       }
     }
@@ -380,6 +399,50 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
       container.appendChild(summary);
     }
 
+    // Player-specific: show stats + inventory
+    if (entity.type === 'player') {
+      const playerData = _codexData?.player;
+      if (playerData) {
+        const statsDiv = document.createElement('div');
+        statsDiv.style.marginBottom = '12px';
+        statsDiv.innerHTML = `
+          <div style="color:#6a6a78;font-size:10px;letter-spacing:1px;margin-bottom:4px">STATS</div>
+          <div>Level: <span style="color:#c8c8d0">${playerData.level || 1}</span></div>
+          <div>Health: <span style="color:#50c878">${playerData.health || 100}</span></div>
+          <div>Archetype: <span style="color:#8b5cf6">${esc(playerData.archetype || 'Unknown')}</span></div>
+        `;
+        container.appendChild(statsDiv);
+      }
+
+      const invItems = _codexData?.inventory || [];
+      if (invItems.length) {
+        const invHeader = document.createElement('div');
+        invHeader.style.color = '#6a6a78';
+        invHeader.style.fontSize = '10px';
+        invHeader.style.letterSpacing = '1px';
+        invHeader.style.marginBottom = '4px';
+        invHeader.textContent = `INVENTORY (${invItems.length})`;
+        container.appendChild(invHeader);
+
+        for (const item of invItems) {
+          const row = document.createElement('div');
+          row.style.cursor = 'pointer';
+          row.style.marginBottom = '2px';
+          const eqBadge = item.equipped ? ` <span style="color:#50c878">[E:${item.slot_type || '?'}]</span>` : '';
+          row.innerHTML = `<span style="color:${itemColor(item)}">${esc(item.name)}</span>${eqBadge}`;
+          if (item.effects?.length) {
+            row.innerHTML += ` <span style="color:#6a6a78;font-size:10px">${esc(item.effects[0])}</span>`;
+          }
+          row.addEventListener('click', () => { _selectedId = item.id; render(); });
+          container.appendChild(row);
+        }
+      }
+
+      const spacer = document.createElement('div');
+      spacer.style.marginTop = '12px';
+      container.appendChild(spacer);
+    }
+
     // Location-specific: show exits and contained entities
     if (entity.type === 'location' && entity.exits) {
       const exitsHeader = document.createElement('div');
@@ -404,35 +467,48 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
         container.appendChild(row);
       }
 
-      // Show NPCs and items present in this location
+      // Show who/what is present in this location
       if (entity.current) {
         const npcsHere = _codexData?.npcs || [];
         const itemsHere = _codexData?.ground_items || [];
-        if (npcsHere.length || itemsHere.length) {
-          const presHeader = document.createElement('div');
-          presHeader.style.color = '#6a6a78';
-          presHeader.style.fontSize = '10px';
-          presHeader.style.letterSpacing = '1px';
-          presHeader.style.margin = '12px 0 4px';
-          presHeader.textContent = 'PRESENT';
-          container.appendChild(presHeader);
+        const playerHere = _codexData?.player;
 
-          for (const npc of npcsHere) {
-            const row = document.createElement('div');
-            row.style.color = TYPE_COLORS.npc;
-            row.style.cursor = 'pointer';
-            row.textContent = `\u25CF ${npc.name}`;
-            row.addEventListener('click', () => { _selectedId = npc.id; render(); });
-            container.appendChild(row);
-          }
-          for (const item of itemsHere) {
-            const row = document.createElement('div');
-            row.style.color = itemColor(item);
-            row.style.cursor = 'pointer';
-            row.textContent = `\u2022 ${item.name}`;
-            row.addEventListener('click', () => { _selectedId = item.id; render(); });
-            container.appendChild(row);
-          }
+        const presHeader = document.createElement('div');
+        presHeader.style.color = '#6a6a78';
+        presHeader.style.fontSize = '10px';
+        presHeader.style.letterSpacing = '1px';
+        presHeader.style.margin = '12px 0 4px';
+        presHeader.textContent = 'PRESENT';
+        container.appendChild(presHeader);
+
+        // Player
+        if (playerHere) {
+          const row = document.createElement('div');
+          row.style.color = TYPE_COLORS.player;
+          row.style.cursor = 'pointer';
+          row.textContent = `\u2663 ${playerHere.name} (you)`;
+          row.addEventListener('click', () => { _selectedId = playerHere.id; render(); });
+          container.appendChild(row);
+        }
+
+        // NPCs
+        for (const npc of npcsHere) {
+          const row = document.createElement('div');
+          row.style.color = TYPE_COLORS.npc;
+          row.style.cursor = 'pointer';
+          row.textContent = `\u25CF ${npc.name}`;
+          row.addEventListener('click', () => { _selectedId = npc.id; render(); });
+          container.appendChild(row);
+        }
+
+        // Ground items only (not player inventory)
+        for (const item of itemsHere) {
+          const row = document.createElement('div');
+          row.style.color = itemColor(item);
+          row.style.cursor = 'pointer';
+          row.textContent = `\u2022 ${item.name}`;
+          row.addEventListener('click', () => { _selectedId = item.id; render(); });
+          container.appendChild(row);
         }
       }
 
@@ -442,7 +518,7 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
     }
 
     // Connections
-    if (entity.relationships && entity.relationships.length > 0) {
+    if (entity.relationships?.length) {
       const connHeader = document.createElement('div');
       connHeader.style.color = '#6a6a78';
       connHeader.style.fontSize = '10px';
