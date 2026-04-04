@@ -36,16 +36,46 @@ export interface WorldTimeDisplay {
   tick?: number;
 }
 
+export interface RoomMapNpc {
+  id?: string;
+  name?: string;
+  x?: number;
+  y?: number;
+  ch?: string;
+}
+
+export interface RoomMapItem {
+  id?: string;
+  name?: string;
+  x?: number;
+  y?: number;
+  ch?: string;
+}
+
+export interface RoomMapExit {
+  direction?: string;
+  target?: string;
+  target_id?: string;
+  x?: number;
+  y?: number;
+  ch?: string;
+}
+
+export interface RoomMapSpawn {
+  x?: number;
+  y?: number;
+}
+
 export interface RoomMapUpdate {
   id?: string;
   name?: string;
   width?: number;
   height?: number;
   tiles?: string[];
-  npcs?: Record<string, any>[];
-  items?: Record<string, any>[];
-  exits?: Record<string, any>[];
-  spawn?: Record<string, any>;
+  npcs?: RoomMapNpc[];
+  items?: RoomMapItem[];
+  exits?: RoomMapExit[];
+  spawn?: RoomMapSpawn;
 }
 
 export interface CombatEvent {
@@ -66,7 +96,7 @@ export interface EventSummary {
   combat?: CombatEvent | null;
   inventory_changes?: InventoryEvent[];
   quest_update?: string;
-  reputation_changes?: Record<string, any>;
+  reputation_changes?: Record<string, number>;
 }
 
 export interface QuestSummary {
@@ -97,7 +127,7 @@ export interface StateUpdate {
   inventory?: InventoryItemUpdate[] | null;
   room_map?: RoomMapUpdate | null;
   world_time?: WorldTimeDisplay | null;
-  skills?: Record<string, any> | null;
+  skills?: Record<string, number> | null;
   events?: EventSummary | null;
   active_quests?: QuestSummary[] | null;
   factions?: FactionStanding[] | null;
