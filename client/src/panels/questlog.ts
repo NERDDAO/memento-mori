@@ -18,6 +18,8 @@ export function renderQuestLogPanel(panel: TerminalPanel, quests: QuestEntry[]):
   const cols = panel.cols;
   const cells: CharCell[][] = [];
 
+  panel.clearHitRegions();
+
   if (!quests || quests.length === 0) {
     cells.push(textRow('No active quests', theme.colors.dim, cols));
     panel.paint(cells);
@@ -27,6 +29,8 @@ export function renderQuestLogPanel(panel: TerminalPanel, quests: QuestEntry[]):
   for (let i = 0; i < quests.length; i++) {
     const q = quests[i];
     if (i > 0) cells.push(emptyRow(cols));
+
+    const questStartRow = cells.length;
 
     // Quest name + done marker
     const nameSegs: Array<{ text: string; fg: string; attrs?: number }> = [
@@ -62,6 +66,16 @@ export function renderQuestLogPanel(panel: TerminalPanel, quests: QuestEntry[]):
       const desc = q.description.length > 60 ? q.description.slice(0, 57) + '...' : q.description;
       cells.push(textRow(desc, theme.colors.dim, cols));
     }
+
+    // Register hit region for the entire quest entry
+    const questEndRow = cells.length;
+    panel.registerHitRegion({
+      col: 0,
+      row: questStartRow,
+      width: cols,
+      height: questEndRow - questStartRow,
+      data: { questName: q.name },
+    });
   }
 
   panel.paint(cells);

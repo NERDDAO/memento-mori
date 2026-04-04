@@ -4,6 +4,7 @@ import { createTypewriter, type TypewriterController } from './typewriter';
 export interface Dialog {
   el: HTMLElement;
   show(npcName: string, npcRole: string, text: string): void;
+  showQuest(quest: { name: string; description: string; currentStage: number; totalStages: number; giver: string; completed: boolean }): void;
   dismiss(): void;
   readonly active: boolean;
 }
@@ -79,6 +80,38 @@ export function createDialog(): Dialog {
         maxWidth: DIALOG_MAX_WIDTH,
         container: body,
         charDelay: 25,
+        lineClass: 'tw-line',
+        cursorClass: 'tw-cursor',
+      });
+      currentTw.onComplete(() => { currentTw = null; });
+      currentTw.start();
+    },
+    showQuest(quest: { name: string; description: string; currentStage: number; totalStages: number; giver: string; completed: boolean }) {
+      if (currentTw) currentTw.cancel();
+
+      const status = quest.completed ? ' [COMPLETE]' : '';
+      titleBar.textContent = `\u2500 ${quest.name}${status} \u2500`;
+      body.innerHTML = '';
+      backdrop.style.display = '';
+
+      // Build quest detail text
+      const lines: string[] = [];
+      if (quest.giver) lines.push(`Quest giver: ${quest.giver}`);
+      lines.push('');
+      lines.push(quest.description);
+      lines.push('');
+      const filled = quest.totalStages > 0 ? Math.round((quest.currentStage / quest.totalStages) * 10) : 0;
+      const bar = '\u2588'.repeat(Math.min(10, filled)) + '\u2591'.repeat(10 - Math.min(10, filled));
+      lines.push(`Progress: ${bar} ${quest.currentStage}/${quest.totalStages}`);
+
+      const text = lines.join('\n');
+
+      currentTw = createTypewriter({
+        text,
+        font: DIALOG_FONT,
+        maxWidth: DIALOG_MAX_WIDTH,
+        container: body,
+        charDelay: 15,
         lineClass: 'tw-line',
         cursorClass: 'tw-cursor',
       });

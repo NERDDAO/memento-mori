@@ -414,6 +414,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const detail = (e as CustomEvent).detail;
     if (detail.action) handleAction(detail.action);
   });
+  questWin.panel!.canvas.addEventListener('panel-click', (e: Event) => {
+    const detail = (e as CustomEvent).detail;
+    if (detail.questName && gameState) {
+      const quest = gameState.quests.find(q => q.name === detail.questName);
+      if (quest) npcDialog.showQuest(quest);
+    }
+  });
 
   // 4. Map toggle with 'm' key (not when input focused)
   document.addEventListener('keydown', (e: KeyboardEvent) => {
