@@ -57,11 +57,14 @@ def _patch_get_edges(client: BonfiresClient) -> None:
 
         edges = result.get("edges", [])
 
+        # Build a node lookup from the expand response
+        nodes = {n.get("uuid", ""): n for n in result.get("nodes", [])}
+
         # Filter by direction
         filtered = []
         for edge in edges:
-            src = edge.get("source_node_uuid", edge.get("source", {}).get("uuid", ""))
-            tgt = edge.get("target_node_uuid", edge.get("target", {}).get("uuid", ""))
+            src = edge.get("source_node_uuid", "")
+            tgt = edge.get("target_node_uuid", "")
 
             if direction == "outgoing" and src != entity_uuid:
                 continue
@@ -73,13 +76,19 @@ def _patch_get_edges(client: BonfiresClient) -> None:
             if edge_type and edge_name.upper() != edge_type.upper():
                 continue
 
-            # Normalize to consistent format
+            # The "other" node is whichever end isn't entity_uuid
+            other_uuid = tgt if src == entity_uuid else src
+            other_node = nodes.get(other_uuid, {})
+            other_name = other_node.get("name", edge.get("other_name", ""))
+            other_labels = other_node.get("labels", edge.get("other_labels", []))
+
+            # Normalize to consistent format with target/source as dicts
             filtered.append({
                 "uuid": edge.get("uuid", ""),
                 "name": edge_name,
                 "fact": edge.get("fact", ""),
-                "source": edge.get("source", {"uuid": src}),
-                "target": edge.get("target", {"uuid": tgt}),
+                "source": {"uuid": src, "name": other_name if src != entity_uuid else "", "labels": other_labels if src != entity_uuid else []},
+                "target": {"uuid": tgt, "name": other_name if tgt != entity_uuid else "", "labels": other_labels if tgt != entity_uuid else []},
                 "valid_at": edge.get("valid_at"),
                 "expired_at": edge.get("expired_at"),
                 "invalid_at": edge.get("invalid_at"),
