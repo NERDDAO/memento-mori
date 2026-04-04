@@ -86,13 +86,14 @@ def _extract_summary(entity: dict) -> str:
 
 
 @router.get("/codex/{player_id}")
-async def get_codex(player_id: str):
+async def get_codex(player_id: str, location_uuid: str | None = None):
     """Get all manifest entities for a player, grouped by type, with inline chain data."""
     from memento.room_manifest import get_room_manifest
     from memento.inventory_manifest import get_inventory_manifest
 
-    # 1. Resolve player location
-    location_uuid = await _get_location_uuid(player_id)
+    # 1. Resolve player location (client can provide, otherwise look up)
+    if not location_uuid:
+        location_uuid = await _get_location_uuid(player_id)
 
     # 2. Fetch room manifest + inventory manifest in parallel
     room_task = (
@@ -177,7 +178,7 @@ async def get_codex(player_id: str):
             "chain": chain,
         })
 
-    # 6. Build location section
+    # 6. Build location section — current room + exit destinations
     locations = []
     if room_manifest:
         exits = []
@@ -185,13 +186,26 @@ async def get_codex(player_id: str):
             exits.append({
                 "direction": ex.get("direction", "unknown"),
                 "target": ex.get("target", "unknown"),
+                "target_id": ex.get("target_id", ""),
             })
         locations.append({
             "id": room_manifest.get("id", location_uuid or ""),
             "name": room_manifest.get("name", "Unknown"),
             "summary": room_manifest.get("summary", ""),
             "exits": exits,
+            "current": True,
         })
+        # Add exit destinations as separate location entries
+        for ex in exits:
+            if ex.get("target_id"):
+                locations.append({
+                    "id": ex["target_id"],
+                    "name": ex["target"],
+                    "summary": "",
+                    "exits": [],
+                    "current": False,
+                    "direction": ex["direction"],
+                })
 
     # 7. Build player section
     player_entity = await _get_kg_entity(player_id)

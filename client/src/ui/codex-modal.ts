@@ -132,7 +132,10 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
     // Fetch codex data
     try {
       const pid = playerId();
-      const resp = await fetch(`/api/codex/${pid}`);
+      const state = getState();
+      const locId = state?.roomMap?.id || '';
+      const url = locId ? `/api/codex/${pid}?location_uuid=${locId}` : `/api/codex/${pid}`;
+      const resp = await fetch(url);
       _codexData = await resp.json();
     } catch {
       _codexData = null;
@@ -142,8 +145,9 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
     _allEntities = [];
     if (_codexData) {
       _allEntities.push(...(_codexData.npcs || []));
-      _allEntities.push(...(_codexData.items || []));
-      if (_codexData.location) _allEntities.push(_codexData.location);
+      _allEntities.push(...(_codexData.ground_items || []));
+      _allEntities.push(...(_codexData.inventory || []));
+      _allEntities.push(...(_codexData.locations || []));
     }
 
     // Also include inventory + ground items from game state as fallback entities
@@ -235,7 +239,7 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
     const state = getState();
     const npcs = _codexData?.npcs || [];
     const items = _allEntities.filter(e => e.type === 'item');
-    const location = _codexData?.location || null;
+    const locations = _codexData?.locations || [];
 
     // NPCs section
     if (npcs.length) {
@@ -267,17 +271,21 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
       }
     }
 
-    // Location section
-    if (location) {
+    // Locations section
+    if (locations.length) {
       const locHeader = document.createElement('div');
       locHeader.style.color = '#6a6a78';
       locHeader.style.fontSize = '10px';
       locHeader.style.letterSpacing = '1px';
       locHeader.style.padding = '6px 8px 2px';
-      locHeader.textContent = 'LOCATION';
+      locHeader.textContent = `LOCATIONS (${locations.length})`;
       sidebar.appendChild(locHeader);
 
-      sidebar.appendChild(createSidebarItem(location, TYPE_COLORS.location));
+      for (const loc of locations) {
+        const label = loc.current ? `${loc.name} \u25C9` : loc.direction ? `${loc.direction} \u2192 ${loc.name}` : loc.name;
+        const el = createSidebarItem({ ...loc, name: label }, TYPE_COLORS.location);
+        sidebar.appendChild(el);
+      }
     }
 
     // Right detail panel
