@@ -91,22 +91,13 @@ class SessionManager:
         # 3. Find or create starting location
         location_name, loc_uuid = self._find_starting_location()
 
-        # 4. Place player at location and get room_map
+        # 4. Place player at location and get room manifest
         room_map = None
         try:
-            if not loc_uuid:
-                from memento.tools.kg import _resolve_entity_uuid
-                loc_uuid = _resolve_entity_uuid(location_name)
             if loc_uuid:
                 client.kg.create_edge(player_uuid, loc_uuid, "LOCATED_IN", "")
-                # Fetch room_map from location entity
-                try:
-                    loc_entity = client.kg.get_entity(loc_uuid)
-                    rm_raw = _extract_entity_attr(loc_entity, "room_map")
-                    if rm_raw:
-                        room_map = json.loads(rm_raw) if isinstance(rm_raw, str) else rm_raw
-                except Exception:
-                    logger.debug("Could not fetch room_map for %s", location_name)
+                from memento.room_manifest import get_room_manifest
+                room_map = get_room_manifest(loc_uuid)
         except Exception as e:
             logger.warning("Failed to place player at location", exc_info=True)
 
@@ -228,29 +219,29 @@ class SessionManager:
     def restore_player_state(self, player_id: str) -> dict:
         """Restore full game state for a returning player.
 
+        Uses UUID-based lookups only — no text search.
+        Room state comes from get_room_manifest(location_uuid).
+
         Returns: {player_id, player_name, location_name, health, max_health, skills, inventory, room_map}
         """
         client = get_client()
+        from memento.room_manifest import get_room_manifest
 
-        # Get player entity
+        # Get player entity by UUID
         try:
             entity = client.kg.get_entity(player_id)
         except Exception:
-            logger.warning("Failed to get player entity %s, using Threshold fallback", player_id)
-            # Player entity missing from KG — return Threshold with map
-            try:
-                from memento.seed import seed_threshold, THRESHOLD_MAP
-                seed_result = seed_threshold()
-                THRESHOLD_MAP["id"] = seed_result.get("uuid", "")
-                return {
-                    "player_id": player_id,
-                    "location_name": "The Threshold",
-                    "room_map": dict(THRESHOLD_MAP),
-                    "health": 100, "max_health": 100,
-                    "skills": {}, "inventory": [],
-                }
-            except Exception:
-                return {"player_id": player_id, "location_name": "The Threshold"}
+            logger.warning("Player entity not found: %s, using Threshold", player_id)
+            # Player missing from KG — place at Threshold with manifest
+            location_name, loc_uuid = self._find_starting_location()
+            room_map = get_room_manifest(loc_uuid) if loc_uuid else None
+            return {
+                "player_id": player_id,
+                "location_name": location_name,
+                "room_map": room_map,
+                "health": 100, "max_health": 100,
+                "skills": {}, "inventory": [],
+            }
 
         player_name = entity.get("name", "Unknown")
         health = int(str(_extract_entity_attr(entity, "health") or 100))
@@ -263,8 +254,9 @@ class SessionManager:
         except (json.JSONDecodeError, TypeError):
             pass
 
-        # Get location
+        # Get location via LOCATED_IN edge (UUID-based, no text search)
         location_name = "The Threshold"
+        loc_uuid = None
         room_map = None
         try:
             loc_edges = client.kg.get_edges(player_id, direction="outgoing", edge_type="LOCATED_IN")
@@ -273,33 +265,21 @@ class SessionManager:
                 if "Location" in loc_target.get("labels", []):
                     location_name = loc_target.get("name", "The Threshold")
                     loc_uuid = loc_target.get("uuid", loc_target.get("id", ""))
-                    # Try to get room_map from location entity
-                    if loc_uuid:
-                        try:
-                            loc_entity = client.kg.get_entity(loc_uuid)
-                            rm_raw = _extract_entity_attr(loc_entity, "room_map")
-                            if rm_raw:
-                                room_map = json.loads(rm_raw) if isinstance(rm_raw, str) else rm_raw
-                        except Exception:
-                            pass
                     break
         except Exception:
-            logger.debug("Location lookup failed for %s", player_id)
+            logger.debug("Location edge lookup failed for %s", player_id)
 
-        # Fallback: if no room_map found, use The Threshold's map
-        if not room_map:
-            try:
-                from memento.seed import seed_threshold, THRESHOLD_MAP
-                seed_result = seed_threshold()
-                threshold_uuid = seed_result.get("uuid", "")
-                if threshold_uuid:
-                    THRESHOLD_MAP["id"] = threshold_uuid
-                    room_map = dict(THRESHOLD_MAP)
-                    location_name = "The Threshold"
-            except Exception:
-                logger.debug("Threshold map fallback failed")
+        # Get room manifest (or Threshold fallback)
+        if loc_uuid:
+            room_map = get_room_manifest(loc_uuid)
+        else:
+            # No location edge — place at Threshold
+            _, threshold_uuid = self._find_starting_location()
+            if threshold_uuid:
+                room_map = get_room_manifest(threshold_uuid)
+                location_name = "The Threshold"
 
-        # Get inventory
+        # Get inventory via CARRIES edges (UUID-based)
         inventory = []
         try:
             carry_edges = client.kg.get_edges(player_id, direction="outgoing", edge_type="CARRIES")
