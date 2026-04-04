@@ -52,8 +52,10 @@ interface CodexEntity {
 
 interface CodexResponse {
   npcs: CodexEntity[];
-  items: CodexEntity[];
-  location: CodexEntity | null;
+  ground_items: CodexEntity[];
+  inventory: CodexEntity[];
+  locations: CodexEntity[];
+  player: { id: string; name: string; level: number; health: number; archetype: string; chain: Record<string, unknown> | null };
 }
 
 // --- Color map ---
