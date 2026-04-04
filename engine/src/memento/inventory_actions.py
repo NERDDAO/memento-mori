@@ -52,6 +52,21 @@ def _parse_entity_meta(entity: dict) -> dict[str, Any]:
     return {}
 
 
+def _update_entity_summary(client, entity_id: str, meta: dict) -> None:
+    """Update an entity's summary JSON, preserving name and labels.
+
+    The SDK's update_entity requires (uuid, name, labels, summary).
+    We fetch the current entity to get name/labels, then update summary.
+    """
+    try:
+        entity = client.kg.get_entity(entity_id)
+        name = entity.get("name", "Unknown")
+        labels = entity.get("labels", ["Item"])
+        client.kg.update_entity(entity_id, name, labels, json.dumps(meta))
+    except Exception:
+        logger.warning("Failed to update entity %s", entity_id)
+
+
 # ── Public Actions ──
 
 
@@ -86,7 +101,7 @@ def equip(player_uuid: str, item_id: str, slot: str) -> dict:
             entity = client.kg.get_entity(current["id"])
             meta = _parse_entity_meta(entity)
             meta["equipped"] = False
-            client.kg.update_entity(current["id"], {"summary": json.dumps(meta)})
+            _update_entity_summary(client, current["id"], meta)
         except Exception:
             logger.warning("Failed to unequip current item in slot %s", slot)
 
@@ -96,7 +111,7 @@ def equip(player_uuid: str, item_id: str, slot: str) -> dict:
         meta = _parse_entity_meta(entity)
         meta["equipped"] = True
         meta["slot_type"] = slot
-        client.kg.update_entity(item_id, {"summary": json.dumps(meta)})
+        _update_entity_summary(client, item_id, meta)
     except Exception as e:
         raise InventoryError(f"Failed to equip item: {e}") from e
 
@@ -121,7 +136,7 @@ def unequip(player_uuid: str, slot: str) -> dict:
         entity = client.kg.get_entity(current["id"])
         meta = _parse_entity_meta(entity)
         meta["equipped"] = False
-        client.kg.update_entity(current["id"], {"summary": json.dumps(meta)})
+        _update_entity_summary(client, current["id"], meta)
     except Exception as e:
         raise InventoryError(f"Failed to unequip: {e}") from e
 
@@ -164,7 +179,7 @@ def drop(
             entity = client.kg.get_entity(item_id)
             meta = _parse_entity_meta(entity)
             meta["quantity"] = new_qty
-            client.kg.update_entity(item_id, {"summary": json.dumps(meta)})
+            _update_entity_summary(client, item_id, meta)
 
             # Create new entity for the dropped portion
             split_uuid = client.kg.create_entity(
@@ -211,7 +226,7 @@ def drop(
             entity = client.kg.get_entity(item_id)
             meta = _parse_entity_meta(entity)
             meta["equipped"] = False
-            client.kg.update_entity(item_id, {"summary": json.dumps(meta)})
+            _update_entity_summary(client, item_id, meta)
         except Exception:
             pass
 
@@ -246,7 +261,7 @@ def use(player_uuid: str, item_id: str) -> dict:
         entity = client.kg.get_entity(item_id)
         meta = _parse_entity_meta(entity)
         meta["quantity"] = current_qty - 1
-        client.kg.update_entity(item_id, {"summary": json.dumps(meta)})
+        _update_entity_summary(client, item_id, meta)
     else:
         # Last one — delete from chain + expire KG edge
         _chain.drop_item(item_id, "")  # ownerId=0 signals deletion
@@ -313,9 +328,7 @@ def pickup(
                 existing_meta = _parse_entity_meta(existing_entity)
                 ground_qty = meta.get("quantity", 1)
                 existing_meta["quantity"] = existing_meta.get("quantity", 1) + ground_qty
-                client.kg.update_entity(
-                    bp_item["id"], {"summary": json.dumps(existing_meta)},
-                )
+                _update_entity_summary(client, bp_item["id"], existing_meta)
                 # Expire the ground entity's LOCATED_IN edge
                 _expire_located_in_edge(client, item_id, location_uuid, now)
                 # Chain: transfer to player (merge)
@@ -416,6 +429,6 @@ def _apply_item_effects(client, player_uuid: str, item: dict) -> None:
             logger.info("Healed %s for %d HP (%d → %d)", player_uuid, amount, current_hp, new_hp)
 
     try:
-        client.kg.update_entity(player_uuid, {"summary": json.dumps(player_meta)})
+        _update_entity_summary(client, player_uuid, player_meta)
     except Exception:
         logger.warning("Failed to apply effects for %s", player_uuid)
