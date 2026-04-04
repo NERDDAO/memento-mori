@@ -5693,366 +5693,358 @@ function createInventoryModal(getState) {
   };
 }
 
-// src/ui/wiki.ts
-var GATEWAY = "";
-var SUMMARY_MAX = 150;
-var ITEMS_PER_PAGE = 8;
-var LABEL_TABLE_MAP = {
-  Character: ["Characters", "Deaths"],
-  Player: ["Characters", "Deaths"],
-  Item: ["Items"],
-  Weapon: ["Items"],
-  Armor: ["Items"],
-  Consumable: ["Items"],
-  Location: ["Locations"],
-  Room: ["Locations"],
-  Region: ["Locations"]
+// src/ui/codex-modal.ts
+var TYPE_COLORS = {
+  npc: "#d4a574",
+  item: "#808080",
+  location: "#7aa2d4",
+  player: "#8b5cf6"
 };
-function tablesForLabels(labels) {
-  for (const label of labels) {
-    if (label in LABEL_TABLE_MAP)
-      return LABEL_TABLE_MAP[label];
-  }
-  return [];
+var RARITY_COLORS3 = {
+  common: "#808080",
+  uncommon: "#1eff00",
+  rare: "#0070dd",
+  epic: "#a335ee",
+  legendary: "#ff8000"
+};
+function itemColor(entity) {
+  if (entity.rarity && RARITY_COLORS3[entity.rarity])
+    return RARITY_COLORS3[entity.rarity];
+  return TYPE_COLORS.item;
 }
-async function fetchChainData(table, entityId) {
-  try {
-    const resp = await fetch(`${GATEWAY}/api/chain/${table}/${entityId}`);
-    if (resp.status === 200)
-      return resp.json();
-    return null;
-  } catch {
-    return null;
-  }
-}
-function formatTimestamp(ts) {
-  if (!ts)
-    return "Unknown";
-  return new Date(ts * 1000).toLocaleDateString();
+function entityColor(entity) {
+  if (entity.type === "item")
+    return itemColor(entity);
+  return TYPE_COLORS[entity.type] || "#c8c8d0";
 }
 function formatAddr(addr) {
   if (!addr || addr.length < 10 || addr === "0x0000000000000000000000000000000000000000")
     return "None";
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
-function renderCharacterChain(data, deaths) {
-  let html = '<div class="wiki-page-heading">ONCHAIN RECORD</div>';
-  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Status</span> ${data.alive ? "Alive" : "Dead"}</div>`;
-  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Level</span> ${data.level ?? "?"}</div>`;
-  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Wallet</span> ${formatAddr(String(data.wallet || ""))}</div>`;
-  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Created</span> ${formatTimestamp(Number(data.createdAt || 0))}</div>`;
-  if (deaths && Array.isArray(deaths) && deaths.length > 0) {
-    html += '<div class="wiki-page-heading" style="margin-top:8px">DEATHS</div>';
-    for (const d of deaths) {
-      html += `<div class="wiki-chain-death">`;
-      html += `<div>☠ ${esc(String(d.cause || "Unknown"))}</div>`;
-      html += `<div class="wiki-fact">${esc(String(d.location || ""))} · Lv${d.level} · Tick ${d.tick}</div>`;
-      html += `</div>`;
+function createCodexModal(getState, playerId) {
+  const backdrop = document.createElement("div");
+  backdrop.className = "dialog-backdrop";
+  backdrop.style.display = "none";
+  const win = document.createElement("div");
+  win.className = "dialog-win";
+  win.style.maxWidth = "700px";
+  win.style.width = "90vw";
+  backdrop.appendChild(win);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop)
+      close();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && backdrop.style.display !== "none")
+      close();
+  });
+  let _codexData = null;
+  let _selectedId = null;
+  let _allEntities = [];
+  function close() {
+    backdrop.style.display = "none";
+  }
+  async function open(entityId) {
+    backdrop.style.display = "";
+    win.innerHTML = "";
+    const loading = document.createElement("div");
+    loading.style.color = "#6a6a78";
+    loading.style.fontStyle = "italic";
+    loading.style.padding = "16px";
+    loading.textContent = "Loading...";
+    win.appendChild(loading);
+    try {
+      const pid = playerId();
+      const resp = await fetch(`/api/codex/${pid}`);
+      _codexData = await resp.json();
+    } catch {
+      _codexData = null;
     }
-  }
-  return html;
-}
-function renderItemChain(data) {
-  let html = '<div class="wiki-page-heading">ONCHAIN RECORD</div>';
-  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Rarity</span> ${esc(String(data.rarity || "Common"))}</div>`;
-  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Owner</span> ${formatAddr(String(data.ownerId || ""))}</div>`;
-  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Location</span> ${formatAddr(String(data.locationId || ""))}</div>`;
-  return html;
-}
-function renderLocationChain(data) {
-  let html = '<div class="wiki-page-heading">ONCHAIN RECORD</div>';
-  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Region</span> ${esc(String(data.region || "Unknown"))}</div>`;
-  html += `<div class="wiki-chain-row"><span class="wiki-chain-label">Discovered by</span> ${formatAddr(String(data.discoveredBy || ""))}</div>`;
-  return html;
-}
-function createWikiPanel() {
-  const el = document.createElement("div");
-  el.className = "wiki-panel";
-  el.innerHTML = '<div class="wiki-empty">Click an entity to browse</div>';
-  const cache = new Map;
-  const navStack = [];
-  let currentId = "";
-  let pages = [];
-  let pageIdx = 0;
-  let activeTab = "lore";
-  let currentLabels = [];
-  async function fetchEntity(id) {
-    if (cache.has(id))
-      return cache.get(id);
-    try {
-      const resp = await fetch(`${GATEWAY}/api/entity/${id}/neighbors`);
-      const data = await resp.json();
-      if (data.entity.name !== "Unknown") {
-        cache.set(id, data);
-        return data;
+    _allEntities = [];
+    if (_codexData) {
+      _allEntities.push(..._codexData.npcs || []);
+      _allEntities.push(..._codexData.items || []);
+      if (_codexData.location)
+        _allEntities.push(_codexData.location);
+    }
+    const state2 = getState();
+    if (state2) {
+      for (const inv of state2.inventory) {
+        if (!_allEntities.find((e) => e.id === inv.id)) {
+          _allEntities.push({
+            id: inv.id,
+            name: inv.name,
+            type: "item",
+            labels: [inv.rarity, inv.slot_type].filter(Boolean),
+            summary: inv.effects.join(", ") || "",
+            relationships: [],
+            rarity: inv.rarity
+          });
+        }
       }
-    } catch {}
-    return null;
-  }
-  async function fetchByName(name) {
-    try {
-      const resp = await fetch(`${GATEWAY}/api/entity/search/${encodeURIComponent(name)}`);
-      const data = await resp.json();
-      if (data && data.id && !data.error) {
-        return fetchEntity(data.id);
+      for (const gi of state2.location.items) {
+        if (!_allEntities.find((e) => e.id === gi.id)) {
+          _allEntities.push({
+            id: gi.id,
+            name: gi.name,
+            type: "item",
+            labels: [],
+            summary: "",
+            relationships: []
+          });
+        }
       }
-    } catch {}
-    return null;
+    }
+    if (entityId) {
+      _selectedId = entityId;
+    } else if (_codexData?.npcs?.length) {
+      _selectedId = _codexData.npcs[0].id;
+    } else if (_allEntities.length) {
+      _selectedId = _allEntities[0].id;
+    } else {
+      _selectedId = null;
+    }
+    render();
   }
-  function cleanSummary(raw) {
-    if (raw.startsWith("{") || raw.startsWith("[") || raw.startsWith('"'))
-      return "";
-    if (raw.length > SUMMARY_MAX)
-      return raw.slice(0, SUMMARY_MAX) + "…";
-    return raw;
+  function render() {
+    win.innerHTML = "";
+    const header = document.createElement("div");
+    header.className = "win-title dialog-title";
+    header.style.display = "flex";
+    header.style.justifyContent = "space-between";
+    header.style.alignItems = "center";
+    const title = document.createElement("span");
+    title.style.color = "#8b5cf6";
+    title.textContent = "CODEX";
+    const closeBtn = document.createElement("span");
+    closeBtn.textContent = "[×]";
+    closeBtn.style.color = "#e05050";
+    closeBtn.style.cursor = "pointer";
+    closeBtn.onclick = close;
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    win.appendChild(header);
+    const body = document.createElement("div");
+    body.style.display = "flex";
+    body.style.gap = "0";
+    body.style.fontFamily = "'Fira Code', monospace";
+    body.style.fontSize = "12px";
+    body.style.lineHeight = "1.6";
+    body.style.minHeight = "300px";
+    body.style.maxHeight = "60vh";
+    const sidebar = document.createElement("div");
+    sidebar.style.width = "140px";
+    sidebar.style.flexShrink = "0";
+    sidebar.style.borderRight = "1px solid #1a1a24";
+    sidebar.style.overflowY = "auto";
+    sidebar.style.padding = "8px 0";
+    const state2 = getState();
+    const npcs = _codexData?.npcs || [];
+    const items = _allEntities.filter((e) => e.type === "item");
+    const location = _codexData?.location || null;
+    if (npcs.length) {
+      const npcHeader = document.createElement("div");
+      npcHeader.style.color = "#6a6a78";
+      npcHeader.style.fontSize = "10px";
+      npcHeader.style.letterSpacing = "1px";
+      npcHeader.style.padding = "2px 8px";
+      npcHeader.textContent = `NPCs (${npcs.length})`;
+      sidebar.appendChild(npcHeader);
+      for (const npc of npcs) {
+        sidebar.appendChild(createSidebarItem(npc, TYPE_COLORS.npc));
+      }
+    }
+    if (items.length) {
+      const itemHeader = document.createElement("div");
+      itemHeader.style.color = "#6a6a78";
+      itemHeader.style.fontSize = "10px";
+      itemHeader.style.letterSpacing = "1px";
+      itemHeader.style.padding = "6px 8px 2px";
+      itemHeader.textContent = `ITEMS (${items.length})`;
+      sidebar.appendChild(itemHeader);
+      for (const item of items) {
+        sidebar.appendChild(createSidebarItem(item, itemColor(item)));
+      }
+    }
+    if (location) {
+      const locHeader = document.createElement("div");
+      locHeader.style.color = "#6a6a78";
+      locHeader.style.fontSize = "10px";
+      locHeader.style.letterSpacing = "1px";
+      locHeader.style.padding = "6px 8px 2px";
+      locHeader.textContent = "LOCATION";
+      sidebar.appendChild(locHeader);
+      sidebar.appendChild(createSidebarItem(location, TYPE_COLORS.location));
+    }
+    const detail = document.createElement("div");
+    detail.style.flex = "1";
+    detail.style.minWidth = "0";
+    detail.style.overflowY = "auto";
+    detail.style.padding = "8px 12px";
+    const selected = _allEntities.find((e) => e.id === _selectedId);
+    if (selected) {
+      renderDetail(detail, selected);
+    } else {
+      detail.style.color = "#6a6a78";
+      detail.style.fontStyle = "italic";
+      detail.style.paddingTop = "16px";
+      detail.textContent = "No entities to display";
+    }
+    body.appendChild(sidebar);
+    body.appendChild(detail);
+    win.appendChild(body);
   }
-  function buildPages(data) {
-    const { entity, neighbors, edges } = data;
-    const result = [];
-    let overviewHtml = "";
-    overviewHtml += `<div class="wiki-name">${esc(entity.name)}</div>`;
+  function createSidebarItem(entity, color) {
+    const item = document.createElement("div");
+    item.style.padding = "2px 8px";
+    item.style.cursor = "pointer";
+    item.style.color = color;
+    item.style.fontSize = "11px";
+    item.style.whiteSpace = "nowrap";
+    item.style.overflow = "hidden";
+    item.style.textOverflow = "ellipsis";
+    if (entity.id === _selectedId) {
+      item.style.background = "#1a1a24";
+    }
+    item.textContent = entity.name;
+    item.addEventListener("click", () => {
+      _selectedId = entity.id;
+      render();
+    });
+    return item;
+  }
+  function renderDetail(container, entity) {
+    const name = document.createElement("div");
+    name.style.color = entityColor(entity);
+    name.style.fontWeight = "bold";
+    name.style.fontSize = "15px";
+    name.style.marginBottom = "4px";
+    name.textContent = entity.name;
+    container.appendChild(name);
     if (entity.labels.length) {
-      overviewHtml += `<div class="wiki-labels">${entity.labels.map((l) => esc(l)).join(" · ")}</div>`;
+      const labels = document.createElement("div");
+      labels.style.color = "#6a6a78";
+      labels.style.fontSize = "10px";
+      labels.style.marginBottom = "8px";
+      labels.textContent = entity.labels.join(" · ");
+      container.appendChild(labels);
     }
-    const summary = cleanSummary(entity.summary);
-    if (summary) {
-      overviewHtml += `<div class="wiki-summary">${esc(summary)}</div>`;
+    if (entity.summary) {
+      const summary = document.createElement("div");
+      summary.style.color = "#c8c8d0";
+      summary.style.lineHeight = "1.5";
+      summary.style.marginBottom = "12px";
+      summary.textContent = entity.summary;
+      container.appendChild(summary);
     }
-    const grouped = new Map;
-    for (const edge of edges) {
-      const key = edge.relationship || "connected";
-      if (!grouped.has(key))
-        grouped.set(key, []);
-      grouped.get(key).push(edge);
-    }
-    const edgeNames = new Set(edges.flatMap((e) => [e.source, e.target]));
-    const extraNeighbors = neighbors.filter((n) => !edgeNames.has(n.name) && n.id !== entity.id);
-    if (grouped.size > 0 || extraNeighbors.length > 0) {
-      overviewHtml += '<div class="wiki-toc-label">Connections:</div>';
-      let tocIdx = 2;
-      for (const [rel, group] of grouped) {
-        overviewHtml += `<div class="wiki-toc-item" data-page="${tocIdx}">${formatRel(rel)} (${group.length})</div>`;
-        tocIdx += Math.ceil(group.length / ITEMS_PER_PAGE);
-      }
-      if (extraNeighbors.length) {
-        overviewHtml += `<div class="wiki-toc-item" data-page="${tocIdx}">Nearby (${extraNeighbors.length})</div>`;
-      }
-    }
-    result.push({ title: entity.name, html: overviewHtml, links: [] });
-    for (const [rel, group] of grouped) {
-      const chunks = chunk(group, ITEMS_PER_PAGE);
-      for (let ci = 0;ci < chunks.length; ci++) {
-        const label = formatRel(rel);
-        const suffix = chunks.length > 1 ? ` ${ci + 1}/${chunks.length}` : "";
-        let html = `<div class="wiki-page-heading">${esc(label)}${suffix}</div>`;
-        const links = [];
-        for (const edge of chunks[ci]) {
-          const other = edge.source === entity.name ? edge.target : edge.source;
-          html += `<div class="wiki-link" data-name="${esc(other)}">· ${esc(other)}</div>`;
-          if (edge.fact) {
-            const cleanFact = edge.fact.length > 80 ? edge.fact.slice(0, 80) + "…" : edge.fact;
-            html += `<div class="wiki-fact">${esc(cleanFact)}</div>`;
+    if (entity.relationships && entity.relationships.length > 0) {
+      const connHeader = document.createElement("div");
+      connHeader.style.color = "#6a6a78";
+      connHeader.style.fontSize = "10px";
+      connHeader.style.letterSpacing = "1px";
+      connHeader.style.marginBottom = "4px";
+      connHeader.textContent = "CONNECTIONS";
+      container.appendChild(connHeader);
+      for (const rel of entity.relationships) {
+        const row = document.createElement("div");
+        row.style.marginBottom = "4px";
+        const relType = document.createElement("span");
+        relType.style.color = "#6a6a78";
+        relType.style.fontSize = "10px";
+        relType.textContent = rel.relationship.replace(/_/g, " ") + " ";
+        const target = document.createElement("span");
+        const other = rel.source === entity.name ? rel.target : rel.source;
+        target.style.color = "#7aa2d4";
+        target.style.cursor = "pointer";
+        target.style.textDecoration = "underline dotted";
+        target.textContent = other;
+        target.addEventListener("click", () => {
+          const linked = _allEntities.find((e) => e.name === other);
+          if (linked) {
+            _selectedId = linked.id;
+            render();
           }
-          links.push({ name: other });
+        });
+        row.appendChild(relType);
+        row.appendChild(target);
+        if (rel.fact) {
+          const fact = document.createElement("div");
+          fact.style.color = "#6a6a78";
+          fact.style.fontSize = "11px";
+          fact.style.fontStyle = "italic";
+          fact.style.marginLeft = "8px";
+          fact.textContent = rel.fact.length > 100 ? rel.fact.slice(0, 100) + "…" : rel.fact;
+          row.appendChild(fact);
         }
-        result.push({ title: label, html, links });
+        container.appendChild(row);
       }
+      const spacer = document.createElement("div");
+      spacer.style.marginTop = "12px";
+      container.appendChild(spacer);
     }
-    if (extraNeighbors.length) {
-      const chunks = chunk(extraNeighbors, ITEMS_PER_PAGE);
-      for (let ci = 0;ci < chunks.length; ci++) {
-        const suffix = chunks.length > 1 ? ` ${ci + 1}/${chunks.length}` : "";
-        let html = `<div class="wiki-page-heading">Nearby${suffix}</div>`;
-        const links = [];
-        for (const n of chunks[ci]) {
-          html += `<div class="wiki-link" data-name="${esc(n.name)}" data-id="${esc(n.id)}">· ${esc(n.name)}</div>`;
-          links.push({ name: n.name, id: n.id });
-        }
-        result.push({ title: "Nearby", html, links });
-      }
-    }
-    return result;
-  }
-  function renderPage() {
-    if (!pages.length)
-      return;
-    const page = pages[pageIdx];
-    const total = pages.length;
-    let html = "";
-    const hasTabs = tablesForLabels(currentLabels).length > 0;
-    if (hasTabs)
-      html = renderTabBar() + html;
-    if (navStack.length > 1) {
-      const prev = navStack[navStack.length - 2];
-      html += `<div class="wiki-back" data-id="${esc(prev.id)}" data-name="${esc(prev.name)}">← ${esc(prev.name)}</div>`;
-    }
-    html += page.html;
-    if (total > 1) {
-      html += '<div class="wiki-pagination">';
-      html += `<span class="wiki-page-btn wiki-prev ${pageIdx === 0 ? "disabled" : ""}">◀</span>`;
-      html += `<span class="wiki-page-num">${pageIdx + 1}/${total}</span>`;
-      html += `<span class="wiki-page-btn wiki-next ${pageIdx >= total - 1 ? "disabled" : ""}">▶</span>`;
-      html += "</div>";
-    }
-    el.innerHTML = html;
-    if (hasTabs)
-      wireTabClicks();
-    const prevBtn = el.querySelector(".wiki-prev");
-    const nextBtn = el.querySelector(".wiki-next");
-    if (prevBtn && pageIdx > 0) {
-      prevBtn.addEventListener("click", () => {
-        pageIdx--;
-        renderPage();
-      });
-    }
-    if (nextBtn && pageIdx < total - 1) {
-      nextBtn.addEventListener("click", () => {
-        pageIdx++;
-        renderPage();
-      });
-    }
-    el.querySelectorAll(".wiki-toc-item").forEach((item) => {
-      item.addEventListener("click", () => {
-        const target = parseInt(item.dataset.page || "1", 10) - 1;
-        if (target >= 0 && target < total) {
-          pageIdx = target;
-          renderPage();
-        }
-      });
-    });
-    el.querySelectorAll(".wiki-link").forEach((link) => {
-      link.addEventListener("click", () => {
-        const id = link.dataset.id;
-        const name = link.dataset.name;
-        if (id)
-          show(id, name);
-        else
-          showByName(name);
-      });
-    });
-    el.querySelectorAll(".wiki-back").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset.id;
-        const name = btn.dataset.name;
-        navStack.pop();
-        show(id, name);
-      });
-    });
-    el.scrollTop = 0;
-  }
-  function renderFallback(name) {
-    el.innerHTML = `
-      <div class="wiki-name">${esc(name)}</div>
-      <div class="wiki-summary wiki-empty">No knowledge graph data available</div>
-    `;
-  }
-  function renderTabBar() {
-    return `<div class="wiki-tabs">
-      <span class="wiki-tab ${activeTab === "lore" ? "active" : ""}" data-tab="lore">Lore</span>
-      <span class="wiki-tab ${activeTab === "chain" ? "active" : ""}" data-tab="chain">Chain</span>
-    </div>`;
-  }
-  function wireTabClicks() {
-    el.querySelectorAll(".wiki-tab").forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const t = tab.dataset.tab;
-        if (t === activeTab)
-          return;
-        activeTab = t;
-        if (t === "lore")
-          renderPage();
-        else
-          renderChainTab(currentId, currentLabels);
-      });
-    });
-  }
-  async function renderChainTab(entityId, labels) {
-    const tables = tablesForLabels(labels);
-    if (!tables.length) {
-      el.innerHTML = '<div class="wiki-empty">No onchain data for this entity type</div>';
-      return;
-    }
-    el.innerHTML = '<div class="wiki-loading">Loading chain data…</div>';
-    let html = renderTabBar();
-    if (tables.includes("Characters")) {
-      const charData = await fetchChainData("Characters", entityId);
-      const deathData = await fetchChainData("Deaths", entityId);
-      if (charData) {
-        html += renderCharacterChain(charData.data, deathData ? Array.isArray(deathData.data) ? deathData.data : [deathData.data] : null);
-      } else {
-        html += '<div class="wiki-empty">No onchain data</div>';
-      }
-    } else if (tables.includes("Items")) {
-      const itemData = await fetchChainData("Items", entityId);
-      html += itemData ? renderItemChain(itemData.data) : '<div class="wiki-empty">No onchain data</div>';
-    } else if (tables.includes("Locations")) {
-      const locData = await fetchChainData("Locations", entityId);
-      html += locData ? renderLocationChain(locData.data) : '<div class="wiki-empty">No onchain data</div>';
-    }
-    el.innerHTML = html;
-    wireTabClicks();
-  }
-  async function show(entityId, entityName) {
-    if (entityId === currentId)
-      return;
-    currentId = entityId;
-    navStack.push({ id: entityId, name: entityName });
-    el.innerHTML = '<div class="wiki-loading">Loading…</div>';
-    const data = await fetchEntity(entityId);
-    activeTab = "lore";
-    if (data)
-      currentLabels = data.entity.labels;
-    if (data) {
-      pages = buildPages(data);
-      pageIdx = 0;
-      renderPage();
-    } else {
-      renderFallback(entityName);
+    if (entity.chain_data) {
+      renderChainSection(container, entity);
     }
   }
-  async function showByName(name) {
-    el.innerHTML = '<div class="wiki-loading">Loading…</div>';
-    const data = await fetchByName(name);
-    activeTab = "lore";
-    if (data)
-      currentLabels = data.entity.labels;
-    if (data) {
-      currentId = data.entity.id;
-      navStack.push({ id: data.entity.id, name: data.entity.name });
-      pages = buildPages(data);
-      pageIdx = 0;
-      renderPage();
-    } else {
-      renderFallback(name);
+  function renderChainSection(container, entity) {
+    const chain = entity.chain_data;
+    const card = document.createElement("div");
+    card.style.border = "1px solid #1a3a1a";
+    card.style.borderRadius = "3px";
+    card.style.padding = "8px";
+    card.style.marginTop = "4px";
+    const cardHeader = document.createElement("div");
+    cardHeader.style.color = "#50c878";
+    cardHeader.style.fontSize = "10px";
+    cardHeader.style.letterSpacing = "1px";
+    cardHeader.style.marginBottom = "4px";
+    cardHeader.textContent = "ONCHAIN";
+    card.appendChild(cardHeader);
+    if (entity.type === "npc" || entity.type === "player") {
+      if (chain.level != null)
+        addChainRow(card, "Level", String(chain.level));
+      if (chain.alive != null)
+        addChainRow(card, "Status", chain.alive ? "Alive" : "Dead");
+      if (chain.wallet)
+        addChainRow(card, "Wallet", formatAddr(chain.wallet));
+    } else if (entity.type === "item") {
+      if (chain.rarity)
+        addChainRow(card, "Rarity", String(chain.rarity));
+      if (chain.ownerId)
+        addChainRow(card, "Owner", formatAddr(chain.ownerId));
+      if (chain.locationId)
+        addChainRow(card, "Location", formatAddr(chain.locationId));
     }
+    container.appendChild(card);
+  }
+  function addChainRow(container, label, value) {
+    const row = document.createElement("div");
+    row.style.padding = "1px 0";
+    row.style.fontSize = "12px";
+    const lbl = document.createElement("span");
+    lbl.style.color = "#6a6a78";
+    lbl.style.display = "inline-block";
+    lbl.style.width = "70px";
+    lbl.style.fontSize = "10px";
+    lbl.style.letterSpacing = "0.5px";
+    lbl.style.textTransform = "uppercase";
+    lbl.textContent = label;
+    const val = document.createElement("span");
+    val.style.color = "#c8c8d0";
+    val.textContent = value;
+    row.appendChild(lbl);
+    row.appendChild(val);
+    container.appendChild(row);
   }
   return {
-    el,
-    show,
-    showByName,
-    clear() {
-      currentId = "";
-      navStack.length = 0;
-      pages = [];
-      pageIdx = 0;
-      activeTab = "lore";
-      currentLabels = [];
-      el.innerHTML = '<div class="wiki-empty">Click an entity to browse</div>';
+    el: backdrop,
+    open,
+    close,
+    get active() {
+      return backdrop.style.display !== "none";
     }
   };
-}
-function esc(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-function formatRel(rel) {
-  return rel.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-function chunk(arr, size) {
-  const result = [];
-  for (let i = 0;i < arr.length; i += size) {
-    result.push(arr.slice(i, i + size));
-  }
-  return result;
 }
 
 // src/ui/status.ts
@@ -6292,7 +6284,7 @@ var narrative;
 var eventsFeed;
 var header;
 var npcDialog;
-var wiki;
+var codex;
 var statusBar;
 var narrativeWin;
 var eventsWin;
@@ -6331,9 +6323,6 @@ function renderAllPanels() {
   renderQuestLogPanel(questWin.panel, gameState.quests);
   renderFactionsPanel(factionWin.panel, gameState.factions);
   updateMap(gameState, handleAction);
-  if (wiki && gameState.roomMap) {
-    wiki.show(gameState.roomMap.id, gameState.roomMap.name);
-  }
 }
 async function handleAction(action) {
   if (!action.trim() || action.length > 500)
@@ -6674,14 +6663,8 @@ document.addEventListener("DOMContentLoaded", () => {
   narrative = initNarrative(narrativeWin.body);
   eventsFeed = initNarrative(eventsWin.body);
   narrative.canvas.addEventListener("narrative-entity-click", (e) => {
-    const { entityId, entityName } = e.detail;
-    if (entityName) {
-      if (entityId) {
-        wiki.show(entityId, entityName);
-      } else {
-        wiki.showByName(entityName);
-      }
-    }
+    const { entityId } = e.detail;
+    codex.open(entityId || undefined);
   });
   commandWin.body.innerHTML = `
     <span class="prompt-char">&gt;</span>
@@ -6697,19 +6680,25 @@ document.addEventListener("DOMContentLoaded", () => {
   const worldMapWrap = document.createElement("div");
   worldMapWrap.className = "map-canvas-wrap";
   worldMapWrap.style.display = "none";
-  wiki = createWikiPanel();
   mapWin.body.appendChild(mapCanvasWrap);
   mapWin.body.appendChild(worldMapWrap);
-  mapWin.body.appendChild(wiki.el);
   initMapPanel(mapCanvasWrap, handleAction);
+  codex = createCodexModal(() => gameState, () => getSession().playerId);
+  document.body.appendChild(codex.el);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "k" && document.activeElement?.tagName !== "INPUT") {
+      if (codex.active)
+        codex.close();
+      else
+        codex.open();
+    }
+  });
   const worldRenderer = new WorldMapRenderer(worldMapWrap);
   let worldMapData = null;
   let showingWorldMap = false;
   worldRenderer.setClickHandler((roomId) => {
-    if (roomId && wiki) {
-      const room = worldMapData?.rooms.find((r) => r.id === roomId);
-      if (room)
-        wiki.show(roomId, room.name);
+    if (roomId) {
+      codex.open(roomId);
     }
   });
   async function fetchWorldMap() {
@@ -6756,13 +6745,8 @@ document.addEventListener("DOMContentLoaded", () => {
     overlays.show("char-create");
     narrative = initNarrative(narrativeWin.body);
     narrative.canvas.addEventListener("narrative-entity-click", (e) => {
-      const { entityId, entityName } = e.detail;
-      if (entityName) {
-        if (entityId)
-          wiki.show(entityId, entityName);
-        else
-          wiki.showByName(entityName);
-      }
+      const { entityId } = e.detail;
+      codex.open(entityId || undefined);
     });
     document.getElementById("char-name-input").focus();
   });
