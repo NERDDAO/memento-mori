@@ -22,12 +22,15 @@ import { renderFactionsPanel } from './panels/factions';
 import { createWindow } from './ui/window';
 import { createHeader, type WorldTime } from './ui/header';
 import { createDialog } from './ui/dialog';
+import { createInventoryModal } from './ui/inventory-modal';
 import { createWikiPanel } from './ui/wiki';
 import { createStatusBar } from './ui/status';
 import { hasProvider, connectWallet, formatAddress, getAddress } from './chain/wallet';
 import type { RoomMap } from './map/types';
 import { createOverlayManager, type OverlayManager } from './ui/overlay';
 import { startGame } from './flows/session-flow';
+import { initInventoryApi } from './state/inventory-api';
+import { setManageInventoryCallback } from './panels/inventory';
 
 let gameState: GameState;
 let narrative: NarrativeController;
@@ -247,6 +250,21 @@ function handleMessage(msg: any): void {
       }
       break;
     }
+    case 'state_update': {
+      // Standalone state_update (from inventory actions, not embedded in narrative)
+      if (msg.state_update && gameState) {
+        applyStateUpdate(gameState, msg.state_update);
+        renderAllPanels();
+        if (invModal.active) invModal.refresh();
+      }
+      break;
+    }
+    case 'room_items_changed': {
+      // Ground items changed — refresh room manifest
+      // The next state_update will have the updated room_map
+      if (invModal.active) invModal.refresh();
+      break;
+    }
     default:
       console.log('Unknown message:', msg);
   }
@@ -290,6 +308,9 @@ function enterGame(config: { playerName: string; walletAddress: string; isReturn
     {
       onGameReady(state, openingNarrative) {
         gameState = state;
+        // Init optimistic inventory API
+        const session = getSession();
+        initInventoryApi(gameState, session.playerId, renderAllPanels);
         if (gameState.roomMap) registerMapEntities(gameState.roomMap);
         renderAllPanels();
         if (openingNarrative) {
@@ -436,6 +457,19 @@ document.addEventListener('DOMContentLoaded', () => {
   // 5. Dialog
   npcDialog = createDialog();
   mount('dialog-mount', npcDialog.el);
+
+  // 5b. Inventory modal
+  const invModal = createInventoryModal(() => gameState);
+  document.body.appendChild(invModal.el);
+  setManageInventoryCallback(() => invModal.open());
+
+  // 'i' key toggles inventory modal (when input not focused)
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'i' && document.activeElement?.tagName !== 'INPUT') {
+      if (invModal.active) invModal.close();
+      else invModal.open();
+    }
+  });
 
   // 6. Narrative + Events feed
   narrative = initNarrative(narrativeWin.body);

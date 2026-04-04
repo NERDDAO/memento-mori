@@ -17,6 +17,18 @@ export interface LocationEntity {
   ascii_art?: string;  // cached ASCII art
 }
 
+export interface InventoryItem {
+  id: string;
+  name: string;
+  rarity: string;
+  slot_type: string;
+  equipped: boolean;
+  is_consumable: boolean;
+  is_quest_item: boolean;
+  effects: string[];
+  quantity: number;
+}
+
 export interface GameState {
   player: {
     name: string;
@@ -36,11 +48,7 @@ export interface GameState {
     items: LocationEntity[];
     players: LocationEntity[];
   };
-  inventory: Array<{
-    name: string;
-    rarity: string;
-    equipped: boolean;
-  }>;
+  inventory: InventoryItem[];
   quests: Array<{
     name: string;
     description: string;
@@ -120,9 +128,15 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
   }
   if (update.inventory) {
     state.inventory = update.inventory.map((i: any) => ({
+      id: i.id || '',
       name: i.name || '?',
       rarity: i.rarity || 'common',
+      slot_type: i.slot_type || '',
       equipped: i.equipped || false,
+      is_consumable: i.is_consumable || false,
+      is_quest_item: i.is_quest_item || false,
+      effects: i.effects || [],
+      quantity: i.quantity || 1,
     }));
   }
   if (update.skills) state.player.skills = update.skills as Record<string, number>;

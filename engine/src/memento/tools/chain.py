@@ -142,7 +142,15 @@ def record_death(character_uuid: str, cause: str, location: str, tick: int) -> N
     )
 
 
-def register_item(uuid: str, name: str, rarity: str, owner_uuid: str, location_uuid: str) -> None:
+def register_item(
+    uuid: str,
+    name: str,
+    rarity: str,
+    owner_uuid: str,
+    location_uuid: str,
+    slot_type: str = "",
+    quantity: int = 1,
+) -> None:
     """Register an item onchain."""
     _send_tx(
         "registerItem",
@@ -151,6 +159,8 @@ def register_item(uuid: str, name: str, rarity: str, owner_uuid: str, location_u
         rarity,
         _uuid_to_bytes32(owner_uuid) if owner_uuid else b"\x00" * 32,
         _uuid_to_bytes32(location_uuid) if location_uuid else b"\x00" * 32,
+        slot_type,
+        quantity,
     )
 
 

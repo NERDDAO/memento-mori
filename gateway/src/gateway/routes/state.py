@@ -11,6 +11,16 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+async def _get_inventory_items(player_id: str, state_result: dict) -> list[dict]:
+    """Get inventory items using manifest, with fallback to basic list."""
+    try:
+        from memento.inventory_manifest import get_inventory_as_state_update
+        return await asyncio.to_thread(get_inventory_as_state_update, player_id)
+    except Exception:
+        # Fallback to basic inventory from session state
+        return [{"name": n, "rarity": "common"} for n in state_result.get("inventory", [])]
+
+
 @router.get("/state")
 async def get_state(player_id: str = Query(...)):
     """Get current game state for a player from the KG (UUID-based)."""
@@ -26,7 +36,7 @@ async def get_state(player_id: str = Query(...)):
             "max_health": result.get("max_health", 100),
             "level": 1,
             "xp": 0,
-            "inventory": [{"name": n, "rarity": "common"} for n in result.get("inventory", [])],
+            "inventory": await _get_inventory_items(player_id, result),
         }
     except Exception:
         logger.error("State query failed", exc_info=True)

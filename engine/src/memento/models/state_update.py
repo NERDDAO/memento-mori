@@ -22,9 +22,15 @@ class EntityRefUpdate(BaseModel):
 
 
 class InventoryItemUpdate(BaseModel):
+    id: str = ""
     name: str = ""
     rarity: str = "common"
+    slot_type: str = ""
     equipped: bool = False
+    is_consumable: bool = False
+    is_quest_item: bool = False
+    effects: list[str] = []
+    quantity: int = 1
 
 
 class WorldTimeDisplay(BaseModel):
