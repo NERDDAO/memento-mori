@@ -115,7 +115,33 @@ class CharactersRequest(BaseModel):
 
 @router.post("/session/characters")
 async def list_characters(req: CharactersRequest):
-    """List existing characters for a wallet address."""
+    """List existing characters for a wallet address.
+
+    When chain is enabled, queries the MUD indexer for authoritative
+    wallet→character mapping. Falls back to KG search when chain is off.
+    """
+    from memento.config.chain import CHAIN_ENABLED
+
+    if CHAIN_ENABLED:
+        # Onchain path: query MUD indexer (authoritative)
+        from gateway.chain_client import fetch_characters_by_wallet, fetch_death_info
+        try:
+            characters = await fetch_characters_by_wallet(req.wallet_address)
+            for char in characters:
+                if not char.get("alive", True):
+                    death = await fetch_death_info(char["player_id"])
+                    char["is_dead"] = True
+                    char["death_cause"] = death.get("cause", "") if death else ""
+                    char["death_location"] = death.get("location", "") if death else ""
+                else:
+                    char["is_dead"] = False
+                    char["death_cause"] = ""
+                    char["death_location"] = ""
+            return {"characters": characters}
+        except Exception:
+            logger.warning("Onchain character lookup failed, falling back to KG", exc_info=True)
+
+    # Fallback: KG-based lookup
     try:
         from memento.session import SessionManager
         sm = SessionManager()
