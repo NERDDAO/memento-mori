@@ -27,7 +27,7 @@ class CreateSessionResponse(BaseModel):
     health: int = 100
     max_health: int = 100
     skills: dict = {}
-    inventory: list[str] = []
+    inventory: list = []
     room_map: dict | None = None
 
 
@@ -165,7 +165,7 @@ class JoinSessionResponse(BaseModel):
     max_health: int = 100
     archetype: str = ""
     skills: dict = {}
-    inventory: list[str] = []
+    inventory: list = []
     room_map: dict | None = None
 
 
