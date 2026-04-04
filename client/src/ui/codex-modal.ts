@@ -494,16 +494,22 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
         if (attrs.effects?.length) addSection(container, 'EFFECTS', attrs.effects.join(', '));
       }
 
-      // Location attributes
+      // Location attributes — grouped into one section
       if (entity.type === 'location') {
-        if (attrs.biome) addSection(container, 'BIOME', attrs.biome);
-        if (attrs.atmosphere) addSection(container, 'ATMOSPHERE', attrs.atmosphere);
-        if (attrs.culture) addSection(container, 'CULTURE', attrs.culture);
-        if (attrs.threats?.length) addSection(container, 'THREATS', attrs.threats.join(', '));
+        const locAttrs = document.createElement('div');
+        locAttrs.style.marginBottom = '8px';
+        let hasLocAttrs = false;
+        if (attrs.biome) { addSectionTo(locAttrs, 'BIOME', attrs.biome); hasLocAttrs = true; }
+        if (attrs.atmosphere) { addSectionTo(locAttrs, 'ATMOSPHERE', attrs.atmosphere); hasLocAttrs = true; }
+        if (attrs.culture) { addSectionTo(locAttrs, 'CULTURE', attrs.culture); hasLocAttrs = true; }
+        if (attrs.threats?.length) { addSectionTo(locAttrs, 'THREATS', attrs.threats.join(', ')); hasLocAttrs = true; }
         if (attrs.danger_level) {
           const skulls = '\u2620'.repeat(Math.min(attrs.danger_level, 5));
-          addSection(container, 'DANGER', `${skulls} (${attrs.danger_level}/10)`);
+          addSectionTo(locAttrs, 'DANGER', `${skulls} (${attrs.danger_level}/10)`);
+          hasLocAttrs = true;
         }
+        if (attrs.lore) { addSectionTo(locAttrs, 'LORE', attrs.lore); hasLocAttrs = true; }
+        if (hasLocAttrs) container.appendChild(locAttrs);
       }
     }
 
@@ -527,31 +533,30 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
       container.appendChild(spacer);
     }
 
-    // Location-specific: show exits and contained entities
+    // Location-specific: exits + present grouped into one section
     if (entity.type === 'location' && entity.exits) {
-      const exitsHeader = document.createElement('div');
-      exitsHeader.style.color = '#6a6a78';
-      exitsHeader.style.fontSize = '10px';
-      exitsHeader.style.letterSpacing = '1px';
-      exitsHeader.style.marginBottom = '4px';
-      exitsHeader.textContent = 'EXITS';
-      container.appendChild(exitsHeader);
+      const locSection = document.createElement('div');
+      locSection.style.marginBottom = '8px';
 
+      addSectionTo(locSection, 'EXITS', '');
+      // Replace the empty body with clickable exits
+      const exitsBody = locSection.lastElementChild?.querySelector('div:last-child');
+      if (exitsBody) exitsBody.remove();
       for (const ex of entity.exits) {
         const row = document.createElement('div');
-        row.style.marginBottom = '4px';
+        row.style.marginBottom = '2px';
         row.innerHTML = `<span style="color:#8b5cf6">${esc(ex.direction || '?')}</span> <span style="color:#6a6a78">\u2192</span> <span style="color:#7aa2d4;cursor:pointer">${esc(ex.target || '?')}</span>`;
         const targetSpan = row.querySelector('span:last-child');
         if (targetSpan) {
           targetSpan.addEventListener('click', () => {
             const linked = _allEntities.find(e => e.name === ex.target);
-            if (linked) { _selectedId = linked.id; render(); }
+            if (linked) { _selectedId = linked.id; _detailPage = 0; render(); }
           });
         }
-        container.appendChild(row);
+        locSection.appendChild(row);
       }
 
-      // Show who/what is present in this location
+      // Present — player, NPCs, ground items
       if (entity.current) {
         const npcsHere = _codexData?.npcs || [];
         const itemsHere = _codexData?.ground_items || [];
@@ -561,44 +566,37 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
         presHeader.style.color = '#6a6a78';
         presHeader.style.fontSize = '10px';
         presHeader.style.letterSpacing = '1px';
-        presHeader.style.margin = '12px 0 4px';
+        presHeader.style.margin = '8px 0 4px';
         presHeader.textContent = 'PRESENT';
-        container.appendChild(presHeader);
+        locSection.appendChild(presHeader);
 
-        // Player
         if (playerHere) {
           const row = document.createElement('div');
           row.style.color = TYPE_COLORS.player;
           row.style.cursor = 'pointer';
           row.textContent = `\u2663 ${playerHere.name} (you)`;
-          row.addEventListener('click', () => { _selectedId = playerHere.id; render(); });
-          container.appendChild(row);
+          row.addEventListener('click', () => { _selectedId = playerHere.id; _detailPage = 0; render(); });
+          locSection.appendChild(row);
         }
-
-        // NPCs
         for (const npc of npcsHere) {
           const row = document.createElement('div');
           row.style.color = TYPE_COLORS.npc;
           row.style.cursor = 'pointer';
           row.textContent = `\u25CF ${npc.name}`;
-          row.addEventListener('click', () => { _selectedId = npc.id; render(); });
-          container.appendChild(row);
+          row.addEventListener('click', () => { _selectedId = npc.id; _detailPage = 0; render(); });
+          locSection.appendChild(row);
         }
-
-        // Ground items only (not player inventory)
         for (const item of itemsHere) {
           const row = document.createElement('div');
           row.style.color = itemColor(item);
           row.style.cursor = 'pointer';
           row.textContent = `\u2022 ${item.name}`;
-          row.addEventListener('click', () => { _selectedId = item.id; render(); });
-          container.appendChild(row);
+          row.addEventListener('click', () => { _selectedId = item.id; _detailPage = 0; render(); });
+          locSection.appendChild(row);
         }
       }
 
-      const spacer = document.createElement('div');
-      spacer.style.marginTop = '12px';
-      container.appendChild(spacer);
+      container.appendChild(locSection);
     }
 
     // Connections
@@ -719,9 +717,9 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
     container.appendChild(row);
   }
 
-  function addSection(container: HTMLElement, label: string, text: string) {
+  function addSectionTo(parent: HTMLElement, label: string, text: string) {
     const section = document.createElement('div');
-    section.style.marginBottom = '8px';
+    section.style.marginBottom = '6px';
     const header = document.createElement('div');
     header.style.color = '#6a6a78';
     header.style.fontSize = '10px';
@@ -729,12 +727,18 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
     header.style.marginBottom = '2px';
     header.textContent = label;
     section.appendChild(header);
-    const body = document.createElement('div');
-    body.style.color = '#c8c8d0';
-    body.style.fontSize = '12px';
-    body.textContent = text;
-    section.appendChild(body);
-    container.appendChild(section);
+    if (text) {
+      const body = document.createElement('div');
+      body.style.color = '#c8c8d0';
+      body.style.fontSize = '12px';
+      body.textContent = text;
+      section.appendChild(body);
+    }
+    parent.appendChild(section);
+  }
+
+  function addSection(container: HTMLElement, label: string, text: string) {
+    addSectionTo(container, label, text);
   }
 
   return {
