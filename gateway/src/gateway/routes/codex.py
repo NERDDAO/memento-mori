@@ -1,6 +1,7 @@
 """Codex endpoint — assembles manifest-scoped entities with onchain data."""
 
 import asyncio
+import json as _json
 from fastapi import APIRouter, HTTPException
 
 from gateway.log import get_logger
@@ -72,6 +73,19 @@ async def _get_kg_entity(entity_id: str) -> dict | None:
         return None
 
 
+def _parse_attributes(entity: dict | None) -> dict:
+    """Parse attributes from a KG entity. Handles JSON string or dict."""
+    raw = (entity or {}).get("attributes", {})
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except (ValueError, TypeError):
+            raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    return raw
+
+
 def _extract_summary(entity: dict) -> str:
     """Extract plain-text summary from a KG entity (handles JSON blob summaries)."""
     import json
@@ -133,24 +147,29 @@ async def get_codex(player_id: str, location_uuid: str | None = None):
             "labels": labels,
             "summary": summary,
             "chain": chain,
+            "attributes": _parse_attributes(kg_entity),
         })
 
     # 4. Build ground items from room manifest
     raw_ground = room_manifest.get("items", []) if room_manifest else []
+    ground_entity_tasks = [_get_kg_entity(i["id"]) for i in raw_ground if i.get("id")]
     ground_chain_tasks = [
         _fetch_chain_for_entity(i["id"], ["Item"])
         for i in raw_ground if i.get("id")
     ]
+    ground_entities = await asyncio.gather(*ground_entity_tasks) if ground_entity_tasks else []
     ground_chains = await asyncio.gather(*ground_chain_tasks) if ground_chain_tasks else []
 
     ground_items = []
-    for raw, chain in zip(raw_ground, ground_chains):
+    for raw, kg_entity, chain in zip(raw_ground, ground_entities, ground_chains):
+        summary = _extract_summary(kg_entity) if kg_entity else ""
         ground_items.append({
             "id": raw.get("id", ""),
             "name": raw.get("name", "Unknown"),
             "labels": ["Item"],
-            "summary": "",
+            "summary": summary,
             "chain": chain,
+            "attributes": _parse_attributes(kg_entity),
         })
 
     # 5. Build inventory items (backpack + equipped)
@@ -181,6 +200,10 @@ async def get_codex(player_id: str, location_uuid: str | None = None):
     # 6. Build location section — current room + exit destinations
     locations = []
     if room_manifest:
+        loc_kg_entity = await _get_kg_entity(
+            room_manifest.get("id", location_uuid or "")
+        ) if room_manifest.get("id") or location_uuid else None
+
         exits = []
         for ex in room_manifest.get("exits", []):
             exits.append({
@@ -194,6 +217,7 @@ async def get_codex(player_id: str, location_uuid: str | None = None):
             "summary": room_manifest.get("summary", ""),
             "exits": exits,
             "current": True,
+            "attributes": _parse_attributes(loc_kg_entity),
         })
         # Add exit destinations as separate location entries
         for ex in exits:

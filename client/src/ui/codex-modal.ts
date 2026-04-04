@@ -47,6 +47,7 @@ interface CodexEntity {
   exits?: Array<{ direction: string; target: string }>;
   current?: boolean;
   direction?: string;
+  attributes?: Record<string, any>;
 }
 
 interface CodexResponse {
@@ -370,6 +371,68 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
       container.appendChild(summary);
     }
 
+    // Attributes section
+    const attrs = entity.attributes;
+    if (attrs && Object.keys(attrs).length > 0) {
+      // NPC attributes
+      if (entity.type === 'npc') {
+        if (attrs.personality) addSection(container, 'PERSONALITY', attrs.personality);
+        if (attrs.backstory) addSection(container, 'BACKSTORY', attrs.backstory);
+        if (attrs.stats && Object.keys(attrs.stats).length) {
+          const statsText = Object.entries(attrs.stats).map(([k, v]) => `${k} ${v}`).join(' \u00B7 ');
+          addSection(container, 'STATS', statsText);
+        }
+        if (attrs.skills && Object.keys(attrs.skills).length) {
+          const skillsText = Object.entries(attrs.skills).map(([k, v]) => `${k}: ${v}`).join(', ');
+          addSection(container, 'SKILLS', skillsText);
+        }
+        if (attrs.abilities?.length) {
+          const abDiv = document.createElement('div');
+          abDiv.style.marginBottom = '8px';
+          const abHeader = document.createElement('div');
+          abHeader.style.color = '#6a6a78';
+          abHeader.style.fontSize = '10px';
+          abHeader.style.letterSpacing = '1px';
+          abHeader.style.marginBottom = '4px';
+          abHeader.textContent = 'ABILITIES';
+          abDiv.appendChild(abHeader);
+          for (const ab of attrs.abilities) {
+            const row = document.createElement('div');
+            row.style.marginBottom = '4px';
+            row.innerHTML = `<span style="color:#8b5cf6">${esc(ab.name)}</span> <span style="color:#6a6a78">\u2014 ${esc(ab.description)}</span>`;
+            abDiv.appendChild(row);
+          }
+          container.appendChild(abDiv);
+        }
+        if (attrs.traits?.length) addSection(container, 'TRAITS', attrs.traits.join(', '));
+        if (attrs.disposition) addSection(container, 'DISPOSITION', attrs.disposition);
+        if (attrs.motivation) addSection(container, 'MOTIVATION', attrs.motivation);
+      }
+
+      // Item attributes
+      if (entity.type === 'item') {
+        const parts: string[] = [];
+        if (attrs.damage) parts.push(`Damage: ${attrs.damage}`);
+        if (attrs.defense) parts.push(`Defense: ${attrs.defense}`);
+        if (attrs.weight) parts.push(`Weight: ${attrs.weight}`);
+        if (parts.length) addSection(container, 'MECHANICS', parts.join(' \u00B7 '));
+        if (attrs.lore) addSection(container, 'LORE', attrs.lore);
+        if (attrs.effects?.length) addSection(container, 'EFFECTS', attrs.effects.join(', '));
+      }
+
+      // Location attributes
+      if (entity.type === 'location') {
+        if (attrs.biome) addSection(container, 'BIOME', attrs.biome);
+        if (attrs.atmosphere) addSection(container, 'ATMOSPHERE', attrs.atmosphere);
+        if (attrs.culture) addSection(container, 'CULTURE', attrs.culture);
+        if (attrs.threats?.length) addSection(container, 'THREATS', attrs.threats.join(', '));
+        if (attrs.danger_level) {
+          const skulls = '\u2620'.repeat(Math.min(attrs.danger_level, 5));
+          addSection(container, 'DANGER', `${skulls} (${attrs.danger_level}/10)`);
+        }
+      }
+    }
+
     // Player-specific: show stats + inventory
     if (entity.type === 'player') {
       const playerData = _codexData?.player;
@@ -580,6 +643,24 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
     row.appendChild(lbl);
     row.appendChild(val);
     container.appendChild(row);
+  }
+
+  function addSection(container: HTMLElement, label: string, text: string) {
+    const section = document.createElement('div');
+    section.style.marginBottom = '8px';
+    const header = document.createElement('div');
+    header.style.color = '#6a6a78';
+    header.style.fontSize = '10px';
+    header.style.letterSpacing = '1px';
+    header.style.marginBottom = '2px';
+    header.textContent = label;
+    section.appendChild(header);
+    const body = document.createElement('div');
+    body.style.color = '#c8c8d0';
+    body.style.fontSize = '12px';
+    body.textContent = text;
+    section.appendChild(body);
+    container.appendChild(section);
   }
 
   return {
