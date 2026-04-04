@@ -95,6 +95,11 @@ export async function joinSession(playerId: string): Promise<SessionCreateRespon
 }
 
 function connectWebSocket(): void {
+  // Close existing WS to prevent stale reconnect loops
+  if (ws) {
+    ws.onclose = null;
+    ws.close();
+  }
   ws = new WebSocket(`${WS_URL}/${session.playerId}`);
   ws.onopen = () => {
     session.connected = true;
