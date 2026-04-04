@@ -87,39 +87,104 @@ async def entity_exists_onchain(entity_id: str, labels: list[str]) -> bool:
     return result is not None
 
 
+MUD_WORLD_ADDRESS = os.getenv("MUD_WORLD_ADDRESS", "")
+CHAIN_ID = 31337  # Local Anvil default
+
+
 async def fetch_characters_by_wallet(wallet_address: str) -> list[dict]:
     """Query MUD indexer for all Characters owned by a wallet address.
 
-    Uses the indexer's SQL API (requires ENABLE_UNSAFE_QUERY_API=true on indexer).
-    Returns list of character dicts with player_id, player_name, level, alive.
+    Fetches all store logs from the indexer, filters for Characters table
+    entries matching the wallet address, and decodes the MUD-encoded data.
+    Returns list of character dicts.
     """
-    sql_url = f"{MUD_INDEXER_URL}/api/sql"
+    if not MUD_WORLD_ADDRESS:
+        return []
+
     wallet_lower = wallet_address.lower()
+    logs_url = f"{MUD_INDEXER_URL}/api/logs"
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            resp = await client.get(sql_url, params={
-                "query": f"SELECT * FROM memento__Characters WHERE wallet = '{wallet_lower}'"
+            resp = await client.get(logs_url, params={
+                "input": f'{{"chainId":{CHAIN_ID},"address":"{MUD_WORLD_ADDRESS}","filters":[]}}'
             })
-            if resp.status_code == 200:
-                data = resp.json()
-                rows = data if isinstance(data, list) else data.get("rows", data.get("result", []))
-                characters = []
-                for row in rows:
-                    if isinstance(row, dict):
-                        characters.append({
-                            "player_id": bytes32_to_uuid(row.get("id", "")),
-                            "id_bytes32": row.get("id", ""),
-                            "player_name": row.get("name", "Unknown"),
-                            "level": int(row.get("level", 1)),
-                            "alive": bool(row.get("alive", True)),
-                            "health": int(row.get("level", 1)) * 100,
-                            "archetype": "",
-                        })
-                return characters
-            else:
-                logger.warning(f"MUD indexer SQL query returned {resp.status_code}")
+            if resp.status_code != 200:
+                logger.warning(f"MUD indexer returned {resp.status_code}")
                 return []
+
+            data = resp.json()
+            logs = data.get("logs", [])
+
+            characters = []
+            for log in logs:
+                args = log.get("args", {})
+                table_id = args.get("tableId", "")
+
+                # Check if this is a Characters table entry
+                # MUD encodes table names as bytes32 — "Characters" in memento namespace
+                try:
+                    table_name = bytes.fromhex(table_id.replace("0x", "")).rstrip(b"\x00").decode("utf-8", errors="ignore")
+                except Exception:
+                    continue
+
+                if "Characters" not in table_name:
+                    continue
+
+                # Decode the static data (wallet, entityType, level, alive, createdAt)
+                # ABI layout: address(20) + uint8(1) + uint32(4) + bool(1) + uint256(32) = 58 bytes
+                static_data = args.get("staticData", "0x")
+                key_tuple = args.get("keyTuple", [])
+                dynamic_data = args.get("dynamicData", "0x")
+
+                if not key_tuple:
+                    continue
+
+                char_id = key_tuple[0]
+
+                try:
+                    static_bytes = bytes.fromhex(static_data.replace("0x", ""))
+                    if len(static_bytes) < 58:
+                        continue
+
+                    # Decode fields per MUD Characters schema:
+                    # wallet: address (20 bytes)
+                    char_wallet = "0x" + static_bytes[0:20].hex()
+                    # entityType: uint8 (1 byte)
+                    # entity_type = static_bytes[20]
+                    # level: uint32 (4 bytes)
+                    level = int.from_bytes(static_bytes[21:25], "big")
+                    # alive: bool (1 byte)
+                    alive = bool(static_bytes[25])
+                    # createdAt: uint256 (32 bytes)
+                    # created_at = int.from_bytes(static_bytes[26:58], "big")
+
+                    # Decode dynamic data (name: string)
+                    name = "Unknown"
+                    try:
+                        name_bytes = bytes.fromhex(dynamic_data.replace("0x", ""))
+                        if name_bytes:
+                            name = name_bytes.decode("utf-8", errors="ignore").rstrip("\x00")
+                    except Exception:
+                        pass
+
+                    if char_wallet.lower() != wallet_lower:
+                        continue
+
+                    characters.append({
+                        "player_id": bytes32_to_uuid(char_id),
+                        "id_bytes32": char_id,
+                        "player_name": name or "Unknown",
+                        "level": max(level, 1),
+                        "alive": alive,
+                        "health": max(level, 1) * 100,
+                        "archetype": "",
+                    })
+                except Exception as e:
+                    logger.debug(f"Failed to decode character record: {e}")
+                    continue
+
+            return characters
         except httpx.HTTPError as e:
             logger.warning(f"MUD indexer query failed: {e}")
             return []
@@ -128,30 +193,75 @@ async def fetch_characters_by_wallet(wallet_address: str) -> list[dict]:
 async def fetch_death_info(character_id: str) -> dict | None:
     """Query Deaths table for a character's death record.
 
-    Args:
-        character_id: UUID string of the character
-
+    Scans indexer logs for Deaths table entries matching the character ID.
     Returns dict with {cause, location, level, tick} or None.
     """
+    if not MUD_WORLD_ADDRESS:
+        return None
+
     b32 = uuid_to_bytes32_hex(character_id)
-    sql_url = f"{MUD_INDEXER_URL}/api/sql"
+    logs_url = f"{MUD_INDEXER_URL}/api/logs"
 
     async with httpx.AsyncClient(timeout=5.0) as client:
         try:
-            resp = await client.get(sql_url, params={
-                "query": f"SELECT * FROM memento__Deaths WHERE characterId = '{b32}'"
+            resp = await client.get(logs_url, params={
+                "input": f'{{"chainId":{CHAIN_ID},"address":"{MUD_WORLD_ADDRESS}","filters":[]}}'
             })
-            if resp.status_code == 200:
-                data = resp.json()
-                rows = data if isinstance(data, list) else data.get("rows", data.get("result", []))
-                if rows and isinstance(rows, list) and len(rows) > 0:
-                    row = rows[0]
+            if resp.status_code != 200:
+                return None
+
+            data = resp.json()
+            for log in data.get("logs", []):
+                args = log.get("args", {})
+                table_id = args.get("tableId", "")
+                try:
+                    table_name = bytes.fromhex(table_id.replace("0x", "")).rstrip(b"\x00").decode("utf-8", errors="ignore")
+                except Exception:
+                    continue
+
+                if "Deaths" not in table_name:
+                    continue
+
+                # Deaths key is keccak256(characterId, timestamp) — check static data
+                static_data = args.get("staticData", "0x")
+                dynamic_data = args.get("dynamicData", "0x")
+
+                try:
+                    static_bytes = bytes.fromhex(static_data.replace("0x", ""))
+                    # Deaths schema: characterId(32) + level(4) + tick(32) + timestamp(32) = 100 bytes
+                    if len(static_bytes) < 68:
+                        continue
+                    death_char_id = "0x" + static_bytes[0:32].hex()
+                    if death_char_id.rstrip("0") != b32.rstrip("0"):
+                        continue
+
+                    level = int.from_bytes(static_bytes[32:36], "big")
+                    tick = int.from_bytes(static_bytes[36:68], "big")
+
+                    # Dynamic data: cause(string) + location(string)
+                    cause = ""
+                    location = ""
+                    try:
+                        dyn_bytes = bytes.fromhex(dynamic_data.replace("0x", ""))
+                        # MUD encodes dynamic fields with length prefixes
+                        text = dyn_bytes.decode("utf-8", errors="ignore").rstrip("\x00")
+                        parts = text.split("\x00")
+                        if parts:
+                            cause = parts[0]
+                        if len(parts) > 1:
+                            location = parts[1]
+                    except Exception:
+                        pass
+
                     return {
-                        "cause": row.get("cause", ""),
-                        "location": row.get("location", ""),
-                        "level": int(row.get("level", 0)),
-                        "tick": int(row.get("tick", 0)),
+                        "cause": cause,
+                        "location": location,
+                        "level": level,
+                        "tick": tick,
                     }
+                except Exception:
+                    continue
+
             return None
         except httpx.HTTPError as e:
             logger.warning(f"Death info query failed: {e}")
