@@ -5,11 +5,15 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from collections.abc import Callable, Awaitable
 
 from memento.log import get_logger
 
 logger = get_logger(__name__)
+
+# Callback type aliases
+RoundCloseCallback = Callable[[str, list["PlayerAction"]], Awaitable[None]]
+ActionCallback = Callable[[str, int, float], Awaitable[None]]
 
 
 @dataclass
@@ -34,17 +38,17 @@ class RoundManager:
     def __init__(self, window_seconds: int = 20) -> None:
         self.window = window_seconds
         self.active_rounds: dict[str, Round] = {}  # location -> Round
-        self._callbacks: list[Any] = []
-        self._action_callbacks: list[Any] = []
+        self._callbacks: list[RoundCloseCallback] = []
+        self._action_callbacks: list[ActionCallback] = []
 
-    def on_round_close(self, callback: Any) -> None:
+    def on_round_close(self, callback: RoundCloseCallback) -> None:
         """Register a callback for when a round closes.
 
         Callback signature: async def callback(location: str, actions: list[PlayerAction])
         """
         self._callbacks.append(callback)
 
-    def on_action(self, callback: Any) -> None:
+    def on_action(self, callback: ActionCallback) -> None:
         """Register a callback fired on every submitted action.
 
         Callback signature: async def callback(location: str, action_count: int, deadline: float)

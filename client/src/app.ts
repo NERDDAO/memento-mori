@@ -6,7 +6,8 @@
 
 import { createInitialState, applyStateUpdate, type GameState } from './state/game-state';
 import { getSession, sendAction, setMessageHandler, setConnectionHandler, GATEWAY_URL } from './state/session';
-import { updateRoundState, type PhaseMessage } from './state/round-state';
+import { updateRoundState, type PhaseMessage as RoundPhaseMessage } from './state/round-state';
+import type { WsMessage, PresencePlayer } from './types/ws-messages';
 import { setKnownEntities } from './renderer/text-renderer';
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
@@ -106,7 +107,7 @@ function showDeathScreen(cause: string): void {
 }
 
 // --- WebSocket message handling ---
-function handleMessage(msg: any): void {
+function handleMessage(msg: WsMessage): void {
   switch (msg.type) {
     case 'narrative': {
       narrative.removeThinking();
@@ -205,7 +206,7 @@ function handleMessage(msg: any): void {
       break;
     }
     case 'phase': {
-      updateRoundState(msg as PhaseMessage);
+      updateRoundState(msg as RoundPhaseMessage);
       // Show phase progress in events feed
       const phase = msg.phase || '';
       const crew = msg.crew || '';
@@ -243,7 +244,7 @@ function handleMessage(msg: any): void {
     }
     case 'presence': {
       if (gameState) {
-        gameState.location.players = (msg.players || []).map((p: any) => ({
+        gameState.location.players = (msg.players || []).map((p: PresencePlayer) => ({
           name: p.player_name,
           id: p.player_id,
         }));

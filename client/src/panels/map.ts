@@ -4,7 +4,7 @@ import type { RoomMap } from '../map/types';
 import type { EntityCardData } from '../map/entity-card';
 import type { CardContent } from '../map/card-renderer';
 import { MapRenderer } from '../map/renderer';
-import { PlayerController, setupMapInput } from '../map/movement';
+import { PlayerController, setupMapInput, type RoomNpc, type RoomItem, type RoomExit } from '../map/movement';
 
 let renderer: MapRenderer | null = null;
 let controller: PlayerController | null = null;
@@ -68,17 +68,18 @@ export function updateMap(
       map,
       // onInteract — triggers crew call
       (type, entity) => {
-        if (type === 'npc') onAction(`talk to ${entity.name}`);
-        else if (type === 'item') onAction(`examine ${entity.name}`);
-        else if (type === 'exit') onAction(`go ${entity.direction}`);
+        if (type === 'npc') onAction(`talk to ${(entity as RoomNpc).name}`);
+        else if (type === 'item') onAction(`examine ${(entity as RoomItem).name}`);
+        else if (type === 'exit') onAction(`go ${(entity as RoomExit).direction}`);
       },
       // onProximity — show entity card on canvas
       (type, entity) => {
         if (!renderer) return;
         if (type && entity) {
-          // Fetch from KG (async) then update card
-          const entityId = entity.id || entity.name;
-          fetchEntityData(entityId, entity.name).then(data => {
+          // Derive display name/id — exits lack .id/.name, using direction/target instead
+          const entityId = 'id' in entity ? entity.id : ('target' in entity ? entity.target : '');
+          const entityName = 'name' in entity ? entity.name : ('target' in entity ? entity.target : '');
+          fetchEntityData(entityId || entityName, entityName).then(data => {
             const typeLabels: Record<string, string[]> = {
               npc: ['NPC'], item: ['Item'], exit: ['Exit'],
             };
@@ -87,7 +88,7 @@ export function updateMap(
             };
             const card: CardContent = {
               type: 'entity',
-              name: data.name || entity.name,
+              name: data.name || entityName,
               labels: data.labels.length ? data.labels : (typeLabels[type!] || []),
               summary: data.summary || '',
               hint: hints[type!] || '[Enter] Interact',

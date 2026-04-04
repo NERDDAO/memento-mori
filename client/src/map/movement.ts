@@ -1,8 +1,21 @@
 // src/map/movement.ts
 import type { RoomMap } from './types';
 
-export type InteractionCallback = (type: 'npc' | 'item' | 'exit', entity: any) => void;
-export type ProximityCallback = (type: 'npc' | 'item' | 'exit' | null, entity: any | null) => void;
+export type RoomNpc = RoomMap['npcs'][number];
+export type RoomItem = RoomMap['items'][number];
+export type RoomExit = RoomMap['exits'][number];
+
+/** Union of all placeable entities on the room map. */
+export type MapEntity = RoomNpc | RoomItem | RoomExit;
+
+/**
+ * Interaction/proximity callbacks receive a correlated (type, entity) pair.
+ * TypeScript cannot express the correlation between the two parameters in a
+ * single callback signature, so `entity` is typed as the full union and
+ * callers narrow with `type` guards + type assertions.
+ */
+export type InteractionCallback = (type: 'npc' | 'item' | 'exit', entity: MapEntity) => void;
+export type ProximityCallback = (type: 'npc' | 'item' | 'exit' | null, entity: MapEntity | null) => void;
 
 export class PlayerController {
   x: number;
@@ -110,7 +123,7 @@ const MOVE_KEYS: Record<string, [number, number]> = {
 
 export function setupMapInput(
   controller: PlayerController,
-  renderer: { render: (map: any, x: number, y: number) => void },
+  renderer: { render: (map: RoomMap, x: number, y: number) => void },
   map: { current: RoomMap | null },
 ): () => void {
   const handler = (e: KeyboardEvent) => {
