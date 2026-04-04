@@ -1,5 +1,9 @@
 """NPC generation flow — creates NPCs for a location."""
 
+import json
+import logging
+import re
+
 from memento.core import Flow, listen, start
 from pydantic import BaseModel
 
@@ -7,6 +11,50 @@ from memento.crews.npc_gen.planning import make_npc_planning_crew
 from memento.crews.npc_gen.concept import make_concept_crew
 from memento.crews.npc_gen.mechanics import make_mechanics_crew
 from memento.crews.npc_gen.finalization import make_finalization_crew
+
+_logger = logging.getLogger(__name__)
+
+
+def _extract_json_block(text: str) -> dict | None:
+    """Extract the first JSON object from text, handling optional ```json fences."""
+    # Try fenced block first
+    m = re.search(r"```(?:json)?\s*\n?(\{.*?\})\s*\n?```", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except (json.JSONDecodeError, TypeError):
+            pass
+    # Try bare JSON object
+    m = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return None
+
+
+def _persist_npc_attributes(finalization_result: str, entity_name: str) -> None:
+    """Parse structured attributes from finalization output and write to KG."""
+    attrs = _extract_json_block(finalization_result)
+    if not attrs:
+        _logger.debug("No JSON attributes found in finalization output for %s", entity_name)
+        return
+
+    # Extract UUID from the finalization result text
+    uuid_match = re.search(r"UUID:\s*([a-f0-9-]+)", finalization_result, re.IGNORECASE)
+    if not uuid_match:
+        _logger.debug("No UUID found in finalization output for %s", entity_name)
+        return
+
+    uuid = uuid_match.group(1)
+    try:
+        from memento.bonfires_client import get_client
+        client = get_client()
+        client.kg.update_entity(uuid, entity_name, [], "", attributes=attrs)
+        _logger.info("Persisted structured attributes for NPC '%s' (%s)", entity_name, uuid)
+    except Exception:
+        _logger.warning("Failed to persist attributes for NPC '%s'", entity_name, exc_info=True)
 
 
 class NPCGenState(BaseModel):
@@ -54,6 +102,12 @@ class NPCGenerationFlow(Flow[NPCGenState]):
             )
             result = final_crew.kickoff()
             self.state.npcs_created.append(result.raw[:200])
+
+            # Persist structured attributes extracted from the finalization output
+            try:
+                _persist_npc_attributes(result.raw, concept[:50])
+            except Exception:
+                _logger.debug("Attribute persistence skipped for NPC at %s", self.state.location_name)
 
             # Spawn Bonfires agent for this NPC
             try:

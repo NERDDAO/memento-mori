@@ -53,11 +53,19 @@ def make_concept_crew(
     personality_task = Task(
         description=(
             "Define this NPC's personality: traits, speech patterns, a secret, "
-            "and their primary motivation."
+            "and their primary motivation.\n\n"
+            "Output as a JSON object with these keys:\n"
+            '- "personality": 2-3 sentence personality description\n'
+            '- "traits": array of 3-5 personality trait words\n'
+            '- "speech_pattern": how they talk (accent, vocabulary, mannerisms)\n'
+            '- "secret": one hidden fact they keep\n'
+            '- "motivation": their primary motivation\n'
+            '- "disposition": one of hostile/unfriendly/neutral/friendly/allied\n'
+            "Include any additional color after the JSON."
         ),
         expected_output=(
-            "An NPC personality profile with: 3-5 personality traits, a distinctive speech "
-            "pattern or verbal habit, one secret they keep, and their primary motivation."
+            "A JSON object with personality, traits, speech_pattern, secret, motivation, "
+            "and disposition fields, followed by optional additional flavor text."
         ),
         agent=personality_writer,
         context=[concept_task],

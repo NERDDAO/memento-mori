@@ -31,12 +31,17 @@ def make_item_concept_crew(
         description=(
             f"Design {num_items} items that would be found at '{location_name}'. "
             f"Use the Roll Loot Table tool with rarity budget '{rarity_budget}' to determine rarities. "
-            f"For each item, provide: name, description, rarity, slot type "
-            f"(weapon/armor/accessory/consumable/none), and notable effects."
+            f"For each item, provide a structured JSON array where each element has:\n"
+            f'- "name": item name\n'
+            f'- "description": 1-2 sentence physical description\n'
+            f'- "rarity": one of common/uncommon/rare/epic/legendary\n'
+            f'- "slot_type": one of weapon/armor/accessory/ring or empty string\n'
+            f'- "effects": array of effect description strings\n'
+            f'- "lore": 1-2 sentence historical flavor text\n'
         ),
         expected_output=(
-            f"A list of {num_items} items, each with: name, description, rarity, "
-            "slot type, and notable effects."
+            f"A JSON array of {num_items} item objects, each with name, description, "
+            "rarity, slot_type, effects, and lore fields."
         ),
         agent=item_concepter,
     )

@@ -24,12 +24,19 @@ def make_item_mechanics_crew(item_concept: str) -> Crew:
     mechanics_task = Task(
         description=(
             f"Assign mechanical stats to this item: {item_concept}\n\n"
-            "Assign mechanical stats to this item: damage/defense values, weight, any status "
-            "effects it applies, and whether it's consumable or a quest item."
+            "Output a JSON object (or array of objects if multiple items) with these fields:\n"
+            '- "name": item name (from the concept)\n'
+            '- "damage": integer damage value (0 for non-weapons)\n'
+            '- "defense": integer defense value (0 for non-armor)\n'
+            '- "weight": integer weight (1-20)\n'
+            '- "effects": array of effect description strings\n'
+            '- "is_consumable": boolean\n'
+            '- "is_quest_item": boolean\n'
+            "Include a brief balance note after the JSON."
         ),
         expected_output=(
-            "A structured stat block with: damage or defense value (as appropriate), weight, "
-            "status effects (if any), consumable flag, quest item flag, and any special mechanics."
+            "A JSON object (or array) with name, damage, defense, weight, effects, "
+            "is_consumable, and is_quest_item fields, followed by a brief balance note."
         ),
         agent=item_mechanic,
     )

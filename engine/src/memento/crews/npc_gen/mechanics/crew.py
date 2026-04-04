@@ -37,22 +37,29 @@ def make_mechanics_crew(npc_concept: str) -> Crew:
         description=(
             f"NPC concept:\n{npc_concept}\n\n"
             "Assign attributes (strength, dexterity, constitution, intelligence, wisdom, "
-            "charisma) and 3-5 skills with levels 1-10 for this NPC."
+            "charisma) and 3-5 skills with levels 1-10 for this NPC.\n\n"
+            "Output the stats as a JSON object with these keys:\n"
+            '- "stats": {"STR": int, "DEX": int, "CON": int, "INT": int, "WIS": int, "CHA": int}\n'
+            '- "skills": {"skill_name": level, ...} (3-5 skills, levels 1-10)\n'
+            "Include a brief justification after the JSON."
         ),
         expected_output=(
-            "A stat block with: six attribute scores (1-20), and 3-5 named skills each "
-            "with a level between 1 and 10. Include a brief note justifying the choices."
+            "A JSON object with 'stats' (six attribute scores 3-18) and 'skills' "
+            "(3-5 named skills with levels 1-10), followed by a brief justification."
         ),
         agent=stat_builder,
     )
 
     ability_task = Task(
         description=(
-            "Select 1-3 abilities that reflect this NPC's combat style and background."
+            "Select 1-3 abilities that reflect this NPC's combat style and background.\n\n"
+            "Output as a JSON array:\n"
+            '[{"name": "...", "description": "..."}, ...]\n'
+            "Include a brief note connecting each ability to the NPC's background."
         ),
         expected_output=(
-            "A list of 1-3 abilities, each with a name, one-sentence description, "
-            "and how it connects to the NPC's background or role."
+            "A JSON array of 1-3 abilities, each with 'name' and 'description' fields, "
+            "plus a brief note on how each connects to the NPC's background or role."
         ),
         agent=ability_designer,
         context=[stat_task],

@@ -249,6 +249,19 @@ async def get_codex(player_id: str, location_uuid: str | None = None):
         player_info["health"] = player_chain.get("health", player_info["health"])
         player_info["archetype"] = player_chain.get("archetype", player_info["archetype"])
 
+    # Trigger background enrichment for entities missing attributes
+    import threading
+
+    def _bg_enrich():
+        try:
+            from memento.flows.enrichment import enrich_room_entities
+            if location_uuid:
+                enrich_room_entities(location_uuid)
+        except Exception:
+            pass
+
+    threading.Thread(target=_bg_enrich, daemon=True).start()
+
     return {
         "npcs": npcs,
         "ground_items": ground_items,

@@ -6,6 +6,7 @@ from .items import Item
 from .factions import Faction
 from .quests import Quest
 from .state_update import StateUpdate
+from .attributes import needs_enrichment
 
 __all__ = [
     "EntityRef",
@@ -20,4 +21,5 @@ __all__ = [
     "Faction",
     "Quest",
     "StateUpdate",
+    "needs_enrichment",
 ]
