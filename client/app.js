@@ -51,7 +51,7 @@ function applyStateUpdate(state, update) {
         name: n.name || "",
         id: n.id || "",
         role: n.role || "",
-        ascii_art: n.ascii_art || existing?.ascii_art
+        ascii_art: existing?.ascii_art
       };
     });
   }
@@ -62,15 +62,21 @@ function applyStateUpdate(state, update) {
         name: i.name || "",
         id: i.id || "",
         role: i.role || "",
-        ascii_art: i.ascii_art || existing?.ascii_art
+        ascii_art: existing?.ascii_art
       };
     });
   }
   if (update.inventory) {
     state.inventory = update.inventory.map((i) => ({
+      id: i.id || "",
       name: i.name || "?",
       rarity: i.rarity || "common",
-      equipped: i.equipped || false
+      slot_type: i.slot_type || "",
+      equipped: i.equipped || false,
+      is_consumable: i.is_consumable || false,
+      is_quest_item: i.is_quest_item || false,
+      effects: i.effects || [],
+      quantity: i.quantity || 1
     }));
   }
   if (update.skills)
@@ -4293,8 +4299,9 @@ function updateMap(state2, onAction) {
       if (!renderer)
         return;
       if (type && entity) {
-        const entityId = entity.id || entity.name;
-        fetchEntityData(entityId, entity.name).then((data) => {
+        const entityId = "id" in entity ? entity.id : ("target" in entity) ? entity.target : "";
+        const entityName = "name" in entity ? entity.name : ("target" in entity) ? entity.target : "";
+        fetchEntityData(entityId || entityName, entityName).then((data) => {
           const typeLabels = {
             npc: ["NPC"],
             item: ["Item"],
@@ -4307,7 +4314,7 @@ function updateMap(state2, onAction) {
           };
           const card = {
             type: "entity",
-            name: data.name || entity.name,
+            name: data.name || entityName,
             labels: data.labels.length ? data.labels : typeLabels[type] || [],
             summary: data.summary || "",
             hint: hints[type] || "[Enter] Interact"
@@ -4646,25 +4653,63 @@ var RARITY_COLORS = {
   epic: "#a335ee",
   legendary: "#ff8000"
 };
+var SLOT_GLYPHS = {
+  weapon: "⚔",
+  armor: "\uD83D\uDEE1",
+  accessory: "◇",
+  ring: "○"
+};
+var SLOT_ORDER = ["weapon", "armor", "accessory", "ring"];
+var onManageInventory = null;
+function setManageInventoryCallback(fn) {
+  onManageInventory = fn;
+}
 function renderInventoryPanel(panel, state2) {
   const cols = panel.cols;
   const cells = [];
-  if (state2.inventory.length === 0) {
-    cells.push(textRow("Empty", theme.colors.dim, cols));
-    panel.paint(cells);
-    return;
-  }
-  for (const item of state2.inventory) {
-    const color = RARITY_COLORS[item.rarity] || RARITY_COLORS.common;
-    const segments = [
-      { text: "· ", fg: theme.colors.dim },
-      { text: item.name, fg: color }
-    ];
-    if (item.equipped) {
-      segments.push({ text: " [E]", fg: theme.colors.heal });
+  cells.push(coloredRow([{ text: "EQUIPPED", fg: theme.colors.dim }], cols));
+  for (const slot of SLOT_ORDER) {
+    const glyph = SLOT_GLYPHS[slot] || "?";
+    const item = state2.inventory.find((i) => i.equipped && i.slot_type === slot);
+    if (item) {
+      const color = RARITY_COLORS[item.rarity] || RARITY_COLORS.common;
+      cells.push(coloredRow([
+        { text: `${glyph} `, fg: theme.colors.dim },
+        { text: item.name, fg: color }
+      ], cols));
+    } else {
+      cells.push(coloredRow([
+        { text: `${glyph} `, fg: theme.colors.dim },
+        { text: "- empty -", fg: "#3a3a48" }
+      ], cols));
     }
-    cells.push(coloredRow(segments, cols));
   }
+  cells.push(emptyRow(cols));
+  const backpack = state2.inventory.filter((i) => !i.equipped);
+  const count = backpack.length;
+  cells.push(coloredRow([
+    { text: "PACK", fg: theme.colors.dim },
+    { text: ` ${count}/10`, fg: theme.colors.primary }
+  ], cols));
+  if (count === 0) {
+    cells.push(textRow("  Empty", theme.colors.dim, cols));
+  } else {
+    for (const item of backpack) {
+      const color = RARITY_COLORS[item.rarity] || RARITY_COLORS.common;
+      const segments = [
+        { text: "· ", fg: theme.colors.dim },
+        { text: item.name, fg: color }
+      ];
+      if (item.quantity > 1) {
+        segments.push({ text: ` ×${item.quantity}`, fg: theme.colors.heal });
+      }
+      cells.push(coloredRow(segments, cols));
+    }
+  }
+  cells.push(emptyRow(cols));
+  cells.push(coloredRow([
+    { text: "  [manage inventory]", fg: theme.colors.accent }
+  ], cols));
   panel.paint(cells);
 }
 
@@ -5231,6 +5276,407 @@ function createDialog() {
   };
 }
 
+// src/state/inventory-api.ts
+var API_BASE = "/api/inventory";
+var _state = null;
+var _playerId = "";
+var _onRender = null;
+function initInventoryApi(state2, playerId, onRender) {
+  _state = state2;
+  _playerId = playerId;
+  _onRender = onRender;
+}
+function rerender() {
+  if (_onRender)
+    _onRender();
+}
+function snapshot() {
+  return _state ? _state.inventory.map((i) => ({ ...i })) : [];
+}
+function rollback(saved) {
+  if (_state) {
+    _state.inventory = saved;
+    rerender();
+  }
+}
+function locationUuid() {
+  return _state?.roomMap?.id || "";
+}
+async function post(path, body) {
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return { ok: false, detail: err.detail || `HTTP ${res.status}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, detail: String(e) };
+  }
+}
+async function equipItem(itemId, slot) {
+  if (!_state)
+    return "Not initialized";
+  const saved = snapshot();
+  const item = _state.inventory.find((i) => i.id === itemId);
+  if (!item)
+    return "Item not found";
+  const current = _state.inventory.find((i) => i.equipped && i.slot_type === slot);
+  if (current)
+    current.equipped = false;
+  item.equipped = true;
+  item.slot_type = slot;
+  rerender();
+  const result = await post("/equip", { player_id: _playerId, item_id: itemId, slot });
+  if (!result.ok) {
+    rollback(saved);
+    return result.detail || "Equip failed";
+  }
+  return null;
+}
+async function unequipItem(slot) {
+  if (!_state)
+    return "Not initialized";
+  const saved = snapshot();
+  const item = _state.inventory.find((i) => i.equipped && i.slot_type === slot);
+  if (!item)
+    return "No item in slot";
+  item.equipped = false;
+  rerender();
+  const result = await post("/unequip", { player_id: _playerId, slot });
+  if (!result.ok) {
+    rollback(saved);
+    return result.detail || "Unequip failed";
+  }
+  return null;
+}
+async function dropItem(itemId, quantity) {
+  if (!_state)
+    return "Not initialized";
+  const saved = snapshot();
+  const idx = _state.inventory.findIndex((i) => i.id === itemId);
+  if (idx === -1)
+    return "Item not found";
+  const item = _state.inventory[idx];
+  if (quantity && item.quantity > quantity) {
+    item.quantity -= quantity;
+  } else {
+    _state.inventory.splice(idx, 1);
+  }
+  rerender();
+  const result = await post("/drop", { player_id: _playerId, item_id: itemId, location_uuid: locationUuid(), quantity });
+  if (!result.ok) {
+    rollback(saved);
+    return result.detail || "Drop failed";
+  }
+  return null;
+}
+async function useItem(itemId) {
+  if (!_state)
+    return "Not initialized";
+  const saved = snapshot();
+  const idx = _state.inventory.findIndex((i) => i.id === itemId);
+  if (idx === -1)
+    return "Item not found";
+  const item = _state.inventory[idx];
+  if (item.quantity > 1) {
+    item.quantity -= 1;
+  } else {
+    _state.inventory.splice(idx, 1);
+  }
+  rerender();
+  const result = await post("/use", { player_id: _playerId, item_id: itemId });
+  if (!result.ok) {
+    rollback(saved);
+    return result.detail || "Use failed";
+  }
+  return null;
+}
+async function pickupItem(itemId) {
+  if (!_state)
+    return "Not initialized";
+  const saved = snapshot();
+  _state.inventory.push({
+    id: itemId,
+    name: "...",
+    rarity: "common",
+    slot_type: "",
+    equipped: false,
+    is_consumable: false,
+    is_quest_item: false,
+    effects: [],
+    quantity: 1
+  });
+  rerender();
+  const result = await post("/pickup", { player_id: _playerId, item_id: itemId, location_uuid: locationUuid() });
+  if (!result.ok) {
+    rollback(saved);
+    return result.detail || "Pickup failed";
+  }
+  return null;
+}
+
+// src/ui/inventory-modal.ts
+var RARITY_COLORS2 = {
+  common: "#808080",
+  uncommon: "#1eff00",
+  rare: "#0070dd",
+  epic: "#a335ee",
+  legendary: "#ff8000"
+};
+var SLOT_LABELS = {
+  weapon: "WPN",
+  armor: "ARM",
+  accessory: "ACC",
+  ring: "RNG"
+};
+var SLOT_ORDER2 = ["weapon", "armor", "accessory", "ring"];
+function createInventoryModal(getState) {
+  const backdrop = document.createElement("div");
+  backdrop.className = "dialog-backdrop";
+  backdrop.style.display = "none";
+  const win = document.createElement("div");
+  win.className = "dialog-win";
+  win.style.maxWidth = "600px";
+  win.style.width = "90vw";
+  backdrop.appendChild(win);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop)
+      close();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && backdrop.style.display !== "none")
+      close();
+  });
+  function close() {
+    backdrop.style.display = "none";
+  }
+  function open() {
+    backdrop.style.display = "";
+    refresh();
+  }
+  function refresh() {
+    const state2 = getState();
+    win.innerHTML = "";
+    const header = document.createElement("div");
+    header.className = "win-title dialog-title";
+    header.style.display = "flex";
+    header.style.justifyContent = "space-between";
+    header.style.alignItems = "center";
+    const title = document.createElement("span");
+    title.style.color = "#8b5cf6";
+    title.textContent = "INVENTORY";
+    const meta = document.createElement("span");
+    meta.style.color = "#6a6a78";
+    meta.style.fontSize = "12px";
+    const total = state2.inventory.length;
+    const weight = total * 5;
+    meta.textContent = `${weight}/50 wt · ${total} items`;
+    const closeBtn = document.createElement("span");
+    closeBtn.textContent = "[×]";
+    closeBtn.style.color = "#e05050";
+    closeBtn.style.cursor = "pointer";
+    closeBtn.onclick = close;
+    header.appendChild(title);
+    const rightSpan = document.createElement("span");
+    rightSpan.appendChild(meta);
+    rightSpan.appendChild(document.createTextNode(" "));
+    rightSpan.appendChild(closeBtn);
+    header.appendChild(rightSpan);
+    win.appendChild(header);
+    const body = document.createElement("div");
+    body.className = "win-body";
+    body.style.display = "flex";
+    body.style.gap = "16px";
+    body.style.fontFamily = "'Fira Code', monospace";
+    body.style.fontSize = "12px";
+    body.style.lineHeight = "1.6";
+    const slotsCol = document.createElement("div");
+    slotsCol.style.flex = "1";
+    slotsCol.style.minWidth = "0";
+    const slotsLabel = document.createElement("div");
+    slotsLabel.style.color = "#6a6a78";
+    slotsLabel.style.fontSize = "11px";
+    slotsLabel.style.marginBottom = "6px";
+    slotsLabel.textContent = "EQUIPMENT SLOTS";
+    slotsCol.appendChild(slotsLabel);
+    for (const slot of SLOT_ORDER2) {
+      const label = SLOT_LABELS[slot];
+      const item = state2.inventory.find((i) => i.equipped && i.slot_type === slot);
+      const card = createSlotCard(label, slot, item);
+      slotsCol.appendChild(card);
+    }
+    const packCol = document.createElement("div");
+    packCol.style.flex = "1";
+    packCol.style.minWidth = "0";
+    const backpack = state2.inventory.filter((i) => !i.equipped);
+    const packLabel = document.createElement("div");
+    packLabel.style.color = "#6a6a78";
+    packLabel.style.fontSize = "11px";
+    packLabel.style.marginBottom = "6px";
+    packLabel.textContent = `BACKPACK (${backpack.length}/10)`;
+    packCol.appendChild(packLabel);
+    if (backpack.length === 0) {
+      const empty = document.createElement("div");
+      empty.style.color = "#3a3a48";
+      empty.style.padding = "8px";
+      empty.textContent = "Empty";
+      packCol.appendChild(empty);
+    } else {
+      for (const item of backpack) {
+        packCol.appendChild(createBackpackCard(item));
+      }
+    }
+    const groundItems = state2.location.items;
+    if (groundItems.length > 0) {
+      const divider = document.createElement("div");
+      divider.style.borderTop = "1px solid #1a1a24";
+      divider.style.marginTop = "8px";
+      divider.style.paddingTop = "8px";
+      packCol.appendChild(divider);
+      const groundLabel = document.createElement("div");
+      groundLabel.style.color = "#6a6a78";
+      groundLabel.style.fontSize = "10px";
+      groundLabel.textContent = "GROUND (this room)";
+      packCol.appendChild(groundLabel);
+      for (const gi of groundItems) {
+        const row = document.createElement("div");
+        row.style.marginTop = "4px";
+        const name = document.createElement("span");
+        name.style.color = "#808080";
+        name.textContent = gi.name;
+        row.appendChild(name);
+        const pickup = createActionLink("pickup", "#50c878", async () => {
+          const err = await pickupItem(gi.id);
+          if (err)
+            console.warn("Pickup failed:", err);
+          else
+            refresh();
+        });
+        row.appendChild(document.createTextNode(" "));
+        row.appendChild(pickup);
+        packCol.appendChild(row);
+      }
+    }
+    body.appendChild(slotsCol);
+    body.appendChild(packCol);
+    win.appendChild(body);
+  }
+  function createSlotCard(label, slot, item) {
+    const card = document.createElement("div");
+    card.style.border = "1px solid #1a1a24";
+    card.style.padding = "8px";
+    card.style.marginBottom = "6px";
+    card.style.borderRadius = "3px";
+    card.style.background = item ? "#12121a" : "#0a0a0f";
+    if (item) {
+      const color = RARITY_COLORS2[item.rarity] || "#808080";
+      const top = document.createElement("div");
+      top.innerHTML = `<span style="color:#6a6a78">${label}</span> <span style="color:${color}">${item.name}</span>`;
+      card.appendChild(top);
+      const details = document.createElement("div");
+      details.style.color = "#6a6a78";
+      details.style.fontSize = "10px";
+      details.style.marginTop = "2px";
+      const parts = [];
+      if (item.effects.length)
+        parts.push(item.effects[0]);
+      parts.push(item.rarity);
+      const unequipLink = createActionLink("unequip", "#e05050", async () => {
+        const err = await unequipItem(slot);
+        if (err)
+          console.warn("Unequip failed:", err);
+        else
+          refresh();
+      });
+      details.textContent = parts.join(" · ") + " · ";
+      details.appendChild(unequipLink);
+      card.appendChild(details);
+    } else {
+      card.innerHTML = `<span style="color:#6a6a78">${label}</span> <span style="color:#3a3a48">— empty —</span>`;
+    }
+    return card;
+  }
+  function createBackpackCard(item) {
+    const card = document.createElement("div");
+    card.style.border = "1px solid #1a1a24";
+    card.style.padding = "8px";
+    card.style.marginBottom = "6px";
+    card.style.borderRadius = "3px";
+    card.style.background = "#12121a";
+    const color = RARITY_COLORS2[item.rarity] || "#808080";
+    const top = document.createElement("div");
+    const nameSpan = `<span style="color:${color}">${item.name}</span>`;
+    const qty = item.quantity > 1 ? ` <span style="color:#50c878;font-size:10px">×${item.quantity}</span>` : "";
+    const tag = item.slot_type ? ` <span style="color:#6a6a78;font-size:10px">${item.slot_type}</span>` : "";
+    top.innerHTML = nameSpan + qty + tag;
+    card.appendChild(top);
+    const actions = document.createElement("div");
+    actions.style.color = "#6a6a78";
+    actions.style.fontSize = "10px";
+    actions.style.marginTop = "2px";
+    const parts = [];
+    if (item.effects.length)
+      parts.push(item.effects[0]);
+    actions.textContent = parts.length ? parts.join(" · ") + " · " : "";
+    if (item.slot_type) {
+      actions.appendChild(createActionLink("equip", "#8b5cf6", async () => {
+        const err = await equipItem(item.id, item.slot_type);
+        if (err)
+          console.warn("Equip failed:", err);
+        else
+          refresh();
+      }));
+      actions.appendChild(document.createTextNode(" · "));
+    }
+    if (item.is_consumable) {
+      actions.appendChild(createActionLink("use", "#50c878", async () => {
+        const err = await useItem(item.id);
+        if (err)
+          console.warn("Use failed:", err);
+        else
+          refresh();
+      }));
+      actions.appendChild(document.createTextNode(" · "));
+    }
+    if (!item.is_quest_item) {
+      actions.appendChild(createActionLink("drop", "#e05050", async () => {
+        const err = await dropItem(item.id);
+        if (err)
+          console.warn("Drop failed:", err);
+        else
+          refresh();
+      }));
+    }
+    card.appendChild(actions);
+    return card;
+  }
+  function createActionLink(text, color, onClick) {
+    const link = document.createElement("span");
+    link.textContent = text;
+    link.style.color = color;
+    link.style.cursor = "pointer";
+    link.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onClick();
+    });
+    return link;
+  }
+  return {
+    el: backdrop,
+    open,
+    close,
+    refresh,
+    get active() {
+      return backdrop.style.display !== "none";
+    }
+  };
+}
+
 // src/ui/wiki.ts
 var GATEWAY = "";
 var SUMMARY_MAX = 150;
@@ -5745,7 +6191,22 @@ async function startGame(config, overlays, callbacks) {
   if (data.room_map)
     applyStateUpdate(gameState, { room_map: data.room_map });
   if (data.inventory) {
-    gameState.inventory = data.inventory.map((name) => ({ name, rarity: "common", equipped: false }));
+    gameState.inventory = data.inventory.map((item) => {
+      if (typeof item === "string") {
+        return { id: "", name: item, rarity: "common", slot_type: "", equipped: false, is_consumable: false, is_quest_item: false, effects: [], quantity: 1 };
+      }
+      return {
+        id: item.id || "",
+        name: item.name || "?",
+        rarity: item.rarity || "common",
+        slot_type: item.slot_type || "",
+        equipped: item.equipped || false,
+        is_consumable: item.is_consumable || false,
+        is_quest_item: item.is_quest_item || false,
+        effects: item.effects || [],
+        quantity: item.quantity || 1
+      };
+    });
   }
   if (!getSession().connected) {
     await Promise.race([
@@ -5828,6 +6289,7 @@ var questWin;
 var factionWin;
 var commandWin;
 var overlays;
+var invModal;
 function registerMapEntities(map) {
   if (!map)
     return;
@@ -6008,6 +6470,20 @@ function handleMessage(msg) {
       }
       break;
     }
+    case "state_update": {
+      if (msg.state_update && gameState) {
+        applyStateUpdate(gameState, msg.state_update);
+        renderAllPanels();
+        if (invModal.active)
+          invModal.refresh();
+      }
+      break;
+    }
+    case "room_items_changed": {
+      if (invModal.active)
+        invModal.refresh();
+      break;
+    }
     default:
       console.log("Unknown message:", msg);
   }
@@ -6044,6 +6520,8 @@ function enterGame(config) {
   startGame({ ...config }, overlays, {
     onGameReady(state2, openingNarrative) {
       gameState = state2;
+      const session2 = getSession();
+      initInventoryApi(gameState, session2.playerId, renderAllPanels);
       if (gameState.roomMap)
         registerMapEntities(gameState.roomMap);
       renderAllPanels();
@@ -6164,6 +6642,17 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   npcDialog = createDialog();
   mount("dialog-mount", npcDialog.el);
+  invModal = createInventoryModal(() => gameState);
+  document.body.appendChild(invModal.el);
+  setManageInventoryCallback(() => invModal.open());
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "i" && document.activeElement?.tagName !== "INPUT") {
+      if (invModal.active)
+        invModal.close();
+      else
+        invModal.open();
+    }
+  });
   narrative = initNarrative(narrativeWin.body);
   eventsFeed = initNarrative(eventsWin.body);
   narrative.canvas.addEventListener("narrative-entity-click", (e) => {

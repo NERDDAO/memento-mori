@@ -42,6 +42,10 @@ function rollback(saved: InventoryItem[]): void {
   }
 }
 
+function locationUuid(): string {
+  return _state?.roomMap?.id || '';
+}
+
 async function post(path: string, body: Record<string, unknown>): Promise<{ ok: boolean; detail?: string }> {
   try {
     const res = await fetch(`${API_BASE}${path}`, {
@@ -123,7 +127,7 @@ export async function dropItem(itemId: string, quantity?: number): Promise<strin
   }
   rerender();
 
-  const result = await post('/drop', { player_id: _playerId, item_id: itemId, quantity });
+  const result = await post('/drop', { player_id: _playerId, item_id: itemId, location_uuid: locationUuid(), quantity });
   if (!result.ok) {
     rollback(saved);
     return result.detail || 'Drop failed';
@@ -175,7 +179,7 @@ export async function pickupItem(itemId: string): Promise<string | null> {
   });
   rerender();
 
-  const result = await post('/pickup', { player_id: _playerId, item_id: itemId });
+  const result = await post('/pickup', { player_id: _playerId, item_id: itemId, location_uuid: locationUuid() });
   if (!result.ok) {
     rollback(saved);
     return result.detail || 'Pickup failed';

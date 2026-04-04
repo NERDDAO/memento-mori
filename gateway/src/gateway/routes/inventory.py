@@ -30,6 +30,7 @@ class UnequipRequest(BaseModel):
 class DropRequest(BaseModel):
     player_id: str
     item_id: str
+    location_uuid: str | None = None
     quantity: int | None = None
 
 
@@ -41,6 +42,7 @@ class UseRequest(BaseModel):
 class PickupRequest(BaseModel):
     player_id: str
     item_id: str
+    location_uuid: str | None = None
 
 
 async def _broadcast_inventory_update(player_id: str, manifest: dict) -> None:
@@ -123,8 +125,7 @@ async def drop_item(req: DropRequest):
     if not location:
         raise HTTPException(status_code=400, detail="Player location unknown")
 
-    # Resolve location UUID from session
-    location_uuid = await _get_location_uuid(req.player_id)
+    location_uuid = req.location_uuid or await _get_location_uuid(req.player_id)
     if not location_uuid:
         raise HTTPException(status_code=400, detail="Cannot resolve location")
 
@@ -161,7 +162,7 @@ async def pickup_item(req: PickupRequest):
     """Pick up an item from the current room."""
     from memento.inventory_actions import pickup, InventoryError
 
-    location_uuid = await _get_location_uuid(req.player_id)
+    location_uuid = req.location_uuid or await _get_location_uuid(req.player_id)
     if not location_uuid:
         raise HTTPException(status_code=400, detail="Cannot resolve location")
 
@@ -179,21 +180,40 @@ async def pickup_item(req: PickupRequest):
 
 
 async def _get_location_uuid(player_id: str) -> str | None:
-    """Resolve a player's current location UUID from the session."""
+    """Resolve a player's current location UUID.
+
+    Strategy: get location name from WebSocket hub, then search KG for its UUID.
+    Falls back to world.json threshold UUID if available.
+    """
+    from gateway.app import ws_hub
+
+    # 1. Get location name from WebSocket hub
+    location_name = ws_hub.player_locations.get(player_id) if ws_hub else None
+    if not location_name:
+        return None
+
+    # 2. Search KG for location entity by name
     try:
         from memento.bonfires_client import get_client
         client = await asyncio.to_thread(get_client)
-        entity = await asyncio.to_thread(client.kg.get_entity, player_id)
-        # Get outgoing LOCATED_IN edge from player to location
-        edges = await asyncio.to_thread(
-            client.kg.get_edges, player_id,
-            direction="outgoing", edge_type="LOCATED_IN",
-        )
-        for edge in edges:
-            if not (edge.get("expired_at") or edge.get("invalid_at")):
-                target = edge.get("target", {})
-                return target.get("uuid", target.get("id", ""))
-        return None
+        result = await asyncio.to_thread(client.kg.search, location_name, 5)
+        entities = result.get("entities", result.get("nodes", []))
+        for entity in entities:
+            if "Location" in entity.get("labels", []):
+                return entity.get("uuid", entity.get("id", ""))
     except Exception:
-        logger.debug("Failed to resolve location for %s", player_id)
-        return None
+        logger.debug("KG search failed for location %s", location_name)
+
+    # 3. Fallback: check world.json for threshold UUID
+    try:
+        import json
+        from pathlib import Path
+        world_json = Path(__file__).parent.parent.parent.parent / "world.json"
+        if world_json.exists():
+            data = json.loads(world_json.read_text())
+            if location_name == "The Threshold" and data.get("threshold_uuid"):
+                return data["threshold_uuid"]
+    except Exception:
+        pass
+
+    return None

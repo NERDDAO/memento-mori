@@ -269,36 +269,34 @@ def pickup(
     """
     client = get_client()
 
-    # Verify item is in the room
-    try:
-        located_edges = client.kg.get_edges(
-            item_id, direction="outgoing", edge_type="LOCATED_IN",
-        )
-        in_room = any(
-            (e.get("target", {}).get("uuid", "") == location_uuid
-             or e.get("target", {}).get("id", "") == location_uuid)
-            and not (e.get("expired_at") or e.get("invalid_at"))
-            for e in located_edges
-        )
-    except Exception:
-        in_room = False
-
-    if not in_room:
-        raise InventoryError(f"Item {item_id} is not in this room")
-
     # Check capacity
     manifest = get_inventory_manifest(player_uuid)
     if manifest["count"] >= DEFAULT_CAPACITY:
         raise InventoryError("Inventory full — cannot carry more items")
 
-    # Get item metadata
+    # Get item metadata — item may be a full KG entity or just in the room_map JSON
+    entity = None
     try:
         entity = client.kg.get_entity(item_id)
-    except Exception as e:
-        raise InventoryError(f"Item not found: {e}") from e
+    except Exception:
+        pass  # Item may only exist in room_map, not as standalone KG entity
 
-    meta = _parse_entity_meta(entity)
-    item_name = entity.get("name", "Unknown")
+    if entity:
+        meta = _parse_entity_meta(entity)
+        item_name = entity.get("name", "Unknown")
+    else:
+        # Item exists only in room_map — look it up from room manifest
+        from memento.room_manifest import get_room_manifest
+        room = get_room_manifest(location_uuid)
+        room_item = next(
+            (i for i in room.get("items", []) if i.get("id") == item_id),
+            None,
+        )
+        if not room_item:
+            raise InventoryError(f"Item {item_id} is not in this room")
+        item_name = room_item.get("name", "Unknown")
+        meta = {}
+
     item_rarity = meta.get("rarity", "common")
     is_stackable = bool(meta.get("stackable", False))
 
@@ -325,13 +323,24 @@ def pickup(
                 return get_inventory_manifest(player_uuid)
 
     # No merge — standard pickup
-    # 1. Chain tx: set ownerId=player
+    # 1. If item doesn't exist as KG entity yet (room_map-only), create it
+    if not entity:
+        try:
+            item_id = client.kg.create_entity(
+                name=item_name,
+                entity_type="Item",
+                summary=json.dumps(meta) if meta else "",
+            )
+        except Exception:
+            pass  # Non-fatal — edge creation may still work with the ID
+
+    # 2. Chain tx: set ownerId=player
     _chain.transfer_item(item_id, player_uuid)
 
-    # 2. Expire LOCATED_IN edge
+    # 3. Expire LOCATED_IN edge (if it exists)
     _expire_located_in_edge(client, item_id, location_uuid, now)
 
-    # 3. Create CARRIES edge
+    # 4. Create CARRIES edge
     client.kg.create_edge(
         player_uuid, item_id, "CARRIES",
         f"Picked up: {item_name}",
