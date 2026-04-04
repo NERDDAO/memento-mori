@@ -236,8 +236,21 @@ class SessionManager:
         try:
             entity = client.kg.get_entity(player_id)
         except Exception:
-            logger.warning("Failed to get player entity %s", player_id, exc_info=True)
-            return {"player_id": player_id, "location_name": "The Threshold"}
+            logger.warning("Failed to get player entity %s, using Threshold fallback", player_id)
+            # Player entity missing from KG — return Threshold with map
+            try:
+                from memento.seed import seed_threshold, THRESHOLD_MAP
+                seed_result = seed_threshold()
+                THRESHOLD_MAP["id"] = seed_result.get("uuid", "")
+                return {
+                    "player_id": player_id,
+                    "location_name": "The Threshold",
+                    "room_map": dict(THRESHOLD_MAP),
+                    "health": 100, "max_health": 100,
+                    "skills": {}, "inventory": [],
+                }
+            except Exception:
+                return {"player_id": player_id, "location_name": "The Threshold"}
 
         player_name = entity.get("name", "Unknown")
         health = int(str(_extract_entity_attr(entity, "health") or 100))
