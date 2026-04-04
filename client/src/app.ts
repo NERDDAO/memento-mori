@@ -51,6 +51,7 @@ let questWin: ReturnType<typeof createWindow>;
 let factionWin: ReturnType<typeof createWindow>;
 let commandWin: ReturnType<typeof createWindow>;
 let overlays: OverlayManager;
+let invModal: ReturnType<typeof createInventoryModal>;
 
 // --- Entity registration for narrative highlighting ---
 function registerMapEntities(map: import('./map/types').RoomMap | null): void {
@@ -459,7 +460,7 @@ document.addEventListener('DOMContentLoaded', () => {
   mount('dialog-mount', npcDialog.el);
 
   // 5b. Inventory modal
-  const invModal = createInventoryModal(() => gameState);
+  invModal = createInventoryModal(() => gameState);
   document.body.appendChild(invModal.el);
   setManageInventoryCallback(() => invModal.open());
 

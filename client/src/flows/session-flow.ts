@@ -51,7 +51,17 @@ export async function startGame(
   if (data.skills) gameState.player.skills = data.skills as Record<string, number>;
   if (data.room_map) applyStateUpdate(gameState, { room_map: data.room_map });
   if (data.inventory) {
-    gameState.inventory = data.inventory.map(name => ({ name, rarity: 'common', equipped: false }));
+    gameState.inventory = data.inventory.map((item: any) => ({
+      id: item.id || '',
+      name: typeof item === 'string' ? item : (item.name || '?'),
+      rarity: item.rarity || 'common',
+      slot_type: item.slot_type || '',
+      equipped: item.equipped || false,
+      is_consumable: item.is_consumable || false,
+      is_quest_item: item.is_quest_item || false,
+      effects: item.effects || [],
+      quantity: item.quantity || 1,
+    }));
   }
 
   // 4. Wait for WebSocket connection (with 10s timeout — WS auto-reconnects)
