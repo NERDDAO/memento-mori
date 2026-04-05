@@ -2,7 +2,7 @@
 pragma solidity >=0.8.24;
 
 import { System } from "@latticexyz/world/src/System.sol";
-import { Items } from "../codegen/index.sol";
+import { Items, ItemsData } from "../codegen/index.sol";
 
 contract ItemSystem is System {
   function registerItem(
@@ -12,7 +12,10 @@ contract ItemSystem is System {
     bytes32 ownerId,
     bytes32 locationId
   ) public {
-    Items.set(id, ownerId, locationId, name, rarity);
+    Items.set(
+      id,
+      ItemsData({ ownerId: ownerId, locationId: locationId, quantity: 1, name: name, rarity: rarity, slotType: "" })
+    );
   }
 
   function transferItem(bytes32 itemId, bytes32 newOwnerId) public {
