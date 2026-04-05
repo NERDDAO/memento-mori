@@ -56,6 +56,12 @@ class EngineMatrixListener:
         # Auto-join on invite
         self.client.add_event_callback(self._on_invite, InviteMemberEvent)  # type: ignore[arg-type]
         self.client.add_event_callback(self._on_action, RoomMessageText)  # type: ignore[arg-type]
+
+        # Start periodic heartbeat check (world evolution)
+        heartbeat_interval = int(os.getenv("MEMENTO_HEARTBEAT_INTERVAL", "300"))
+        if heartbeat_interval > 0:
+            asyncio.create_task(self._heartbeat_loop(heartbeat_interval))
+
         logger.info("Listening for player actions...")
         await self.client.sync_forever(timeout=30000)
 
@@ -92,6 +98,19 @@ class EngineMatrixListener:
             location = room.display_name or ""
             if location:
                 await asyncio.to_thread(self._reconcile_single_location, location)
+
+    @staticmethod
+    async def _heartbeat_loop(interval: int) -> None:
+        """Periodic heartbeat — checks stack and runs world evolution if needed."""
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                from memento.heartbeat import HeartbeatRunner
+                result = await asyncio.to_thread(HeartbeatRunner().run)
+                if not result.get("skipped"):
+                    logger.info("Heartbeat: %s", result)
+            except Exception:
+                logger.warning("Heartbeat loop failed (non-fatal)", exc_info=True)
 
     @staticmethod
     def _reconcile_single_location(location_name: str) -> None:

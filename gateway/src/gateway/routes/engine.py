@@ -696,3 +696,23 @@ async def transfer_item(req: InventoryTransferRequest):
 
     return {"status": "ok", "item_id": req.item_id,
             "from": req.from_entity, "to": req.to_entity}
+
+
+# ── World Heartbeat ──
+
+class HeartbeatRequest(BaseModel):
+    npc_id: str = Field("", max_length=64)
+
+@router.post("/engine/heartbeat")
+async def trigger_heartbeat(req: HeartbeatRequest):
+    """Trigger world evolution — processes stack and generates new content.
+
+    Callable by NPC agents when something significant happens.
+    Skips if the stack is empty or already processing.
+    """
+    def _run():
+        from memento.heartbeat import HeartbeatRunner
+        return HeartbeatRunner().run()
+
+    result = await asyncio.to_thread(_run)
+    return result
