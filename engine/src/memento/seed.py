@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from memento.bonfires_client import get_client
 from memento.log import get_logger
@@ -217,7 +216,15 @@ def seed_threshold() -> dict:
                 "ch": npc["ch"], "name": npc["name"],
                 "id": npc_uuid,
             })
-        except Exception as e:
+            try:
+                import asyncio
+                from gateway.chain_client import write_position
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(write_position(npc_uuid, uuid, npc["x"], npc["y"]))
+                loop.close()
+            except Exception:
+                pass
+        except Exception:
             logger.warning("NPC creation failed: %s", npc["name"], exc_info=True)
             npc_entries.append({
                 "x": npc["x"], "y": npc["y"],
@@ -256,7 +263,15 @@ def seed_threshold() -> dict:
                 "ch": item["ch"], "name": item["name"],
                 "id": item_uuid,
             })
-        except Exception as e:
+            try:
+                import asyncio
+                from gateway.chain_client import write_position
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(write_position(item_uuid, uuid, item["x"], item["y"]))
+                loop.close()
+            except Exception:
+                pass
+        except Exception:
             logger.warning("Item creation failed: %s", item["name"], exc_info=True)
             item_entries.append({
                 "x": item["x"], "y": item["y"],
@@ -289,7 +304,15 @@ def seed_threshold() -> dict:
         if tiles:
             terrain_bytes = pack_terrain(tiles, width, height)
             logger.info("Packed Threshold terrain: %dx%d (%d bytes)", width, height, len(terrain_bytes))
-            # Chain write will be wired when chain_writer has full ABI encoding
+            import asyncio
+            try:
+                from gateway.chain_client import write_terrain, write_position
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(write_terrain(uuid, width, height, terrain_bytes))
+                loop.close()
+                logger.info("Wrote Threshold terrain onchain")
+            except Exception:
+                logger.debug("Terrain chain write skipped", exc_info=True)
     except Exception:
         logger.debug("Terrain packing failed for Threshold", exc_info=True)
 

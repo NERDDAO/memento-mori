@@ -74,5 +74,15 @@ def mm_move(target_x: int, target_y: int) -> str:
     except Exception:
         logger.warning("Position KG update failed for %s", npc_uuid, exc_info=True)
 
+    # Write position onchain
+    try:
+        import asyncio
+        from gateway.chain_client import write_position
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(write_position(npc_uuid, location_uuid, target_x, target_y))
+        loop.close()
+    except Exception:
+        logger.debug("Position chain write skipped", exc_info=True)
+
     logger.info("NPC %s moved from (%d,%d) to (%d,%d)", ctx.get("name", ""), current_x, current_y, target_x, target_y)
     return f"Moved to ({target_x},{target_y}). Distance: {distance} tiles."
