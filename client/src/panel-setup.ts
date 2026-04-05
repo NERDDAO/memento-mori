@@ -8,6 +8,8 @@ import type { GameState } from './state/game-state';
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
 import { initMapPanel } from './panels/map';
+import { renderViewport } from './panels/viewport';
+import type { CardContent } from './map/card-renderer';
 import { createWindow } from './ui/window';
 import { createHeader } from './ui/header';
 import { createDialog } from './ui/dialog';
@@ -26,6 +28,8 @@ function mount(mountId: string, el: HTMLElement): void {
     mountEl.parentElement.replaceChild(el, mountEl);
   }
 }
+
+export type ViewportSetter = (card: import('./map/card-renderer').CardContent | null) => void;
 
 export interface PanelRefs {
   header: ReturnType<typeof createHeader>;
@@ -47,6 +51,9 @@ export interface PanelRefs {
   invModal: ReturnType<typeof createInventoryModal>;
   codex: ReturnType<typeof createCodexModal>;
   artViewer: ReturnType<typeof createArtViewer>;
+  viewportWin: ReturnType<typeof createWindow>;
+  setViewportCard: ViewportSetter;
+  setViewportScene: (lines: string[]) => void;
   actionInput: HTMLInputElement;
 }
 
@@ -65,6 +72,7 @@ export function initPanels(
   const characterWin = createWindow({ title: 'Character', id: 'character-win', className: 'sidebar-win', canvas: true, chromeless: true });
   const inventoryWin = createWindow({ title: 'Inventory', id: 'inventory-win', className: 'sidebar-win', canvas: true, chromeless: true });
   const presentWin = createWindow({ title: 'Present', id: 'present-win', className: 'sidebar-win', canvas: true, chromeless: true });
+  const viewportWin = createWindow({ title: 'Viewport', id: 'viewport-win', canvas: true, chromeless: true });
   const commandWin = createWindow({ title: 'Command', id: 'command-win', chromeless: true });
   // Overlay panels — keep chrome for context when floating
   const exitsWin = createWindow({ title: 'World', id: 'exits-win', className: 'sidebar-win', canvas: true });
@@ -78,6 +86,7 @@ export function initPanels(
   mount('character-mount', characterWin.el);
   mount('inventory-mount', inventoryWin.el);
   mount('present-mount', presentWin.el);
+  mount('viewport-mount', viewportWin.el);
   mount('command-mount', commandWin.el);
 
   // Overlay panels — float over the game canvas, toggled by hotkeys
@@ -150,6 +159,24 @@ export function initPanels(
   mapWin.body.appendChild(mapCanvasWrap);
   initMapPanel(mapCanvasWrap, handleAction);
 
+  // Viewport — render initial empty state
+  let currentCard: CardContent | null = null;
+  let currentScene: string[] | null = null;
+
+  const setViewportCard: ViewportSetter = (card) => {
+    currentCard = card;
+    currentScene = null; // card takes priority, clear scene
+    renderViewport(viewportWin.panel!, currentCard, currentScene);
+  };
+
+  const setViewportScene = (lines: string[]) => {
+    currentScene = lines;
+    currentCard = null;
+    renderViewport(viewportWin.panel!, currentCard, currentScene);
+  };
+
+  renderViewport(viewportWin.panel!, null, null);
+
   return {
     header,
     narrative,
@@ -164,6 +191,9 @@ export function initPanels(
     questWin,
     factionWin,
     commandWin,
+    viewportWin,
+    setViewportCard,
+    setViewportScene,
     statusBar,
     overlays,
     npcDialog,

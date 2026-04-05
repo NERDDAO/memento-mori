@@ -44,6 +44,7 @@ export interface AppRefs {
   registerMapEntities: (map: import('./map/types').RoomMap | null) => void;
   fetchPlayerWorldMap: () => Promise<void>;
   showDeathScreen: (cause: string) => void;
+  setViewportScene?: (lines: string[]) => void;
 }
 
 /** Tracks the last dialogue message from each NPC (keyed by display name). */
@@ -147,10 +148,10 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
         break;
       }
       case 'scene_art': {
-        // Render scene art as a narrative block
-        const artText = (msg.lines || []).join('\n');
-        if (artText) {
-          refs.narrative.addBlock(artText, 'scene-art');
+        const artLines = msg.lines || [];
+        // Send to viewport panel
+        if (artLines.length > 0) {
+          refs.setViewportScene?.(artLines);
         }
         break;
       }

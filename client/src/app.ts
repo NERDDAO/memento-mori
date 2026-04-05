@@ -10,7 +10,7 @@ import { getRoundState } from './state/round-state';
 import { setKnownEntities } from './renderer/text-renderer';
 import { createMessageHandler } from './message-handler';
 import { initNarrative, type NarrativeController } from './panels/narrative';
-import { updateMap } from './panels/map';
+import { updateMap, setViewportCallback } from './panels/map';
 import { renderCharacterPanel } from './panels/character';
 import { renderInventoryPanel } from './panels/inventory';
 import { renderWorldMapPanel } from './panels/worldmap';
@@ -175,6 +175,9 @@ document.addEventListener('DOMContentLoaded', () => {
     artViewer,
   } = panels);
 
+  // Wire viewport to receive card content from map proximity
+  setViewportCallback(panels.setViewportCard);
+
   // Hotkeys: m (map), i (inventory), k (codex), narrative-entity-click, npc-name-click
   initHotkeys({ exitsWin, questWin, factionWin, invModal, codex, npcDialog, narrative });
 
@@ -197,6 +200,7 @@ document.addEventListener('DOMContentLoaded', () => {
     registerMapEntities,
     fetchPlayerWorldMap,
     showDeathScreen,
+    setViewportScene: panels.setViewportScene,
   });
   setMessageHandler(handleMessage);
 

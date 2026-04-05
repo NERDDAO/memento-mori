@@ -77,15 +77,17 @@
     #tui-main {
       display: grid;
       grid-template-columns: 180px 1fr 280px;
-      grid-template-rows: 3fr 2fr;
+      grid-template-rows: 3fr auto 2fr;
       grid-template-areas:
-        "present  map  sidebar"
-        "events   narrative  narrative";
+        "present  map       sidebar"
+        "present  viewport  sidebar"
+        "events   narrative narrative";
       gap: 2px;
       overflow: hidden; min-height: 0;
     }
     #present-mount { grid-area: present; min-height: 0; }
     #map-mount { grid-area: map; min-height: 0; }
+    #viewport-mount { grid-area: viewport; min-height: 80px; max-height: 200px; }
     #sidebar-col {
       grid-area: sidebar;
       display: flex; flex-direction: column; gap: 2px; min-height: 0;
@@ -446,6 +448,7 @@
     <div id="tui-main">
       <div id="present-mount"></div>
       <div id="map-mount"></div>
+      <div id="viewport-mount"></div>
       <div id="sidebar-col">
         <div id="inventory-mount"></div>
         <div id="character-mount"></div>

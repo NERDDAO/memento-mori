@@ -11,6 +11,14 @@ let controller: PlayerController | null = null;
 let cleanupInput: (() => void) | null = null;
 const mapRef = { current: null as RoomMap | null };
 
+// Viewport callback — receives card content for the ASCII viewport panel
+let viewportCallback: ((card: CardContent | null) => void) | null = null;
+
+/** Set the callback that receives card content for the viewport panel. */
+export function setViewportCallback(cb: (card: CardContent | null) => void): void {
+  viewportCallback = cb;
+}
+
 // Entity data cache (fetched from KG)
 const entityCache: Map<string, EntityCardData> = new Map();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -106,6 +114,7 @@ export function updateMap(
               hint: hints[type!] || '[Enter] Interact',
             };
             renderer!.setCard(card);
+            viewportCallback?.(card);
             if (mapRef.current && controller) {
               renderer!.render(mapRef.current, controller.x, controller.y);
             }
@@ -142,4 +151,5 @@ function showPlayerCard(state: GameState): void {
     xpThreshold: state.player.xpThreshold,
   };
   renderer.setCard(card);
+  viewportCallback?.(card);
 }
