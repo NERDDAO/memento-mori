@@ -104,7 +104,10 @@ def check_proximity(
     max_distance: int = INTERACTION_RADIUS,
 ) -> bool:
     """Check if player is within interaction range (Manhattan distance)."""
-    return abs(player_pos[0] - target_pos[0]) + abs(player_pos[1] - target_pos[1]) <= max_distance
+    return (
+        abs(player_pos[0] - target_pos[0]) + abs(player_pos[1] - target_pos[1])
+        <= max_distance
+    )
 
 
 def query_active_quests(player_uuid: str) -> list[dict]:
@@ -113,22 +116,27 @@ def query_active_quests(player_uuid: str) -> list[dict]:
         return []
     try:
         from memento.bonfires_client import get_client
+
         client = get_client()
 
         # Use edge traversal — HAS_QUEST edges from player to quest entities
-        edges = client.kg.get_edges(player_uuid, direction="outgoing", edge_type="HAS_QUEST")
+        edges = client.kg.get_edges(
+            player_uuid, direction="outgoing", edge_type="HAS_QUEST"
+        )
         quests = []
         for edge in edges:
             target = edge.get("target", {})
             if "Quest" in target.get("labels", []):
-                quests.append({
-                    "name": target.get("name", "Unknown Quest"),
-                    "description": target.get("summary", ""),
-                    "giver": target.get("giver", ""),
-                    "current_stage": 0,
-                    "total_stages": 3,
-                    "completed": False,
-                })
+                quests.append(
+                    {
+                        "name": target.get("name", "Unknown Quest"),
+                        "description": target.get("summary", ""),
+                        "giver": target.get("giver", ""),
+                        "current_stage": 0,
+                        "total_stages": 3,
+                        "completed": False,
+                    }
+                )
         return quests
     except Exception:
         logger.warning("Failed to query active quests", exc_info=True)
@@ -179,7 +187,9 @@ class RoundController:
         self.npc_wait = npc_wait
 
         # Derived convenience fields
-        self.player_name: str = actions[0].get("player_name", "unknown") if actions else "unknown"
+        self.player_name: str = (
+            actions[0].get("player_name", "unknown") if actions else "unknown"
+        )
         self.player_id: str = actions[0].get("player_id", "") if actions else ""
         self.combined_action: str = "; ".join(
             f"{a.get('player_name', '?')}: {a.get('action', '?')}" for a in actions
@@ -212,7 +222,9 @@ class RoundController:
             Sub-step label during "resolving" (e.g. "context", "plausibility").
         """
         if not self.matrix_client or not self.room_id or not self.loop:
-            logger.debug("emit_phase(%s:%s) skipped — no matrix client/room/loop", phase, crew)
+            logger.debug(
+                "emit_phase(%s:%s) skipped — no matrix client/room/loop", phase, crew
+            )
             return
 
         body = f"[phase] {phase}" + (f":{crew}" if crew else "")
@@ -250,6 +262,7 @@ class RoundController:
         response tracker and exits early once at least one NPC has responded.
         """
         from memento.agent_controller import get_agent_controller
+
         controller = get_agent_controller()
         npcs_here = controller.get_npc_user_ids(self.location)
 
@@ -353,7 +366,11 @@ class RoundController:
 
     def narrate(self, mode: str = "action") -> str:
         self.emit_phase("resolving", "narrating")
-        events_str = str(self.events) if mode == "action" else f"Action rejected: {self.rejection_reason}"
+        events_str = (
+            str(self.events)
+            if mode == "action"
+            else f"Action rejected: {self.rejection_reason}"
+        )
         crew = make_narration_crew(
             action=self.combined_action,
             context=self.context,
@@ -434,6 +451,7 @@ class RoundController:
         # 5b. Fire-and-forget scene art
         if self.narrative:
             import threading
+
             threading.Thread(
                 target=self.request_art,
                 args=(self.context[:500],),
@@ -461,7 +479,8 @@ class RoundController:
                 combat = CombatEvent(
                     action_type=self.events.get("action_type", "attack"),
                     target_name=self.events.get("combat_target", ""),
-                    target_dead="dead" in str(self.events.get("combat_consequences", "")).lower(),
+                    target_dead="dead"
+                    in str(self.events.get("combat_consequences", "")).lower(),
                 )
             events_summary = EventSummary(
                 categories=categories,
@@ -476,7 +495,9 @@ class RoundController:
 
         state_update = StateUpdate(
             location=self.location,
-            world_time=WorldTimeDisplay(**self.world_time) if isinstance(self.world_time, dict) and self.world_time else None,
+            world_time=WorldTimeDisplay(**self.world_time)
+            if isinstance(self.world_time, dict) and self.world_time
+            else None,
             events=events_summary,
             active_quests=active_quests,
             subsystem_warnings=self.subsystem_warnings,
@@ -491,6 +512,7 @@ class RoundController:
         """Fire-and-forget: generate scene art if not cached."""
         try:
             from memento.bonfires_client import get_client
+
             client = get_client()
             # Check KG for cached art — use stored UUID, no text search
             loc_uuid = self.location_uuid
@@ -501,6 +523,7 @@ class RoundController:
 
             # Generate in background
             from memento.crews.ascii_art.crew import make_scene_art_crew
+
             crew = make_scene_art_crew(self.location, description, "dark fantasy")
             result = crew.kickoff()
             art_text = result.raw.strip()
@@ -511,7 +534,7 @@ class RoundController:
 
             # Post to Matrix
             if art_text and self.matrix_client and self.room_id and self.loop:
-                lines = art_text.split('\n')
+                lines = art_text.split("\n")
                 content = {
                     "msgtype": "m.text",
                     "body": art_text,
@@ -519,14 +542,19 @@ class RoundController:
                         "type": "scene_art",
                         "location": self.location,
                         "lines": lines,
-                        "width": max(len(l) for l in lines) if lines else 0,
+                        "width": max(len(ln) for ln in lines) if lines else 0,
                         "height": len(lines),
                         "channel": "narrative",
                     },
                 }
-                coro = self.matrix_client.room_send(self.room_id, "m.room.message", content)
+                coro = self.matrix_client.room_send(
+                    self.room_id, "m.room.message", content
+                )
                 future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-                future.add_done_callback(lambda f: f.exception() and logger.debug("Art post failed", exc_info=f.exception()))
+                future.add_done_callback(
+                    lambda f: f.exception()
+                    and logger.debug("Art post failed", exc_info=f.exception())
+                )
         except Exception:
             logger.warning("Art generation failed for %s", self.location, exc_info=True)
 
@@ -538,6 +566,7 @@ class RoundController:
         """Persist quest data to KG and link to player."""
         try:
             from memento.bonfires_client import get_client
+
             client = get_client()
 
             quest_name = quest_flow.state.quest_concept[:100].split("\n")[0].strip()
