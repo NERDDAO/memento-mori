@@ -29,7 +29,7 @@ async def list_episodes(
     if agent_id:
         # Proxy to Delve agent episodes search
         url = f"{DELVE_URL}/knowledge_graph/agents/{agent_id}/episodes/search"
-        body = {"limit": limit}
+        body: dict[str, int | str] = {"limit": limit}
         if before:
             body["before_time"] = before
         if after:
