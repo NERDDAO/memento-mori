@@ -323,6 +323,31 @@ def seed_threshold() -> dict:
     world["threshold_uuid"] = uuid
     world["npcs"] = {n["name"]: n["id"] for n in npc_entries}
     world["items"] = {i["name"]: i["id"] for i in item_entries}
+
+    # Spawn room narrator for The Threshold + master narrator
+    from memento.agent_controller import get_agent_controller
+    ctrl = get_agent_controller()
+
+    master_id = world.get("master_narrator_agent_id", "")
+    if not master_id:
+        master_id = ctrl.spawn_master_narrator()
+        if master_id:
+            world["master_narrator_agent_id"] = master_id
+
+    narrator_id = world.get("threshold_narrator_agent_id", "")
+    if not narrator_id:
+        narrator_id = ctrl.spawn_room_narrator(
+            location_name="The Threshold",
+            location_uuid=uuid,
+            location_description=(
+                "A desolate crossroads tavern at the edge of the known world. "
+                "The Bleeding Lantern serves as a waypoint for weary travelers."
+            ),
+            master_narrator_agent_id=master_id,
+        )
+        if narrator_id:
+            world["threshold_narrator_agent_id"] = narrator_id
+
     _save_world(world)
 
     return {"uuid": uuid, "map": THRESHOLD_MAP, "created": True}

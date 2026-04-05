@@ -58,6 +58,40 @@ CONVERSATION LIMITS (CRITICAL — FOLLOW STRICTLY):
 - Keep responses concise — 1-3 sentences of dialogue plus brief action description.
 """
 
+NARRATOR_SYSTEM_PROMPT_TEMPLATE = """\
+You are the narrator for {location}. {description}
+
+YOUR ROLE:
+You observe everything that happens in {location} and decide how the world evolves.
+After your stack is processed into an episode, you:
+1. Review the episode for significant events
+2. Call mm_search_world to check what already exists (NEVER duplicate entities)
+3. Use mm_world_reaction to spawn new NPCs, items, quests, or lore as appropriate
+4. Post a concise, atmospheric narration summarizing what changed
+
+RULES:
+- ALWAYS check mm_search_world before spawning anything — no duplicates
+- Use mm_world_reaction for batch entity creation from episode seeds
+- Your final message should be useful narration of what evolved in {location}
+- Focus on world evolution, not re-narrating what the turn narrator already said
+- Stay atmospheric and concise — 2-4 sentences max
+"""
+
+MASTER_NARRATOR_SYSTEM_PROMPT = """\
+You are the World Chronicler for Memento Mori.
+
+YOUR ROLE:
+You receive episode summaries from location narrators across the world.
+When your stack is processed, synthesize these into world-level chronicle entries that
+capture the bigger picture — cross-location themes, emerging threats, shifting balances of power.
+
+RULES:
+- Synthesize, don't repeat — find the thread connecting events across locations
+- Focus on world-level significance, not local details
+- Write in the voice of a distant observer chronicling history
+- 3-5 sentences per world episode
+"""
+
 
 @dataclass
 class NPCAgent:
@@ -327,6 +361,109 @@ class AgentController:
             location_name, len(npcs), len(spawned),
         )
         return spawned
+
+    def spawn_room_narrator(
+        self,
+        *,
+        location_name: str,
+        location_uuid: str,
+        location_description: str = "",
+        master_narrator_agent_id: str = "",
+    ) -> str:
+        """Spawn a room narrator agent for a location.
+
+        Creates a Bonfires agent that processes the location's event stack and
+        evolves the world via MCP tools. Not directly addressable — only triggered
+        by the supervisor cron processing its stack.
+
+        Args:
+            location_name: Display name of the location
+            location_uuid: KG UUID of the location
+            location_description: Atmosphere/purpose of this location
+            master_narrator_agent_id: If provided, subscribe this narrator to the master narrator
+
+        Returns:
+            The created agent's ID, or empty string on failure.
+        """
+        slug = self._name_to_username(location_name)
+        username = f"narrator_{slug}"
+
+        context = NARRATOR_SYSTEM_PROMPT_TEMPLATE.format(
+            location=location_name,
+            description=location_description or "A location in the world of Memento Mori.",
+        )
+
+        try:
+            client = get_client()
+            result = client.agents.create(
+                name=f"Narrator: {location_name}",
+                username=username,
+                context=context,
+                platform=self.platform,
+                deployment_config=self._build_deployment_config(),
+                enabled_mcp_tools=["memento-engine"],
+                agent_features={
+                    "maxToolIterations": 5,
+                    "maxParallelToolCalls": 1,
+                },
+                agent_env_vars={
+                    "MEMENTO_GATEWAY_URL": self.gateway_url,
+                    "ENGINE_API_TOKEN": self.engine_api_token,
+                },
+            )
+            agent_id = result.get("_id", result.get("id", ""))
+            logger.info("Spawned room narrator: %s → agent %s", location_name, agent_id)
+        except Exception:
+            logger.error("Failed to spawn narrator for %s", location_name, exc_info=True)
+            return ""
+
+        # Subscribe to master narrator if provided
+        if master_narrator_agent_id and agent_id:
+            try:
+                # Use Delve API to add subscription
+                delve_url = os.getenv("DELVE_URL", "http://localhost:8000")
+                _requests.post(
+                    f"{delve_url}/agents/{agent_id}/subscribers",
+                    json={"target_agent_id": master_narrator_agent_id},
+                    timeout=10,
+                )
+                logger.info("Subscribed narrator %s to master %s", agent_id, master_narrator_agent_id)
+            except Exception:
+                logger.warning("Failed to subscribe narrator to master", exc_info=True)
+
+        return agent_id
+
+    def spawn_master_narrator(self) -> str:
+        """Spawn the master/world narrator agent.
+
+        No Matrix room, no MCP tools. Only synthesizes location episode summaries
+        into world-level episodes.
+
+        Returns:
+            The created agent's ID, or empty string on failure.
+        """
+        try:
+            client = get_client()
+            result = client.agents.create(
+                name="World Chronicler",
+                username="narrator_world",
+                context=MASTER_NARRATOR_SYSTEM_PROMPT,
+                platform="web",  # No Matrix identity needed
+                deployment_config={
+                    "bonfireId": client.config.bonfire_id,
+                },
+                enabled_mcp_tools=[],  # No tools — just synthesizes
+                agent_features={
+                    "maxToolIterations": 0,
+                    "maxParallelToolCalls": 0,
+                },
+            )
+            agent_id = result.get("_id", result.get("id", ""))
+            logger.info("Spawned master narrator: agent %s", agent_id)
+            return agent_id
+        except Exception:
+            logger.error("Failed to spawn master narrator", exc_info=True)
+            return ""
 
     def _spawn_from_kg(
         self,
