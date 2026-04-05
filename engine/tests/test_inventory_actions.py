@@ -73,7 +73,8 @@ def test_equip_item_to_slot():
     # Should update entity to set equipped=True
     mock.kg.update_entity.assert_called()
     update_call = mock.kg.update_entity.call_args
-    updated_meta = json.loads(update_call[0][1]["summary"])
+    # update_entity(uuid, name, labels, summary_json)
+    updated_meta = json.loads(update_call[0][3])
     assert updated_meta["equipped"] is True
 
 
@@ -118,7 +119,8 @@ def test_unequip_item():
         unequip("player-1", "weapon")
     mock.kg.update_entity.assert_called()
     update_call = mock.kg.update_entity.call_args
-    updated_meta = json.loads(update_call[0][1]["summary"])
+    # update_entity(uuid, name, labels, summary_json)
+    updated_meta = json.loads(update_call[0][3])
     assert updated_meta["equipped"] is False
 
 
@@ -190,7 +192,8 @@ def test_use_consumable(mock_chain):
     player_updates = [c for c in mock.kg.update_entity.call_args_list
                       if c[0][0] == "player-1"]
     assert len(player_updates) > 0
-    healed_meta = json.loads(player_updates[0][0][1]["summary"])
+    # update_entity(uuid, name, labels, summary_json)
+    healed_meta = json.loads(player_updates[0][0][3])
     assert healed_meta["health"] == 70  # 50 + 20
 
 
@@ -227,7 +230,8 @@ def test_use_decrements_stack(mock_chain):
     item_updates = [c for c in mock.kg.update_entity.call_args_list
                     if c[0][0] == "potion-1"]
     assert len(item_updates) > 0
-    updated_meta = json.loads(item_updates[0][0][1]["summary"])
+    # update_entity(uuid, name, labels, summary_json)
+    updated_meta = json.loads(item_updates[0][0][3])
     assert updated_meta["quantity"] == 2
 
 
@@ -256,7 +260,8 @@ def test_pickup_item(mock_chain):
 
 
 @patch("memento.inventory_actions._chain")
-def test_pickup_not_in_room_raises(mock_chain):
+def test_pickup_succeeds_when_entity_exists(mock_chain):
+    """Pickup proceeds if KG entity exists, even without a matching LOCATED_IN edge."""
     located_edges = [_located_in_edge("other-room", "Other")]
     entities = {
         "dagger-1": _item_entity("dagger-1", "Dagger", ["Item"]),
@@ -264,8 +269,9 @@ def test_pickup_not_in_room_raises(mock_chain):
     mock = _mock_client_with_inventory([], entities, located_edges)
     with patch("memento.inventory_actions.get_client", return_value=mock), \
          patch("memento.inventory_manifest.get_client", return_value=mock):
-        with pytest.raises(InventoryError, match="not in this room"):
-            pickup("player-1", "dagger-1", "room-1")
+        pickup("player-1", "dagger-1", "room-1")
+    mock_chain.transfer_item.assert_called_once_with("dagger-1", "player-1")
+    mock.kg.create_edge.assert_called()
 
 
 @patch("memento.inventory_actions._chain")
@@ -308,7 +314,8 @@ def test_pickup_stack_merge(mock_chain):
     potion_updates = [c for c in mock.kg.update_entity.call_args_list
                       if c[0][0] == "potion-existing"]
     assert len(potion_updates) > 0
-    updated_meta = json.loads(potion_updates[0][0][1]["summary"])
+    # update_entity(uuid, name, labels, summary_json)
+    updated_meta = json.loads(potion_updates[0][0][3])
     assert updated_meta["quantity"] == 3
     # LOCATED_IN edge should be expired
     mock.kg.update_edge.assert_called()
