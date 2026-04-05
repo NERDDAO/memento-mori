@@ -99,3 +99,18 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Conventions
+
+### Always Use UUIDs, Never Names
+
+Entities are identified by UUID everywhere — KG, onchain (bytes32), WS messages, API responses. **Never** use entity names for lookups, comparisons, or matching. Names are display-only.
+
+- KG lookups: `get_entity(uuid)` not `search("name")`
+- API responses: always include `id` (UUID), match on `id`
+- WS messages: identify entities by `entity_id`, not `entity_name`
+- Client state: match entities by `id` field, never by `name`
+- World map / compass: `current` field should be a UUID, rooms matched by `id`
+
+**Why:** Text search is fuzzy and returns wrong entities. Name comparisons break on case, partial matches, and duplicates. UUIDs are unambiguous.
+

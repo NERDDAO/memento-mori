@@ -289,10 +289,11 @@ def seed_threshold() -> dict:
     ]
 
     # Update the entity with the complete map
-    client.kg.update_entity(uuid, "The Threshold", ["Location"], json.dumps({
-        "summary": THRESHOLD_MAP["npcs"][0]["name"] if THRESHOLD_MAP["npcs"] else "",
-        "room_map": json.dumps(THRESHOLD_MAP),
-    }))
+    summary = "A vast stone chamber at the boundary between worlds. The air hums with residual energy."
+    client.kg.update_entity(
+        uuid, "The Threshold", ["Location"], summary,
+        attributes={"room_map": json.dumps(THRESHOLD_MAP)},
+    )
 
     # Pack terrain bytes for future onchain storage
     room_map = THRESHOLD_MAP

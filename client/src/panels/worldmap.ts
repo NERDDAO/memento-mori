@@ -75,19 +75,21 @@ export function renderWorldMapPanel(
     return;
   }
 
+  // Find current room by UUID with name fallback.
+  const currentId = wm.current_id || '';
+  const currentRoom = currentId
+    ? wm.rooms.find(r => r.id === currentId)
+    : wm.rooms.find(r => r.name === wm.current);
+  const currentName = currentRoom?.name || wm.current || state.location?.name || 'Unknown';
+
   // Index rooms by direction (neighbor rooms from the current room).
   const byDir: Record<string, WorldMapRoom> = {};
   for (const room of wm.rooms) {
-    if (room.id === wm.current) continue;
-    // direction is set on neighbor rooms to indicate which exit reaches them.
+    if (room === currentRoom) continue;
     if (room.direction) {
       byDir[room.direction.toLowerCase()] = room;
     }
   }
-
-  // Find current room name.
-  const currentRoom = wm.rooms.find(r => r.id === wm.current);
-  const currentName = currentRoom?.name ?? 'Unknown';
 
   // Build the bracketed label for the current room.
   const label = `[${currentName}]`;

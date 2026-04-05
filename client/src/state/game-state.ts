@@ -41,6 +41,7 @@ export interface WorldMapConnection {
 
 export interface WorldMapData {
   current: string;
+  current_id: string;
   rooms: WorldMapRoom[];
   connections: WorldMapConnection[];
 }

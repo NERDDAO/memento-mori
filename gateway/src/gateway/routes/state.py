@@ -148,13 +148,32 @@ async def get_player_world_map(player_id: str):
         )
         visited_ids: set[str] = set()
         for edge in visited_edges:
-            target_id = edge.get("target_node_uuid", edge.get("target_uuid", ""))
+            # SDK returns nested {target: {uuid, name}} structure
+            target = edge.get("target", {})
+            target_id = target.get("uuid", "") if isinstance(target, dict) else edge.get("target_node_uuid", "")
             if target_id:
                 visited_ids.add(target_id)
 
-        # Get current location name
-        from gateway.app import ws_hub
-        current_location = ws_hub.player_locations.get(player_id, "") if ws_hub else ""
+        # Resolve current location UUID from KG LOCATED_IN edge
+        current_id = ""
+        current_name = ""
+        try:
+            loc_edges = await asyncio.to_thread(
+                client.kg.get_edges, player_id, direction="outgoing", edge_type="LOCATED_IN"
+            )
+            for le in loc_edges:
+                target = le.get("target", {})
+                if isinstance(target, dict):
+                    current_id = target.get("uuid", "")
+                    current_name = target.get("name", "")
+                if current_id:
+                    break
+        except Exception:
+            pass
+        # Fallback to ws_hub for name only
+        if not current_name:
+            from gateway.app import ws_hub
+            current_name = ws_hub.player_locations.get(player_id, "") if ws_hub else ""
 
         rooms = []
         all_connections = []
@@ -227,7 +246,8 @@ async def get_player_world_map(player_id: str):
                 })
 
         return {
-            "current": current_location,
+            "current": current_name,
+            "current_id": current_id,
             "rooms": rooms,
             "connections": [
                 {"from": c["from_name"], "to": c["to_name"], "direction": c["direction"]}
