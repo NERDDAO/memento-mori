@@ -4204,6 +4204,10 @@ class PlayerController {
     const ch = this.map.tiles[y * this.map.width + x];
     return ch !== "#" && ch !== undefined && ch !== " ";
   }
+  syncPosition(sendFn) {
+    if (sendFn)
+      sendFn(this.x, this.y);
+  }
   loadMap(map) {
     this.map = map;
     this.x = map.spawn?.x ?? Math.floor(map.width / 2);
@@ -5805,8 +5809,8 @@ function createCodexModal(getState, playerId, openArtViewer) {
     }
     if (_selectedId && !_allEntities.find((e) => e.id === _selectedId)) {
       _selectedId = _allEntities.length ? _allEntities[0].id : null;
-    } else {
-      _selectedId = null;
+    } else if (!_selectedId) {
+      _selectedId = _allEntities.length ? _allEntities[0].id : null;
     }
     render();
   }
@@ -6823,8 +6827,6 @@ function handleMessage(msg) {
       break;
     }
     case "codex_refresh": {
-      if (codex?.active)
-        codex.open();
       break;
     }
     case "npc_status": {
@@ -6869,6 +6871,22 @@ function handleMessage(msg) {
         gameState.location.players = gameState.location.players.filter((p) => p.id !== msg.player_id);
         renderPresentPanel(presentWin.panel, gameState, handleAction);
         narrative.addBlock(`${msg.player_name} departed.`, "system");
+      }
+      break;
+    }
+    case "position_update": {
+      if (gameState && gameState.roomMap && msg.entity_id) {
+        const npc = gameState.roomMap.npcs.find((n) => n.id === msg.entity_id);
+        if (npc) {
+          npc.x = msg.x;
+          npc.y = msg.y;
+        }
+        const item = gameState.roomMap.items.find((i) => i.id === msg.entity_id);
+        if (item) {
+          item.x = msg.x;
+          item.y = msg.y;
+        }
+        updateMap(gameState, handleAction);
       }
       break;
     }

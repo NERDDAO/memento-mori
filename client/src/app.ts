@@ -207,8 +207,8 @@ function handleMessage(msg: WsMessage): void {
       break;
     }
     case 'codex_refresh': {
-      // Enrichment finished — re-fetch codex data if modal is open
-      if (codex?.active) codex.open();
+      // Enrichment finished — no-op while codex is open (art updates come via entity_art).
+      // Data will be fresh next time codex is opened.
       break;
     }
     case 'npc_status': {
@@ -252,6 +252,22 @@ function handleMessage(msg: WsMessage): void {
         gameState.location.players = gameState.location.players.filter(p => p.id !== msg.player_id);
         renderPresentPanel(presentWin.panel!, gameState, handleAction);
         narrative.addBlock(`${msg.player_name} departed.`, 'system');
+      }
+      break;
+    }
+    case 'position_update': {
+      if (gameState && gameState.roomMap && msg.entity_id) {
+        const npc = gameState.roomMap.npcs.find(n => n.id === msg.entity_id);
+        if (npc) {
+          npc.x = msg.x;
+          npc.y = msg.y;
+        }
+        const item = gameState.roomMap.items.find(i => i.id === msg.entity_id);
+        if (item) {
+          item.x = msg.x;
+          item.y = msg.y;
+        }
+        updateMap(gameState, handleAction);
       }
       break;
     }

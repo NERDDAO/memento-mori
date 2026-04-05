@@ -106,6 +106,11 @@ export class PlayerController {
     return ch !== '#' && ch !== undefined && ch !== ' ';
   }
 
+  /** Send current position to server for chain sync. */
+  syncPosition(sendFn?: (x: number, y: number) => void): void {
+    if (sendFn) sendFn(this.x, this.y);
+  }
+
   loadMap(map: RoomMap): void {
     this.map = map;
     this.x = map.spawn?.x ?? Math.floor(map.width / 2);
