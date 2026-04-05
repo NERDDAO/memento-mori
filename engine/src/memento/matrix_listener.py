@@ -190,7 +190,6 @@ class EngineMatrixListener:
         if _USE_TURN_CONTROLLER:
             from memento.turn_controller import TurnController
             from memento.transport import MatrixTransport, NullTransport
-            from memento.world_reaction import WorldReactionCrew
 
             if matrix_client and room_id and loop:
                 transport = MatrixTransport(matrix_client, room_id, loop)
@@ -210,7 +209,6 @@ class EngineMatrixListener:
                 location_uuid=location_uuid,
                 actions=actions,
                 transport=transport,
-                world_reaction=WorldReactionCrew(),
             )
             return controller.run()
 
