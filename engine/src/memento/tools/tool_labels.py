@@ -60,6 +60,10 @@ LABEL_TOOLS: dict[str, set[str]] = {
         "mm_detect_events",
         "mm_reputation_check",
     },
+    "Narrator": {
+        "mm_world_reaction",
+        "mm_heartbeat",
+    },
 }
 
 

@@ -716,3 +716,28 @@ async def trigger_heartbeat(req: HeartbeatRequest):
 
     result = await asyncio.to_thread(_run)
     return result
+
+
+# ── World Reaction ──
+
+class WorldReactionRequest(BaseModel):
+    npc_id: str = Field("", max_length=64)
+    entities_json: str = Field(..., description="JSON array of entity seeds")
+    location: str = Field(..., max_length=200)
+    location_uuid: str = Field(..., max_length=64)
+    episode_summary: str = Field("", max_length=5000)
+
+@router.post("/engine/world/react")
+async def trigger_world_reaction(req: WorldReactionRequest):
+    """Process world seeds and spawn entities."""
+    await check_tool_access(req.npc_id, "mm_world_reaction")
+    def _run():
+        from memento.tools.world_reaction_tool import mm_world_reaction
+        return mm_world_reaction(
+            entities_json=req.entities_json,
+            location=req.location,
+            location_uuid=req.location_uuid,
+            episode_summary=req.episode_summary,
+        )
+    result = await asyncio.to_thread(_run)
+    return {"result": result}
