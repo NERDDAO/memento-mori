@@ -25,7 +25,8 @@ function createInitialState(playerName) {
     inventory: [],
     quests: [],
     factions: [],
-    roomMap: null
+    roomMap: null,
+    worldMap: null
   };
 }
 function applyStateUpdate(state, update) {
@@ -4365,231 +4366,6 @@ function showPlayerCard(state2) {
   renderer.setCard(card);
 }
 
-// src/map/world-renderer.ts
-var NODE_RADIUS = 18;
-var LABEL_FONT = "11px monospace";
-var NODE_FONT = "13px monospace";
-var PADDING = 40;
-var COLORS2 = {
-  bg: "#0a0a0f",
-  nodeBg: "#16161f",
-  nodeBorder: "#2a2a38",
-  currentBg: "#1a1a35",
-  currentBorder: "#8b5cf6",
-  connection: "#2a2a38",
-  connectionActive: "#3a3a50",
-  text: "#c8c8d0",
-  textDim: "#6a6a78",
-  current: "#8b5cf6",
-  discovered: "#50c878",
-  undiscovered: "#3a3a48"
-};
-var DIR_OFFSETS = {
-  north: { dx: 0, dy: -1 },
-  south: { dx: 0, dy: 1 },
-  east: { dx: 1, dy: 0 },
-  west: { dx: -1, dy: 0 },
-  northeast: { dx: 0.7, dy: -0.7 },
-  northwest: { dx: -0.7, dy: -0.7 },
-  southeast: { dx: 0.7, dy: 0.7 },
-  southwest: { dx: -0.7, dy: 0.7 },
-  up: { dx: 0.3, dy: -1 },
-  down: { dx: -0.3, dy: 1 }
-};
-
-class WorldMapRenderer {
-  canvas;
-  ctx;
-  dpr;
-  onClick = null;
-  lastMap = null;
-  nodePositions = new Map;
-  constructor(container) {
-    this.dpr = Math.min(devicePixelRatio, 2);
-    this.canvas = document.createElement("canvas");
-    this.canvas.style.display = "block";
-    this.canvas.style.background = COLORS2.bg;
-    this.canvas.style.cursor = "pointer";
-    this.ctx = this.canvas.getContext("2d");
-    container.appendChild(this.canvas);
-    this.canvas.addEventListener("click", (e) => this.handleClick(e));
-  }
-  setClickHandler(handler) {
-    this.onClick = handler;
-  }
-  render(map) {
-    this.lastMap = map;
-    this.layoutNodes(map);
-    const { width, height } = this.computeBounds();
-    this.canvas.width = width * this.dpr;
-    this.canvas.height = height * this.dpr;
-    this.canvas.style.width = `${width}px`;
-    this.canvas.style.height = `${height}px`;
-    const ctx = this.ctx;
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.fillStyle = COLORS2.bg;
-    ctx.fillRect(0, 0, width, height);
-    for (const conn of map.connections) {
-      const from = this.nodePositions.get(conn.from);
-      const to = this.nodePositions.get(conn.to);
-      if (!from || !to)
-        continue;
-      const isActive = conn.from === map.currentRoom || conn.to === map.currentRoom;
-      ctx.strokeStyle = isActive ? COLORS2.connectionActive : COLORS2.connection;
-      ctx.lineWidth = isActive ? 2 : 1;
-      ctx.beginPath();
-      ctx.moveTo(from.x, from.y);
-      ctx.lineTo(to.x, to.y);
-      ctx.stroke();
-      if (conn.direction) {
-        const mx = (from.x + to.x) / 2;
-        const my = (from.y + to.y) / 2;
-        ctx.font = "9px monospace";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = COLORS2.textDim;
-        ctx.fillText(conn.direction[0].toUpperCase(), mx, my);
-      }
-    }
-    for (const room of map.rooms) {
-      const pos = this.nodePositions.get(room.id);
-      if (!pos)
-        continue;
-      const isCurrent = room.id === map.currentRoom;
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, NODE_RADIUS, 0, Math.PI * 2);
-      ctx.fillStyle = isCurrent ? COLORS2.currentBg : COLORS2.nodeBg;
-      ctx.fill();
-      ctx.strokeStyle = isCurrent ? COLORS2.currentBorder : COLORS2.nodeBorder;
-      ctx.lineWidth = isCurrent ? 2.5 : 1;
-      ctx.stroke();
-      ctx.font = NODE_FONT;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = isCurrent ? COLORS2.current : COLORS2.discovered;
-      ctx.fillText(isCurrent ? "@" : "●", pos.x, pos.y);
-      ctx.font = LABEL_FONT;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      ctx.fillStyle = isCurrent ? COLORS2.text : COLORS2.textDim;
-      const label = room.name.length > 16 ? room.name.slice(0, 14) + ".." : room.name;
-      ctx.fillText(label, pos.x, pos.y + NODE_RADIUS + 4);
-    }
-  }
-  layoutNodes(map) {
-    this.nodePositions.clear();
-    if (map.rooms.length === 0)
-      return;
-    const hasCoords = map.rooms.some((r) => r.x !== 0 || r.y !== 0);
-    if (hasCoords) {
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const r of map.rooms) {
-        minX = Math.min(minX, r.x);
-        minY = Math.min(minY, r.y);
-        maxX = Math.max(maxX, r.x);
-        maxY = Math.max(maxY, r.y);
-      }
-      const rangeX = maxX - minX || 1;
-      const rangeY = maxY - minY || 1;
-      const areaW = 400;
-      const areaH = 300;
-      for (const r of map.rooms) {
-        this.nodePositions.set(r.id, {
-          x: PADDING + (r.x - minX) / rangeX * areaW,
-          y: PADDING + (r.y - minY) / rangeY * areaH
-        });
-      }
-    } else {
-      this.autoLayout(map);
-    }
-  }
-  autoLayout(map) {
-    const spacing = 100;
-    const placed = new Set;
-    const startId = map.currentRoom || map.rooms[0]?.id;
-    if (!startId)
-      return;
-    const centerX = 220;
-    const centerY = 180;
-    this.nodePositions.set(startId, { x: centerX, y: centerY });
-    placed.add(startId);
-    const queue = [startId];
-    while (queue.length > 0) {
-      const nodeId = queue.shift();
-      const nodePos = this.nodePositions.get(nodeId);
-      for (const conn of map.connections) {
-        let neighborId = "";
-        let direction = conn.direction;
-        if (conn.from === nodeId && !placed.has(conn.to)) {
-          neighborId = conn.to;
-        } else if (conn.to === nodeId && !placed.has(conn.from)) {
-          neighborId = conn.from;
-          const reverseDir = {
-            north: "south",
-            south: "north",
-            east: "west",
-            west: "east",
-            northeast: "southwest",
-            northwest: "southeast",
-            southeast: "northwest",
-            southwest: "northeast"
-          };
-          direction = reverseDir[direction] || direction;
-        }
-        if (!neighborId)
-          continue;
-        const offset = DIR_OFFSETS[direction] || { dx: 0, dy: -1 };
-        const nx = nodePos.x + offset.dx * spacing;
-        const ny = nodePos.y + offset.dy * spacing;
-        let finalX = nx, finalY = ny;
-        for (const pos of this.nodePositions.values()) {
-          const dist = Math.hypot(finalX - pos.x, finalY - pos.y);
-          if (dist < NODE_RADIUS * 3) {
-            finalX += (Math.random() - 0.5) * 40;
-            finalY += (Math.random() - 0.5) * 40;
-          }
-        }
-        this.nodePositions.set(neighborId, { x: finalX, y: finalY });
-        placed.add(neighborId);
-        queue.push(neighborId);
-      }
-    }
-    let orphanX = PADDING;
-    for (const room of map.rooms) {
-      if (!placed.has(room.id)) {
-        this.nodePositions.set(room.id, { x: orphanX, y: centerY + spacing });
-        orphanX += spacing;
-        placed.add(room.id);
-      }
-    }
-  }
-  computeBounds() {
-    let maxX = 200, maxY = 200;
-    for (const pos of this.nodePositions.values()) {
-      maxX = Math.max(maxX, pos.x + PADDING + NODE_RADIUS);
-      maxY = Math.max(maxY, pos.y + PADDING + NODE_RADIUS + 20);
-    }
-    return { width: Math.ceil(maxX), height: Math.ceil(maxY) };
-  }
-  handleClick(e) {
-    if (!this.lastMap || !this.onClick)
-      return;
-    const rect = this.canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    for (const room of this.lastMap.rooms) {
-      const pos = this.nodePositions.get(room.id);
-      if (!pos)
-        continue;
-      const dist = Math.hypot(mx - pos.x, my - pos.y);
-      if (dist <= NODE_RADIUS + 4) {
-        this.onClick(room.id);
-        return;
-      }
-    }
-  }
-}
-
 // src/panels/panel-utils.ts
 function textRow(text, fg, cols, attrs) {
   const row = [];
@@ -4725,34 +4501,132 @@ function renderInventoryPanel(panel, state2) {
   panel.paint(cells);
 }
 
-// src/panels/exits.ts
-function renderExitsPanel(panel, state2, onAction) {
+// src/panels/worldmap.ts
+var COLOR_CURRENT = theme.colors.accent;
+var COLOR_VISITED = theme.colors.location;
+var COLOR_UNVISITED = "#3a3a48";
+var COLOR_LINE = theme.colors.dim;
+var COLOR_BRACKET = theme.colors.primary;
+function segmentRow(segments, cols, startCol = 0) {
+  const row = Array.from({ length: cols }, () => ({
+    char: " ",
+    fg: theme.colors.primary
+  }));
+  let col = startCol;
+  for (const seg of segments) {
+    for (const ch of seg.text) {
+      if (col >= cols)
+        break;
+      row[col] = { char: ch, fg: seg.fg };
+      col++;
+    }
+  }
+  return row;
+}
+function renderWorldMapPanel(panel, state2, onAction) {
   const cols = panel.cols;
   const cells = [];
   panel.clearHitRegions();
-  if (state2.location.exits.length === 0) {
-    cells.push(textRow("None", theme.colors.dim, cols));
+  const wm = state2.worldMap;
+  if (!wm) {
+    cells.push(textRow("No map data", COLOR_UNVISITED, cols));
     panel.paint(cells);
     return;
   }
-  for (const e of state2.location.exits) {
-    const dir = typeof e === "string" ? e : e.direction;
-    const dest = typeof e === "string" ? "" : e.name;
-    const label = dir.charAt(0).toUpperCase() + dir.slice(1);
-    const segments = [
-      { text: "→ " + label, fg: theme.colors.location }
-    ];
-    if (dest) {
-      segments.push({ text: "  " + dest, fg: theme.colors.dim });
+  const byDir = {};
+  for (const room of wm.rooms) {
+    if (room.id === wm.current)
+      continue;
+    if (room.direction) {
+      byDir[room.direction.toLowerCase()] = room;
     }
-    const rowIdx = cells.length;
-    cells.push(coloredRow(segments, cols));
+  }
+  const currentRoom = wm.rooms.find((r) => r.id === wm.current);
+  const currentName = currentRoom?.name ?? "Unknown";
+  const label = `[${currentName}]`;
+  const westRoom = byDir["west"];
+  const eastRoom = byDir["east"];
+  const northRoom = byDir["north"];
+  const southRoom = byDir["south"];
+  const westText = westRoom ? westRoom.visited ? westRoom.name : "?" : null;
+  const eastText = eastRoom ? eastRoom.visited ? eastRoom.name : "?" : null;
+  const northText = northRoom ? northRoom.visited ? northRoom.name : "?" : null;
+  const southText = southRoom ? southRoom.visited ? southRoom.name : "?" : null;
+  const HORIZ = " --- ";
+  const westPart = westText ? westText + HORIZ : "";
+  const eastPart = eastText ? HORIZ + eastText : "";
+  const mainLine = westPart + label + eastPart;
+  const mainStart = Math.max(0, Math.floor((cols - mainLine.length) / 2));
+  const labelStartCol = mainStart + westPart.length;
+  const labelMidCol = labelStartCol + Math.floor(label.length / 2);
+  if (northText !== null) {
+    const fg = northRoom.visited ? COLOR_VISITED : COLOR_UNVISITED;
+    const nameStart = Math.max(0, labelMidCol - Math.floor(northText.length / 2));
+    cells.push(segmentRow([{ text: northText, fg }], cols, nameStart));
+    cells.push(segmentRow([{ text: "|", fg: COLOR_LINE }], cols, labelMidCol));
+  }
+  {
+    const segments = [];
+    if (westText !== null) {
+      const fg = westRoom.visited ? COLOR_VISITED : COLOR_UNVISITED;
+      segments.push({ text: westText, fg });
+      segments.push({ text: HORIZ, fg: COLOR_LINE });
+    }
+    segments.push({ text: "[", fg: COLOR_BRACKET });
+    segments.push({ text: currentName, fg: COLOR_CURRENT });
+    segments.push({ text: "]", fg: COLOR_BRACKET });
+    if (eastText !== null) {
+      const fg = eastRoom.visited ? COLOR_VISITED : COLOR_UNVISITED;
+      segments.push({ text: HORIZ, fg: COLOR_LINE });
+      segments.push({ text: eastText, fg });
+    }
+    const mainRowIdx = cells.length;
+    cells.push(segmentRow(segments, cols, mainStart));
+    if (westText !== null) {
+      const westStart = mainStart;
+      const westWidth = westText.length;
+      panel.registerHitRegion({
+        col: westStart,
+        row: mainRowIdx,
+        width: westWidth,
+        height: 1,
+        data: { action: "go west" }
+      });
+    }
+    if (eastText !== null) {
+      const eastStart = mainStart + westPart.length + label.length + HORIZ.length;
+      const eastWidth = eastText.length;
+      panel.registerHitRegion({
+        col: eastStart,
+        row: mainRowIdx,
+        width: eastWidth,
+        height: 1,
+        data: { action: "go east" }
+      });
+    }
+  }
+  if (southText !== null) {
+    cells.push(segmentRow([{ text: "|", fg: COLOR_LINE }], cols, labelMidCol));
+    const fg = southRoom.visited ? COLOR_VISITED : COLOR_UNVISITED;
+    const nameStart = Math.max(0, labelMidCol - Math.floor(southText.length / 2));
+    const southRowIdx = cells.length;
+    cells.push(segmentRow([{ text: southText, fg }], cols, nameStart));
     panel.registerHitRegion({
-      col: 0,
-      row: rowIdx,
-      width: cols,
+      col: nameStart,
+      row: southRowIdx,
+      width: southText.length,
       height: 1,
-      data: { action: `go ${dir}` }
+      data: { action: "go south" }
+    });
+  }
+  if (northText !== null) {
+    const nameStart = Math.max(0, labelMidCol - Math.floor(northText.length / 2));
+    panel.registerHitRegion({
+      col: nameStart,
+      row: 0,
+      width: northText.length,
+      height: 1,
+      data: { action: "go north" }
     });
   }
   panel.paint(cells);
@@ -6716,14 +6590,25 @@ function registerMapEntities(map) {
   entities.push({ name: map.name, id: map.id, type: "location" });
   setKnownEntities(entities);
 }
+async function fetchPlayerWorldMap() {
+  try {
+    const pid = getSession().playerId;
+    if (!pid || !gameState)
+      return;
+    const resp = await fetch(`${GATEWAY_URL}/api/worldmap/${pid}`);
+    if (resp.ok) {
+      gameState.worldMap = await resp.json();
+      renderWorldMapPanel(exitsWin.panel, gameState, handleAction);
+    }
+  } catch {}
+}
 function renderAllPanels() {
   if (!gameState)
     return;
   characterWin.setTitle(gameState.player.name || "Character");
   renderCharacterPanel(characterWin.panel, gameState);
   renderInventoryPanel(inventoryWin.panel, gameState);
-  exitsWin.setTitle(gameState.location.name || "Exits");
-  renderExitsPanel(exitsWin.panel, gameState, handleAction);
+  renderWorldMapPanel(exitsWin.panel, gameState, handleAction);
   renderPresentPanel(presentWin.panel, gameState, handleAction);
   renderQuestLogPanel(questWin.panel, gameState.quests);
   renderFactionsPanel(factionWin.panel, gameState.factions);
@@ -6777,6 +6662,7 @@ function handleMessage(msg) {
           statusBar.setTick(msg.state_update.world_time.tick || 0);
         }
         renderAllPanels();
+        fetchPlayerWorldMap();
         if (msg.state_update.events) {
           const events = msg.state_update.events;
           if (events.combat) {
@@ -6943,6 +6829,7 @@ function handleMessage(msg) {
       if (msg.state_update && gameState) {
         applyStateUpdate(gameState, msg.state_update);
         renderAllPanels();
+        fetchPlayerWorldMap();
         if (invModal.active)
           invModal.refresh();
       }
@@ -6996,6 +6883,7 @@ function enterGame(config) {
       if (gameState.roomMap)
         registerMapEntities(gameState.roomMap);
       renderAllPanels();
+      fetchPlayerWorldMap();
       if (openingNarrative) {
         narrative.addBlock(openingNarrative, config.isReturning ? "system" : "narrative");
       }
@@ -7070,7 +6958,7 @@ document.addEventListener("DOMContentLoaded", () => {
   mapWin = createWindow({ title: "Map", id: "map-win" });
   characterWin = createWindow({ title: "Character", id: "character-win", className: "sidebar-win resizable", canvas: true });
   inventoryWin = createWindow({ title: "Inventory", id: "inventory-win", className: "sidebar-win resizable", canvas: true });
-  exitsWin = createWindow({ title: "Exits", id: "exits-win", className: "sidebar-win resizable", canvas: true });
+  exitsWin = createWindow({ title: "World", id: "exits-win", className: "sidebar-win resizable", canvas: true });
   presentWin = createWindow({ title: "Present", id: "present-win", className: "sidebar-win resizable", canvas: true });
   questWin = createWindow({ title: "Quests", id: "quest-win", className: "sidebar-win resizable", canvas: true });
   factionWin = createWindow({ title: "Factions", id: "faction-win", className: "sidebar-win resizable", canvas: true });
@@ -7141,11 +7029,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }));
   const mapCanvasWrap = document.createElement("div");
   mapCanvasWrap.className = "map-canvas-wrap";
-  const worldMapWrap = document.createElement("div");
-  worldMapWrap.className = "map-canvas-wrap";
-  worldMapWrap.style.display = "none";
   mapWin.body.appendChild(mapCanvasWrap);
-  mapWin.body.appendChild(worldMapWrap);
   initMapPanel(mapCanvasWrap, handleAction);
   artViewer = createArtViewer();
   document.body.appendChild(artViewer.el);
@@ -7157,45 +7041,6 @@ document.addEventListener("DOMContentLoaded", () => {
         codex.close();
       else
         codex.open();
-    }
-  });
-  const worldRenderer = new WorldMapRenderer(worldMapWrap);
-  let worldMapData = null;
-  let showingWorldMap = false;
-  worldRenderer.setClickHandler((roomId) => {
-    if (roomId) {
-      codex.open(roomId);
-    }
-  });
-  async function fetchWorldMap() {
-    try {
-      const resp = await fetch(`${GATEWAY_URL}/api/worldmap`);
-      const data = await resp.json();
-      if (data.rooms && data.rooms.length > 0) {
-        worldMapData = {
-          rooms: data.rooms,
-          connections: data.connections,
-          currentRoom: gameState?.location?.name || ""
-        };
-      }
-    } catch {}
-  }
-  function toggleWorldMap() {
-    showingWorldMap = !showingWorldMap;
-    mapCanvasWrap.style.display = showingWorldMap ? "none" : "";
-    worldMapWrap.style.display = showingWorldMap ? "" : "none";
-    mapWin.setTitle(showingWorldMap ? "World Map" : "Map");
-    if (showingWorldMap && worldMapData) {
-      worldMapData.currentRoom = gameState?.location?.name || "";
-      worldRenderer.render(worldMapData);
-    }
-  }
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "w" && document.activeElement?.tagName !== "INPUT") {
-      if (!worldMapData)
-        fetchWorldMap().then(() => toggleWorldMap());
-      else
-        toggleWorldMap();
     }
   });
   setMessageHandler(handleMessage);

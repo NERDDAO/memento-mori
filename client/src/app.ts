@@ -12,11 +12,9 @@ import { setKnownEntities } from './renderer/text-renderer';
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
 import { initMapPanel, updateMap } from './panels/map';
-import { WorldMapRenderer } from './map/world-renderer';
-import type { WorldMap } from './map/types';
 import { renderCharacterPanel } from './panels/character';
 import { renderInventoryPanel } from './panels/inventory';
-import { renderExitsPanel } from './panels/exits';
+import { renderWorldMapPanel } from './panels/worldmap';
 import { renderPresentPanel } from './panels/present';
 import { renderQuestLogPanel } from './panels/questlog';
 import { renderFactionsPanel } from './panels/factions';
@@ -67,14 +65,28 @@ function registerMapEntities(map: import('./map/types').RoomMap | null): void {
   setKnownEntities(entities);
 }
 
+// --- Fetch player world map ---
+async function fetchPlayerWorldMap(): Promise<void> {
+  try {
+    const pid = getSession().playerId;
+    if (!pid || !gameState) return;
+    const resp = await fetch(`${GATEWAY_URL}/api/worldmap/${pid}`);
+    if (resp.ok) {
+      gameState.worldMap = await resp.json();
+      renderWorldMapPanel(exitsWin.panel!, gameState, handleAction);
+    }
+  } catch {
+    // Non-fatal
+  }
+}
+
 // --- Panel rendering ---
 function renderAllPanels(): void {
   if (!gameState) return;
   characterWin.setTitle(gameState.player.name || 'Character');
   renderCharacterPanel(characterWin.panel!, gameState);
   renderInventoryPanel(inventoryWin.panel!, gameState);
-  exitsWin.setTitle(gameState.location.name || 'Exits');
-  renderExitsPanel(exitsWin.panel!, gameState, handleAction);
+  renderWorldMapPanel(exitsWin.panel!, gameState, handleAction);
   renderPresentPanel(presentWin.panel!, gameState, handleAction);
   renderQuestLogPanel(questWin.panel!, gameState.quests);
   renderFactionsPanel(factionWin.panel!, gameState.factions);
@@ -142,6 +154,7 @@ function handleMessage(msg: WsMessage): void {
         }
 
         renderAllPanels();
+        fetchPlayerWorldMap();
 
         // Display event notifications in the events feed
         if (msg.state_update.events) {
@@ -312,6 +325,7 @@ function handleMessage(msg: WsMessage): void {
       if (msg.state_update && gameState) {
         applyStateUpdate(gameState, msg.state_update);
         renderAllPanels();
+        fetchPlayerWorldMap();
         if (invModal.active) invModal.refresh();
       }
       break;
@@ -372,6 +386,7 @@ function enterGame(config: { playerName: string; walletAddress: string; isReturn
         });
         if (gameState.roomMap) registerMapEntities(gameState.roomMap);
         renderAllPanels();
+        fetchPlayerWorldMap();
         if (openingNarrative) {
           narrative.addBlock(openingNarrative, config.isReturning ? 'system' : 'narrative');
         }
@@ -474,7 +489,7 @@ document.addEventListener('DOMContentLoaded', () => {
   mapWin = createWindow({ title: 'Map', id: 'map-win' });
   characterWin = createWindow({ title: 'Character', id: 'character-win', className: 'sidebar-win resizable', canvas: true });
   inventoryWin = createWindow({ title: 'Inventory', id: 'inventory-win', className: 'sidebar-win resizable', canvas: true });
-  exitsWin = createWindow({ title: 'Exits', id: 'exits-win', className: 'sidebar-win resizable', canvas: true });
+  exitsWin = createWindow({ title: 'World', id: 'exits-win', className: 'sidebar-win resizable', canvas: true });
   presentWin = createWindow({ title: 'Present', id: 'present-win', className: 'sidebar-win resizable', canvas: true });
   questWin = createWindow({ title: 'Quests', id: 'quest-win', className: 'sidebar-win resizable', canvas: true });
   factionWin = createWindow({ title: 'Factions', id: 'faction-win', className: 'sidebar-win resizable', canvas: true });
@@ -561,14 +576,10 @@ document.addEventListener('DOMContentLoaded', () => {
     players: gameState?.location?.players || [],
   }));
 
-  // 8. Map — split map window body into canvas wrap + world map
+  // 8. Map
   const mapCanvasWrap = document.createElement('div');
   mapCanvasWrap.className = 'map-canvas-wrap';
-  const worldMapWrap = document.createElement('div');
-  worldMapWrap.className = 'map-canvas-wrap';
-  worldMapWrap.style.display = 'none';
   mapWin.body.appendChild(mapCanvasWrap);
-  mapWin.body.appendChild(worldMapWrap);
   initMapPanel(mapCanvasWrap, handleAction);
 
   // 8b. Art viewer + Codex modal
@@ -582,50 +593,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'k' && document.activeElement?.tagName !== 'INPUT') {
       if (codex.active) codex.close();
       else codex.open();
-    }
-  });
-
-  // World map renderer
-  const worldRenderer = new WorldMapRenderer(worldMapWrap);
-  let worldMapData: WorldMap | null = null;
-  let showingWorldMap = false;
-
-  worldRenderer.setClickHandler((roomId) => {
-    if (roomId) {
-      codex.open(roomId);
-    }
-  });
-
-  async function fetchWorldMap(): Promise<void> {
-    try {
-      const resp = await fetch(`${GATEWAY_URL}/api/worldmap`);
-      const data = await resp.json();
-      if (data.rooms && data.rooms.length > 0) {
-        worldMapData = {
-          rooms: data.rooms,
-          connections: data.connections,
-          currentRoom: gameState?.location?.name || '',
-        };
-      }
-    } catch { /* world map unavailable */ }
-  }
-
-  function toggleWorldMap(): void {
-    showingWorldMap = !showingWorldMap;
-    mapCanvasWrap.style.display = showingWorldMap ? 'none' : '';
-    worldMapWrap.style.display = showingWorldMap ? '' : 'none';
-    mapWin.setTitle(showingWorldMap ? 'World Map' : 'Map');
-    if (showingWorldMap && worldMapData) {
-      worldMapData.currentRoom = gameState?.location?.name || '';
-      worldRenderer.render(worldMapData);
-    }
-  }
-
-  // 'w' key toggles world map (when input not focused)
-  document.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'w' && document.activeElement?.tagName !== 'INPUT') {
-      if (!worldMapData) fetchWorldMap().then(() => toggleWorldMap());
-      else toggleWorldMap();
     }
   });
 
