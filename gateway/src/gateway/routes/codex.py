@@ -2,6 +2,8 @@
 
 import asyncio
 import json as _json
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 
 from gateway.log import get_logger
@@ -99,6 +101,27 @@ def _extract_summary(entity: dict) -> str:
     return summary
 
 
+async def _fetch_relationships(entity_name: str, client: Any) -> list[dict]:
+    """Fetch KG edges for an entity, return as relationship dicts."""
+    try:
+        result = await asyncio.to_thread(client.kg.search, entity_name, 10)
+        raw_edges = result.get("edges", [])
+        relationships = []
+        for e in raw_edges:
+            src = e.get("source_name", "")
+            tgt = e.get("target_name", "")
+            if src == entity_name or tgt == entity_name:
+                relationships.append({
+                    "source": src,
+                    "target": tgt,
+                    "relationship": e.get("name", e.get("relationship", "")),
+                    "fact": e.get("fact", ""),
+                })
+        return relationships[:10]
+    except Exception:
+        return []
+
+
 @router.get("/codex/{player_id}")
 async def get_codex(player_id: str, location_uuid: str | None = None):
     """Get all manifest entities for a player, grouped by type, with inline chain data."""
@@ -137,8 +160,17 @@ async def get_codex(player_id: str, location_uuid: str | None = None):
     npc_entities = await asyncio.gather(*npc_entity_tasks) if npc_entity_tasks else []
     npc_chains = await asyncio.gather(*npc_chain_tasks) if npc_chain_tasks else []
 
+    # Fetch relationships for NPCs
+    from memento.bonfires_client import get_client
+    client = await asyncio.to_thread(get_client)
+    npc_rel_tasks = [
+        _fetch_relationships(raw.get("name", ""), client)
+        for raw in raw_npcs if raw.get("id")
+    ]
+    npc_relationships = await asyncio.gather(*npc_rel_tasks) if npc_rel_tasks else []
+
     npcs = []
-    for raw, kg_entity, chain in zip(raw_npcs, npc_entities, npc_chains):
+    for idx, (raw, kg_entity, chain) in enumerate(zip(raw_npcs, npc_entities, npc_chains)):
         labels = (kg_entity or {}).get("labels", [])
         summary = _extract_summary(kg_entity) if kg_entity else ""
         npcs.append({
@@ -148,6 +180,7 @@ async def get_codex(player_id: str, location_uuid: str | None = None):
             "summary": summary,
             "chain": chain,
             "attributes": _parse_attributes(kg_entity),
+            "relationships": npc_relationships[idx] if idx < len(npc_relationships) else [],
         })
 
     # 4. Build ground items from room manifest
@@ -160,8 +193,15 @@ async def get_codex(player_id: str, location_uuid: str | None = None):
     ground_entities = await asyncio.gather(*ground_entity_tasks) if ground_entity_tasks else []
     ground_chains = await asyncio.gather(*ground_chain_tasks) if ground_chain_tasks else []
 
+    # Fetch relationships for ground items
+    ground_rel_tasks = [
+        _fetch_relationships(raw.get("name", ""), client)
+        for raw in raw_ground if raw.get("id")
+    ]
+    ground_relationships = await asyncio.gather(*ground_rel_tasks) if ground_rel_tasks else []
+
     ground_items = []
-    for raw, kg_entity, chain in zip(raw_ground, ground_entities, ground_chains):
+    for idx, (raw, kg_entity, chain) in enumerate(zip(raw_ground, ground_entities, ground_chains)):
         summary = _extract_summary(kg_entity) if kg_entity else ""
         ground_items.append({
             "id": raw.get("id", ""),
@@ -170,6 +210,7 @@ async def get_codex(player_id: str, location_uuid: str | None = None):
             "summary": summary,
             "chain": chain,
             "attributes": _parse_attributes(kg_entity),
+            "relationships": ground_relationships[idx] if idx < len(ground_relationships) else [],
         })
 
     # 5. Build inventory items (backpack + equipped)
