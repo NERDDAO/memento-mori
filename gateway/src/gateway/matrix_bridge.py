@@ -144,7 +144,7 @@ class MatrixBridge:
 
         rpg_type = rpg_meta.get("type", "")
 
-        # Phase messages — forward to WebSocket
+        # Phase messages — forward to WebSocket (do NOT tee to stack)
         if rpg_type == "phase":
             location = rpg_meta.get("location", self.room_to_location.get(room.room_id, ""))
             if location:
@@ -156,7 +156,11 @@ class MatrixBridge:
                 })
             return
 
-        # Scene / entity art — forward to WebSocket clients
+        # Batch metadata — engine-internal, skip (do NOT tee to stack)
+        if rpg_type == "player-action-batch":
+            return
+
+        # Scene / entity art — forward to WebSocket clients (do NOT tee to stack)
         if rpg_type in ("scene_art", "entity_art"):
             location = rpg_meta.get("location", self.room_to_location.get(room.room_id, ""))
             msg = {
@@ -177,8 +181,6 @@ class MatrixBridge:
         if rpg_type == "narrative":
             logger.info("Narrator message at %s (sender=%s)", room.display_name, event.sender)
             location = self.room_to_location.get(room.room_id, "")
-            # Tee narrative to Delve stack for heartbeat processing
-            self._push_to_stack(event.body, "narrator", location or room.display_name or "")
             state_update = rpg_meta.get("state_update", {})
             player_id = rpg_meta.get("player_id", "")
 
@@ -482,6 +484,10 @@ class MatrixBridge:
             if resp.status != 200:
                 text = await resp.text()
                 logger.error("Send failed (HTTP %d): %s", resp.status, text)
+            else:
+                # Tee player action to Delve stack
+                location = self.room_to_location.get(room_id, "")
+                self._push_to_stack(action_text, player_id, location)
 
     async def get_or_create_room(self, location_name: str, space_id: str = "") -> str:
         """Get or create a Matrix room for a location. Returns room_id."""
