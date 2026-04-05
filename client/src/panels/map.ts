@@ -68,9 +68,21 @@ export function updateMap(
       map,
       // onInteract — triggers crew call
       (type, entity) => {
-        if (type === 'npc') onAction(`talk to ${(entity as RoomNpc).name}`);
-        else if (type === 'item') onAction(`examine ${(entity as RoomItem).name}`);
-        else if (type === 'exit') onAction(`go ${(entity as RoomExit).direction}`);
+        if (type === 'npc') {
+          const npc = entity as RoomNpc;
+          document.dispatchEvent(new CustomEvent('narrative-entity-click', {
+            detail: { entityId: npc.id, entityName: npc.name },
+            bubbles: true,
+          }));
+        } else if (type === 'item') {
+          const item = entity as RoomItem;
+          document.dispatchEvent(new CustomEvent('narrative-entity-click', {
+            detail: { entityId: item.id, entityName: item.name },
+            bubbles: true,
+          }));
+        } else if (type === 'exit') {
+          onAction(`go ${(entity as RoomExit).direction}`);
+        }
       },
       // onProximity — show entity card on canvas
       (type, entity) => {
