@@ -279,6 +279,20 @@ def seed_threshold() -> dict:
         "room_map": json.dumps(THRESHOLD_MAP),
     }))
 
+    # Pack terrain bytes for future onchain storage
+    room_map = THRESHOLD_MAP
+    try:
+        from memento.terrain import pack_terrain
+        tiles = room_map.get("tiles", []) if isinstance(room_map, dict) else []
+        width = room_map.get("width", 35) if isinstance(room_map, dict) else 35
+        height = room_map.get("height", 18) if isinstance(room_map, dict) else 18
+        if tiles:
+            terrain_bytes = pack_terrain(tiles, width, height)
+            logger.info("Packed Threshold terrain: %dx%d (%d bytes)", width, height, len(terrain_bytes))
+            # Chain write will be wired when chain_writer has full ABI encoding
+    except Exception:
+        logger.debug("Terrain packing failed for Threshold", exc_info=True)
+
     # Save all UUIDs to world.json for future lookups
     world["threshold_uuid"] = uuid
     world["npcs"] = {n["name"]: n["id"] for n in npc_entries}
