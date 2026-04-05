@@ -10,8 +10,7 @@ import { getRoundState } from './state/round-state';
 import { setKnownEntities } from './renderer/text-renderer';
 import { createMessageHandler } from './message-handler';
 import { initNarrative, type NarrativeController } from './panels/narrative';
-import { initInput } from './panels/input';
-import { initMapPanel, updateMap } from './panels/map';
+import { updateMap } from './panels/map';
 import { renderCharacterPanel } from './panels/character';
 import { renderInventoryPanel } from './panels/inventory';
 import { renderWorldMapPanel } from './panels/worldmap';
@@ -27,10 +26,10 @@ import { createArtViewer } from './ui/art-viewer';
 import { createStatusBar } from './ui/status';
 import { hasProvider, connectWallet, formatAddress, getAddress } from './chain/wallet';
 import type { RoomMap } from './map/types';
-import { createOverlayManager, type OverlayManager } from './ui/overlay';
+import { type OverlayManager } from './ui/overlay';
 import { startGame } from './flows/session-flow';
 import { initInventoryApi } from './state/inventory-api';
-import { setManageInventoryCallback } from './panels/inventory';
+import { initPanels } from './panel-setup';
 
 let gameState: GameState;
 let narrative: NarrativeController;
@@ -249,132 +248,31 @@ function showCharacterPicker(characters: CharacterSummary[], walletAddress: stri
   });
 }
 
-// --- Helper: replace a mount div with a component element ---
-function mount(mountId: string, el: HTMLElement): void {
-  const mountEl = document.getElementById(mountId);
-  if (mountEl && mountEl.parentElement) {
-    mountEl.parentElement.replaceChild(el, mountEl);
-  }
-}
-
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
-  // 1. Header
-  header = createHeader();
-  mount('tui-header', header.el);
-
-  // 2. Create windows
-  narrativeWin = createWindow({ title: 'Narrative', id: 'narrative-win', className: 'resizable' });
-  eventsWin = createWindow({ title: 'Events', id: 'events-win' });
-  mapWin = createWindow({ title: 'Map', id: 'map-win' });
-  characterWin = createWindow({ title: 'Character', id: 'character-win', className: 'sidebar-win resizable', canvas: true });
-  inventoryWin = createWindow({ title: 'Inventory', id: 'inventory-win', className: 'sidebar-win resizable', canvas: true });
-  exitsWin = createWindow({ title: 'World', id: 'exits-win', className: 'sidebar-win resizable', canvas: true });
-  presentWin = createWindow({ title: 'Present', id: 'present-win', className: 'sidebar-win resizable', canvas: true });
-  questWin = createWindow({ title: 'Quests', id: 'quest-win', className: 'sidebar-win resizable', canvas: true });
-  factionWin = createWindow({ title: 'Factions', id: 'faction-win', className: 'sidebar-win resizable', canvas: true });
-  commandWin = createWindow({ title: 'Command', id: 'command-win' });
-
-  // 3. Mount windows by replacing mount divs
-  mount('narrative-mount', narrativeWin.el);
-  mount('events-mount', eventsWin.el);
-  mount('map-mount', mapWin.el);
-  mount('character-mount', characterWin.el);
-  mount('inventory-mount', inventoryWin.el);
-  mount('exits-mount', exitsWin.el);
-  mount('present-mount', presentWin.el);
-  mount('quest-mount', questWin.el);
-  mount('faction-mount', factionWin.el);
-  mount('command-mount', commandWin.el);
-
-  // Status bar
-  statusBar = createStatusBar();
-  mount('status-mount', statusBar.el);
-
-  // Overlay manager
-  overlays = createOverlayManager(['char-create', 'death', 'loading', 'intro']);
-
-  // Wire up panel-click events for interactive panels
-  exitsWin.panel!.canvas.addEventListener('panel-click', (e: Event) => {
-    const detail = (e as CustomEvent).detail;
-    if (detail.action) handleAction(detail.action);
-  });
-  presentWin.panel!.canvas.addEventListener('panel-click', (e: Event) => {
-    const detail = (e as CustomEvent).detail;
-    if (detail.action) handleAction(detail.action);
-  });
-  questWin.panel!.canvas.addEventListener('panel-click', (e: Event) => {
-    const detail = (e as CustomEvent).detail;
-    if (detail.questName && gameState) {
-      const quest = gameState.quests.find(q => q.name === detail.questName);
-      if (quest) npcDialog.showQuest(quest);
-    }
-  });
-
-  // 4. Map toggle with 'm' key (not when input focused)
-  document.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'm' && document.activeElement?.tagName !== 'INPUT') {
-      mapWin.toggle();
-    }
-  });
-
-  // 5. Dialog
-  npcDialog = createDialog();
-  mount('dialog-mount', npcDialog.el);
-
-  // 5b. Inventory modal
-  invModal = createInventoryModal(() => gameState);
-  document.body.appendChild(invModal.el);
-  setManageInventoryCallback(() => invModal.open());
-
-  // 'i' key toggles inventory modal (when input not focused)
-  document.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'i' && document.activeElement?.tagName !== 'INPUT') {
-      if (invModal.active) invModal.close();
-      else invModal.open();
-    }
-  });
-
-  // 6. Narrative + Events feed
-  narrative = initNarrative(narrativeWin.body);
-  eventsFeed = initNarrative(eventsWin.body);
-
-  // 6b. Entity clicks from canvas narrative panel
-  narrative.canvas.addEventListener('narrative-entity-click', (e: Event) => {
-    const { entityId } = (e as CustomEvent).detail;
-    codex.open(entityId || undefined);
-  });
-
-  // 7. Command input
-  commandWin.body.innerHTML = `
-    <span class="prompt-char">&gt;</span>
-    <input type="text" id="action-input" placeholder="What do you do?" autocomplete="off" spellcheck="false" />
-  `;
-  const actionInput = commandWin.body.querySelector('#action-input') as HTMLInputElement;
-  initInput(actionInput, handleAction, () => ({
-    npcs: gameState?.location?.npcs || [],
-    players: gameState?.location?.players || [],
-  }));
-
-  // 8. Map
-  const mapCanvasWrap = document.createElement('div');
-  mapCanvasWrap.className = 'map-canvas-wrap';
-  mapWin.body.appendChild(mapCanvasWrap);
-  initMapPanel(mapCanvasWrap, handleAction);
-
-  // 8b. Art viewer + Codex modal
-  artViewer = createArtViewer();
-  document.body.appendChild(artViewer.el);
-  codex = createCodexModal(() => gameState, () => getSession().playerId, artViewer.open);
-  document.body.appendChild(codex.el);
-
-  // 'k' key toggles codex modal (when input not focused)
-  document.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'k' && document.activeElement?.tagName !== 'INPUT') {
-      if (codex.active) codex.close();
-      else codex.open();
-    }
-  });
+  // Initialize all panels
+  const panels = initPanels(() => gameState, handleAction);
+  ({
+    header,
+    narrative,
+    eventsFeed,
+    narrativeWin,
+    eventsWin,
+    mapWin,
+    characterWin,
+    inventoryWin,
+    exitsWin,
+    presentWin,
+    questWin,
+    factionWin,
+    commandWin,
+    statusBar,
+    overlays,
+    npcDialog,
+    invModal,
+    codex,
+    artViewer,
+  } = panels);
 
   // 9. Wire handlers
   const handleMessage = createMessageHandler({
