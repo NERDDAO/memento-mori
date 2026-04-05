@@ -109,3 +109,16 @@ class WebSocketHub:
         }
         logger.info("Death feed: %s (Lv %d) at %s — %s", player_name, level, location, cause)
         await self.broadcast_all(msg)
+
+    async def broadcast_episode(self, episode: dict) -> None:
+        """Broadcast a new episode to all connected clients."""
+        msg = {
+            "type": "episode_feed",
+            "episode_uuid": episode.get("uuid", ""),
+            "agent_id": episode.get("agent_id", ""),
+            "name": episode.get("name", ""),
+            "summary": episode.get("content", episode.get("summary", "")),
+            "location": episode.get("location", ""),
+            "timestamp": episode.get("created_at", ""),
+        }
+        await self.broadcast_all(msg)
