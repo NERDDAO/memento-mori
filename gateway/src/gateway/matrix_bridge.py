@@ -37,13 +37,38 @@ class MatrixBridge:
         self.room_to_location: dict[str, str] = {}
         self.location_to_room: dict[str, str] = {}
         self.player_tokens: dict[str, str] = {}  # player_id -> matrix access_token
+        self._narrator_agents: dict[str, str] = {}  # location_name → narrator_agent_id
+
+    def _load_narrator_registry(self) -> None:
+        """Load location → narrator agent_id mapping from world.json."""
+        import json
+        from pathlib import Path
+
+        world_file = Path(__file__).parent.parent.parent.parent / "world.json"
+        try:
+            if world_file.exists():
+                data = json.loads(world_file.read_text())
+                # world.json stores narrator IDs as: threshold_narrator_agent_id, etc.
+                if data.get("threshold_narrator_agent_id"):
+                    self._narrator_agents["The Threshold"] = data["threshold_narrator_agent_id"]
+                # Future: world.json will have a "narrator_agents" dict
+                narrators = data.get("narrator_agents", {})
+                self._narrator_agents.update(narrators)
+                if self._narrator_agents:
+                    logger.info("Loaded narrator registry: %s", list(self._narrator_agents.keys()))
+        except Exception:
+            logger.debug("Failed to load narrator registry", exc_info=True)
+
+    def register_narrator(self, location_name: str, agent_id: str) -> None:
+        """Register a narrator agent for a location (called by agent_controller on dynamic spawn)."""
+        self._narrator_agents[location_name] = agent_id
+        logger.info("Registered narrator for %s: %s", location_name, agent_id)
 
     def _push_to_stack(self, text: str, sender: str, location: str) -> None:
-        """Push a message to the narrator agent's Delve stack for heartbeat processing.
+        """Push a message to the location's narrator agent stack.
 
-        All game messages (player actions, NPC responses, narrator text) flow
-        through the narrator agent's stack. The heartbeat processes them periodically.
-        Fire-and-forget — failures are logged but don't block message flow.
+        Routes to the per-room narrator if one exists for this location,
+        otherwise falls back to the global narrator agent.
         """
         if not text or not text.strip():
             return
@@ -51,7 +76,10 @@ class MatrixBridge:
             from memento.bonfires_client import get_client
             from datetime import datetime, UTC
             client = get_client()
-            agent_id = client.config.agent_id
+
+            # Route to per-room narrator if available, else global narrator
+            agent_id = self._narrator_agents.get(location) or client.config.agent_id
+
             from bonfires.sdk.http import _post
             _post(
                 client.config,
@@ -85,6 +113,9 @@ class MatrixBridge:
 
             # Pre-populate known rooms
             await self._discover_rooms()
+
+            # Load per-room narrator agent mappings
+            self._load_narrator_registry()
         except Exception as e:
             logger.error("Connection failed", exc_info=True)
             self.connected = False
