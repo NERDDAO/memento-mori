@@ -288,12 +288,14 @@ def seed_threshold() -> dict:
         {"x": 17, "y": 17, "ch": "+", "direction": "south", "target": "The Wastes"},
     ]
 
-    # Update the entity with the complete map
-    summary = "A vast stone chamber at the boundary between worlds. The air hums with residual energy."
-    client.kg.update_entity(
-        uuid, "The Threshold", ["Location"], summary,
-        attributes={"room_map": json.dumps(THRESHOLD_MAP)},
-    )
+    # Update the entity with the complete map — store room_map in summary as JSON.
+    # Pass labels=None so the CRUD service uses direct Cypher SET (not node.save()
+    # which mangles JSON strings in Kuzu).
+    summary_data = {
+        "summary": "A vast stone chamber at the boundary between worlds. The air hums with residual energy.",
+        "room_map": THRESHOLD_MAP,
+    }
+    client.kg.update_entity(uuid, "The Threshold", None, json.dumps(summary_data))
 
     # Pack terrain bytes for future onchain storage
     room_map = THRESHOLD_MAP

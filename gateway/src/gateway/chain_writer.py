@@ -89,22 +89,36 @@ async def call_system(function_sig: str, args: list) -> bool:
             logger.warning("Function %s not found in IWorld ABI", function_sig)
             return False
 
+        # Convert hex strings to bytes for bytes32 params
+        converted_args = []
+        for a in args:
+            if isinstance(a, str) and a.startswith("0x") and len(a) == 66:
+                converted_args.append(bytes.fromhex(a[2:]))
+            else:
+                converted_args.append(a)
+
         # Build and send transaction
-        tx = fn(*args).build_transaction({
+        tx = fn(*converted_args).build_transaction({
             "from": account.address,
             "nonce": w3.eth.get_transaction_count(account.address),
-            "gas": 500_000,
+            "gas": 2_000_000,
             "gasPrice": w3.eth.gas_price,
         })
         signed = account.sign_transaction(tx)
         tx_hash = await asyncio.to_thread(w3.eth.send_raw_transaction, signed.raw_transaction)
         receipt = await asyncio.to_thread(w3.eth.wait_for_transaction_receipt, tx_hash, timeout=10)
 
-        if receipt.status == 1:
-            logger.info("Chain write OK: %s tx=%s", function_sig, tx_hash.hex()[:12])
+        if receipt["status"] == 1:
+            logger.info("Chain write OK: %s tx=%s gas=%d", function_sig, tx_hash.hex()[:12], receipt["gasUsed"])
             return True
         else:
-            logger.warning("Chain write reverted: %s tx=%s", function_sig, tx_hash.hex()[:12])
+            # Try to get revert reason
+            try:
+                w3.eth.call(tx, receipt["blockNumber"])
+            except Exception as revert_err:
+                logger.warning("Chain write reverted: %s reason=%s", function_sig, revert_err)
+            else:
+                logger.warning("Chain write reverted: %s tx=%s (no revert reason)", function_sig, tx_hash.hex()[:12])
             return False
 
     except Exception:
