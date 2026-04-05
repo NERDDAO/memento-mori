@@ -33,9 +33,27 @@ async def lifespan(app: FastAPI):
         await bridge.connect()
         round_manager.on_round_close(make_round_callback(bridge, ws_hub))
         round_manager.on_action(make_action_callback(ws_hub))
+
+    # Seed ontology types on Delve for this bonfire
+    _seed_ontology()
+
     yield
     if bridge:
         await bridge.disconnect()
+
+
+def _seed_ontology() -> None:
+    """Register world seed extraction types on the bonfire's Delve ontology."""
+    try:
+        from memento.bonfires_client import get_client
+        from memento.rpg_types import RPG_ENTITY_TYPES
+
+        client = get_client()
+        type_names = list(RPG_ENTITY_TYPES.keys())
+        client.ontology.set_extraction_types(type_names)
+        logger.info("Seeded ontology types: %s", type_names)
+    except Exception:
+        logger.warning("Failed to seed ontology types (non-fatal)", exc_info=True)
 
 
 app = FastAPI(title="Memento Mori Gateway", lifespan=lifespan)
