@@ -6,7 +6,11 @@ import { Items } from "../codegen/index.sol";
 
 contract ItemSystem is System {
   function registerItem(
-    bytes32 id, string memory name, string memory rarity, bytes32 ownerId, bytes32 locationId
+    bytes32 id,
+    string memory name,
+    string memory rarity,
+    bytes32 ownerId,
+    bytes32 locationId
   ) public {
     Items.set(id, ownerId, locationId, name, rarity);
   }
