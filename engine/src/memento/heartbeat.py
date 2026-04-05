@@ -71,21 +71,21 @@ class HeartbeatRunner:
                 logger.info("Heartbeat: stack already processing, skipping")
                 return {"skipped": True, "reason": "already_processing"}
 
-            if not task_id:
-                logger.warning("Heartbeat: no task_id from process_stack")
-                return {"error": "no_task_id"}
+            if task_id:
+                # Real task queue — poll until complete
+                job_result = client.kg.wait_for_job(task_id, timeout=120.0, poll_interval=3.0)
+                job_status = job_result.get("status", "")
 
-            # Poll until complete (120s timeout)
-            job_result = client.kg.wait_for_job(task_id, timeout=120.0, poll_interval=3.0)
-            job_status = job_result.get("status", "")
+                if job_status == "timeout":
+                    logger.warning("Heartbeat: job timed out after 120s")
+                    return {"error": "job_timeout", "task_id": task_id}
 
-            if job_status == "timeout":
-                logger.warning("Heartbeat: job timed out after 120s")
-                return {"error": "job_timeout", "task_id": task_id}
-
-            if job_status in ("failed", "FAILED"):
-                logger.warning("Heartbeat: job failed: %s", job_result)
-                return {"error": "job_failed", "task_id": task_id}
+                if job_status in ("failed", "FAILED"):
+                    logger.warning("Heartbeat: job failed: %s", job_result)
+                    return {"error": "job_failed", "task_id": task_id}
+            else:
+                # Mock queue mode — processing ran inline, no task_id to poll
+                logger.info("Heartbeat: processing completed inline (no task queue)")
 
         except Exception:
             logger.warning("Heartbeat: stack processing failed", exc_info=True)
