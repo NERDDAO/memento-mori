@@ -4,11 +4,11 @@
  * Thin orchestrator: wires session, panels, and message handling together.
  */
 
-import { createInitialState, applyStateUpdate, type GameState } from './state/game-state';
+import { type GameState } from './state/game-state';
 import { getSession, sendAction, setMessageHandler, setConnectionHandler, GATEWAY_URL } from './state/session';
-import { getRoundState, updateRoundState, type PhaseMessage as RoundPhaseMessage } from './state/round-state';
-import type { WsMessage, PresencePlayer } from './types/ws-messages';
+import { getRoundState } from './state/round-state';
 import { setKnownEntities } from './renderer/text-renderer';
+import { createMessageHandler } from './message-handler';
 import { initNarrative, type NarrativeController } from './panels/narrative';
 import { initInput } from './panels/input';
 import { initMapPanel, updateMap } from './panels/map';
@@ -19,7 +19,7 @@ import { renderPresentPanel } from './panels/present';
 import { renderQuestLogPanel } from './panels/questlog';
 import { renderFactionsPanel } from './panels/factions';
 import { createWindow } from './ui/window';
-import { createHeader, type WorldTime } from './ui/header';
+import { createHeader } from './ui/header';
 import { createDialog } from './ui/dialog';
 import { createInventoryModal } from './ui/inventory-modal';
 import { createCodexModal } from './ui/codex-modal';
@@ -118,241 +118,6 @@ function showDeathScreen(cause: string): void {
   ` : '';
 
   overlays.show('death');
-}
-
-// --- WebSocket message handling ---
-function handleMessage(msg: WsMessage): void {
-  switch (msg.type) {
-    case 'narrative': {
-      narrative.removeThinking();
-      const channel = msg.channel || 'narrative';
-
-      // Route by channel: narrative prose stays in narrative, events go to events feed
-      if (channel === 'events') {
-        eventsFeed.addBlock(msg.text || '', 'event');
-      } else if (channel === 'ooc') {
-        eventsFeed.addBlock(msg.text || '', 'ooc');
-      } else if (msg.npc) {
-        // NPC dialogue — remove thinking indicator and show with name header
-        const npcKey = msg.npc_username || msg.npc.toLowerCase().replace(/\s+/g, '-');
-        narrative.removeBlockById(`npc-status-${npcKey}`);
-        narrative.addBlock(`${msg.npc}`, 'npc-name');
-        narrative.addBlock(msg.text || '', 'npc-dialogue');
-      } else {
-        narrative.addBlock(msg.text || '', 'narrative');
-      }
-
-      if (msg.state_update && gameState) {
-        applyStateUpdate(gameState, msg.state_update);
-        const session = getSession();
-        session.currentLocation = gameState.location.name;
-        if (gameState.roomMap) registerMapEntities(gameState.roomMap);
-
-        if (msg.state_update.world_time) {
-          header.updateTime(msg.state_update.world_time as WorldTime);
-          statusBar.setTick(msg.state_update.world_time.tick || 0);
-        }
-
-        renderAllPanels();
-        fetchPlayerWorldMap();
-
-        // Display event notifications in the events feed
-        if (msg.state_update.events) {
-          const events = msg.state_update.events;
-          if (events.combat) {
-            const c = events.combat;
-            if (c.damage_dealt != null) {
-              eventsFeed.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ''}`, 'event-combat');
-            }
-            if (c.xp_gained) {
-              eventsFeed.addBlock(`[+${c.xp_gained} XP]`, 'event-xp');
-            }
-            if (c.target_dead) {
-              eventsFeed.addBlock(`${c.target_name || 'Target'} has been slain.`, 'event-death');
-            }
-          }
-          if (events.inventory_changes) {
-            for (const inv of events.inventory_changes) {
-              const prefix = inv.event_type === 'DROP' ? '-' : '+';
-              eventsFeed.addBlock(`[${prefix}${inv.item_name}]`, 'event-item');
-            }
-          }
-        }
-      }
-
-      // Check for death via structured event or text fallback
-      if (msg.state_update?.status === 'dead' ||
-          msg.state_update?.events?.combat?.target_dead ||
-          (msg.text && msg.text.toLowerCase().includes('you have died'))) {
-        showDeathScreen(msg.state_update?.cause || '');
-      }
-      break;
-    }
-    case 'death_feed': {
-      const skull = '\u2620';
-      const deathMsg = `${skull} ${msg.player_name || 'Unknown'} (Level ${msg.level || '?'}) fell at ${msg.location || 'unknown'}. ${msg.cause || ''}`;
-      narrative.addBlock(deathMsg, 'death-feed');
-      break;
-    }
-    case 'scene_art': {
-      // Render scene art as a narrative block
-      const artText = (msg.lines || []).join('\n');
-      if (artText) {
-        narrative.addBlock(artText, 'scene-art');
-      }
-      break;
-    }
-    case 'entity_art': {
-      // Cache on the entity in game state
-      const artLines = msg.lines || [];
-      if (msg.entity_id && gameState) {
-        const npc = gameState.location.npcs.find(n => n.id === msg.entity_id);
-        const item = gameState.location.items.find(i => i.id === msg.entity_id);
-        const entity = npc || item;
-        if (entity) {
-          entity.ascii_art = artLines.join('\n');
-        }
-        // Also sync to roomMap for map renderer
-        if (gameState.roomMap) {
-          const rmNpc = gameState.roomMap.npcs.find((n: any) => n.id === msg.entity_id);
-          const rmItem = gameState.roomMap.items.find((i: any) => i.id === msg.entity_id);
-          const rmEntity = rmNpc || rmItem;
-          if (rmEntity) {
-            rmEntity.ascii_art = artLines.join('\n');
-          }
-        }
-      }
-      // Update codex modal if it's open
-      if (msg.entity_id && codex?.active) {
-        codex.refreshEntityArt(msg.entity_id, artLines);
-      }
-      break;
-    }
-    case 'codex_refresh': {
-      // Enrichment finished — no-op while codex is open (art updates come via entity_art).
-      // Data will be fresh next time codex is opened.
-      break;
-    }
-    case 'npc_status': {
-      // NPC thinking/status — replace previous status for this NPC
-      const npcKey = msg.npc_username || msg.npc || 'unknown';
-      narrative.replaceBlock(`npc-status-${npcKey}`, `${msg.npc}: ${msg.text}`, 'npc-status');
-      break;
-    }
-    case 'phase': {
-      updateRoundState(msg as RoundPhaseMessage);
-      // Show phase progress in events feed
-      const phase = msg.phase || '';
-      const crew = msg.crew || '';
-      if (phase === 'resolving' && crew) {
-        eventsFeed.replaceBlock('phase-progress', `[${crew}]`, 'event');
-      } else if (phase === 'npc_response') {
-        eventsFeed.replaceBlock('phase-progress', '[waiting for NPCs]', 'event');
-      } else if (phase === 'ready') {
-        eventsFeed.removeBlockById('phase-progress');
-      }
-      break;
-    }
-    case 'status':
-      if (msg.tick != null) statusBar.setTick(msg.tick);
-      if (msg.chain != null) statusBar.setChain(msg.chain);
-      if (msg.activity) statusBar.setActivity(msg.activity);
-      break;
-    case 'player_joined': {
-      if (gameState) {
-        const exists = gameState.location.players.some(p => p.id === msg.player_id);
-        if (!exists) {
-          gameState.location.players.push({ name: msg.player_name, id: msg.player_id });
-          renderPresentPanel(presentWin.panel!, gameState, handleAction);
-          narrative.addBlock(`${msg.player_name} arrived.`, 'system');
-        }
-      }
-      break;
-    }
-    case 'player_left': {
-      if (gameState) {
-        gameState.location.players = gameState.location.players.filter(p => p.id !== msg.player_id);
-        renderPresentPanel(presentWin.panel!, gameState, handleAction);
-        narrative.addBlock(`${msg.player_name} departed.`, 'system');
-      }
-      break;
-    }
-    case 'position_update': {
-      if (gameState && msg.entity_id) {
-        // Update roomMap
-        if (gameState.roomMap) {
-          const npc = gameState.roomMap.npcs.find(n => n.id === msg.entity_id);
-          if (npc) { npc.x = msg.x; npc.y = msg.y; }
-          const item = gameState.roomMap.items.find(i => i.id === msg.entity_id);
-          if (item) { item.x = msg.x; item.y = msg.y; }
-        }
-        // Also update location entities (denormalized)
-        const locNpc = gameState.location.npcs.find(n => n.id === msg.entity_id);
-        if (locNpc) { locNpc.x = msg.x; locNpc.y = msg.y; }
-        const locItem = gameState.location.items.find(i => i.id === msg.entity_id);
-        if (locItem) { locItem.x = msg.x; locItem.y = msg.y; }
-
-        updateMap(gameState, handleAction);
-      }
-      break;
-    }
-    case 'npc_left': {
-      if (gameState) {
-        const leftName = (msg.npc_name as string).toLowerCase();
-        gameState.location.npcs = gameState.location.npcs.filter(n =>
-          n.name.toLowerCase() !== leftName && !n.name.toLowerCase().startsWith(leftName)
-        );
-        renderPresentPanel(presentWin.panel!, gameState, handleAction);
-      }
-      break;
-    }
-    case 'npc_joined': {
-      if (gameState && msg.npc_name) {
-        const joinName = (msg.npc_name as string).toLowerCase();
-        const exists = gameState.location.npcs.some(n =>
-          n.name.toLowerCase() === joinName || n.name.toLowerCase().startsWith(joinName)
-        );
-        if (!exists) {
-          gameState.location.npcs.push({ name: msg.npc_name, id: msg.npc_id || '', role: '' });
-          renderPresentPanel(presentWin.panel!, gameState, handleAction);
-        }
-      }
-      break;
-    }
-    case 'presence': {
-      if (gameState) {
-        gameState.location.players = (msg.players || []).map((p: { player_name: string; player_id: string }) => ({
-          name: p.player_name,
-          id: p.player_id,
-        }));
-        renderPresentPanel(presentWin.panel!, gameState, handleAction);
-      }
-      break;
-    }
-    case 'state_update': {
-      // Standalone state_update (from inventory actions, not embedded in narrative)
-      if (msg.state_update && gameState) {
-        applyStateUpdate(gameState, msg.state_update);
-        renderAllPanels();
-        fetchPlayerWorldMap();
-        if (invModal.active) invModal.refresh();
-      }
-      break;
-    }
-    case 'room_items_changed': {
-      // Ground items changed — refresh room manifest
-      // The next state_update will have the updated room_map
-      if (invModal.active) invModal.refresh();
-      break;
-    }
-    case 'episode_feed': {
-      const label = msg.location ? `[Chronicle · ${msg.location}]` : '[Chronicle]';
-      eventsFeed.addBlock(`${label} ${msg.name}: ${msg.summary}`, 'event');
-      break;
-    }
-    default:
-      console.log('Unknown message:', msg);
-  }
 }
 
 // --- Archetype selection ---
@@ -612,6 +377,25 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // 9. Wire handlers
+  const handleMessage = createMessageHandler({
+    getGameState: () => gameState,
+    narrative,
+    eventsFeed,
+    header,
+    statusBar,
+    codex,
+    invModal,
+    characterWin,
+    inventoryWin,
+    exitsWin,
+    presentWin,
+    questWin,
+    factionWin,
+    handleAction,
+    registerMapEntities,
+    fetchPlayerWorldMap,
+    showDeathScreen,
+  });
   setMessageHandler(handleMessage);
 
   setConnectionHandler((connected) => {
