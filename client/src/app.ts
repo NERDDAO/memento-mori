@@ -5,7 +5,7 @@
  */
 
 import { type GameState } from './state/game-state';
-import { getSession, sendAction, setMessageHandler, setConnectionHandler, GATEWAY_URL } from './state/session';
+import { getSession, sendAction, setMessageHandler, setConnectionHandler, setErrorHandler, GATEWAY_URL } from './state/session';
 import { getRoundState } from './state/round-state';
 import { setKnownEntities } from './renderer/text-renderer';
 import { createMessageHandler } from './message-handler';
@@ -207,6 +207,8 @@ document.addEventListener('DOMContentLoaded', () => {
       narrative.addBlock('Connection lost. Reconnecting...', 'system');
     }
   });
+
+  setErrorHandler((msg) => eventsFeed.addBlock(msg, 'error'));
 
   // 10. Death screen — new character button
   document.getElementById('death-restart-btn')!.addEventListener('click', () => {
