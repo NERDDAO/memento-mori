@@ -124,3 +124,4 @@ class StateUpdate(BaseModel):
     status: str | None = None
     cause: str | None = None
     subsystem_warnings: list[str] = []
+    warning_details: dict[str, str] | None = None
