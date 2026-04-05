@@ -28,8 +28,9 @@ interface HitRegion {
   y: number;
   w: number;
   h: number;
-  entityId: string;
-  entityName: string;
+  entityId?: string;
+  entityName?: string;
+  npcName?: string;
 }
 
 /** A segment positioned for rendering on a specific line. */
@@ -41,6 +42,7 @@ interface PlacedSegment {
   attrs?: number;
   entityId?: string;
   entityName?: string;
+  npcName?: string;
 }
 
 // ── Color mappings ──────────────────────────────────────────────
@@ -215,9 +217,9 @@ export function initNarrative(container: HTMLElement): NarrativeController {
       return [{ text: rule, col: padding, row: 0, fg: theme.colors.dim }];
     }
 
-    // NPC name header: bold gold with diamond marker
+    // NPC name header: bold gold with diamond marker — clickable
     if (blockType === 'npc-name') {
-      return [{ text: `\u25C6 ${blockText}`, col: padding, row: 0, fg: theme.colors.npc, attrs: 1 }]; // ATTR_BOLD
+      return [{ text: `\u25C6 ${blockText}`, col: padding, row: 0, fg: theme.colors.npc, attrs: ATTR_BOLD | ATTR_UNDERLINE, npcName: blockText }];
     }
 
     // NPC dialogue: indented, italic, with left bar
@@ -379,6 +381,17 @@ export function initNarrative(container: HTMLElement): NarrativeController {
             entityName: seg.entityName || seg.text,
           });
         }
+
+        // Register hit region for clickable NPC name blocks
+        if (seg.npcName) {
+          hitRegions.push({
+            x: seg.col * charSize.width,
+            y: segPixelY,
+            w: seg.text.length * charSize.width,
+            h: charSize.height,
+            npcName: seg.npcName,
+          });
+        }
       }
     }
   }
@@ -431,10 +444,17 @@ export function initNarrative(container: HTMLElement): NarrativeController {
     for (const region of hitRegions) {
       if (mx >= region.x && mx < region.x + region.w &&
           my >= region.y && my < region.y + region.h) {
-        canvas.dispatchEvent(new CustomEvent('narrative-entity-click', {
-          detail: { entityId: region.entityId, entityName: region.entityName },
-          bubbles: true,
-        }));
+        if (region.npcName) {
+          canvas.dispatchEvent(new CustomEvent('npc-name-click', {
+            detail: { npcName: region.npcName },
+            bubbles: true,
+          }));
+        } else {
+          canvas.dispatchEvent(new CustomEvent('narrative-entity-click', {
+            detail: { entityId: region.entityId, entityName: region.entityName },
+            bubbles: true,
+          }));
+        }
         return;
       }
     }
