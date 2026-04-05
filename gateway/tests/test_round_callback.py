@@ -14,6 +14,8 @@ async def test_send_batch_to_matrix():
     mock_bridge = MagicMock()
     mock_bridge.connected = True
     mock_bridge.get_or_create_room = AsyncMock(return_value="!room123")
+    mock_bridge.send_action = AsyncMock()
+    mock_bridge.ensure_npcs_in_room = AsyncMock()
     mock_bridge.client = MagicMock()
     mock_bridge.client.room_send = AsyncMock()
     mock_bridge.token = "test-token"
@@ -38,7 +40,8 @@ async def test_send_batch_to_matrix():
     assert content["com.bonfires.rpg"]["batch"] is True
     assert len(content["com.bonfires.rpg"]["actions"]) == 2
 
-    mock_ws_hub.broadcast_to_location.assert_called_once()
+    # send_action called once per player action
+    assert mock_bridge.send_action.call_count == 2
 
 
 @pytest.mark.asyncio
