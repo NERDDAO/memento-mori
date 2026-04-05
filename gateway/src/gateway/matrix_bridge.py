@@ -54,9 +54,6 @@ class MatrixBridge:
 
             # Pre-populate known rooms
             await self._discover_rooms()
-
-            # Start periodic NPC rejoin loop
-            asyncio.create_task(self._npc_rejoin_loop())
         except Exception as e:
             logger.error("Connection failed", exc_info=True)
             self.connected = False
@@ -351,16 +348,6 @@ class MatrixBridge:
                                     })
         except Exception:
             logger.debug("ensure_npcs_in_room failed for %s", room_id, exc_info=True)
-
-    async def _npc_rejoin_loop(self) -> None:
-        """Periodically ensure all kicked NPCs are back in their rooms."""
-        while self.connected:
-            await asyncio.sleep(30)
-            for room_id in list(self.room_to_location.keys()):
-                try:
-                    await self.ensure_npcs_in_room(room_id)
-                except Exception:
-                    pass
 
     async def register_player(self, player_name: str, player_id: str) -> str | None:
         """Register a Matrix user for a player. Returns access_token or None."""

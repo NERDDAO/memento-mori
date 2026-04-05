@@ -253,20 +253,10 @@ class RoundController:
         self.emit_phase("npc_response")
         clear_npc_responses(self.location)
 
-        timeout = 30.0
-        min_wait = 3.0
-        poll_interval = 1.0
-        elapsed = 0.0
-
-        while elapsed < timeout:
-            time.sleep(poll_interval)
-            elapsed += poll_interval
-
-            responded = npc_response_count(self.location)
-            if elapsed >= min_wait and responded > 0:
-                # At least one NPC responded — give a brief extra window then move on
-                time.sleep(2.0)
-                break
+        # Fixed wait — NPC responses land in Matrix room history during this window.
+        # The narration crew reads them via room context.
+        # Keep short since NPCs typically respond within 5-10s.
+        time.sleep(self.npc_wait)
 
     # ------------------------------------------------------------------
     # Individual crew steps
