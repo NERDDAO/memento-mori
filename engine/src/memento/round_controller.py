@@ -175,6 +175,7 @@ class RoundController:
 
         # Derived convenience fields
         self.player_name: str = actions[0].get("player_name", "unknown") if actions else "unknown"
+        self.player_id: str = actions[0].get("player_id", "") if actions else ""
         self.combined_action: str = "; ".join(
             f"{a.get('player_name', '?')}: {a.get('action', '?')}" for a in actions
         )
@@ -464,7 +465,7 @@ class RoundController:
 
         # Query active quests for primary player
         active_quests = None
-        raw_quests = query_active_quests(self.player_name)
+        raw_quests = query_active_quests(self.player_id or self.player_name)
         if raw_quests:
             active_quests = [QuestSummary(**q) for q in raw_quests]
 
@@ -554,6 +555,10 @@ class RoundController:
             loc_uuid = self.location_uuid
             if loc_uuid:
                 client.kg.create_edge(quest_uuid, loc_uuid, "AVAILABLE_AT", "")
+
+            # Link quest to player for restoration
+            if self.player_id:
+                client.kg.create_edge(self.player_id, quest_uuid, "HAS_QUEST", "")
 
             logger.info("Persisted quest: %s (%s)", quest_name, quest_uuid)
         except Exception:
