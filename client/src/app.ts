@@ -212,6 +212,15 @@ function handleMessage(msg: WsMessage): void {
         if (entity) {
           entity.ascii_art = artLines.join('\n');
         }
+        // Also sync to roomMap for map renderer
+        if (gameState.roomMap) {
+          const rmNpc = gameState.roomMap.npcs.find((n: any) => n.id === msg.entity_id);
+          const rmItem = gameState.roomMap.items.find((i: any) => i.id === msg.entity_id);
+          const rmEntity = rmNpc || rmItem;
+          if (rmEntity) {
+            rmEntity.ascii_art = artLines.join('\n');
+          }
+        }
       }
       // Update codex modal if it's open
       if (msg.entity_id && codex?.active) {
