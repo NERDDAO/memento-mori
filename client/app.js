@@ -4161,16 +4161,19 @@ class PlayerController {
       const exit = this.map.exits.find((e) => e.x === tx && e.y === ty);
       if (exit) {
         this.onInteract("exit", exit);
+        this.syncPosition();
         return;
       }
       const npc = this.map.npcs.find((n) => n.x === tx && n.y === ty);
       if (npc) {
         this.onInteract("npc", npc);
+        this.syncPosition();
         return;
       }
       const item = this.map.items.find((i) => i.x === tx && i.y === ty);
       if (item) {
         this.onInteract("item", item);
+        this.syncPosition();
         return;
       }
     }
@@ -4213,9 +4216,15 @@ class PlayerController {
     const ch = this.map.tiles[y * this.map.width + x];
     return ch !== "#" && ch !== undefined && ch !== " ";
   }
-  syncPosition(sendFn) {
-    if (sendFn)
-      sendFn(this.x, this.y);
+  syncPosition() {
+    const pid = window.__mmPlayerId;
+    if (!pid)
+      return;
+    fetch("/api/position/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ player_id: pid, x: this.x, y: this.y })
+    }).catch(() => {});
   }
   loadMap(map) {
     this.map = map;
@@ -4533,16 +4542,17 @@ function renderWorldMapPanel(panel, state2, onAction) {
     panel.paint(cells);
     return;
   }
+  const currentId = wm.current_id || "";
+  const currentRoom = currentId ? wm.rooms.find((r) => r.id === currentId) : wm.rooms.find((r) => r.name === wm.current);
+  const currentName = currentRoom?.name || wm.current || state2.location?.name || "Unknown";
   const byDir = {};
   for (const room of wm.rooms) {
-    if (room.id === wm.current)
+    if (room === currentRoom)
       continue;
     if (room.direction) {
       byDir[room.direction.toLowerCase()] = room;
     }
   }
-  const currentRoom = wm.rooms.find((r) => r.id === wm.current);
-  const currentName = currentRoom?.name ?? "Unknown";
   const label = `[${currentName}]`;
   const westRoom = byDir["west"];
   const eastRoom = byDir["east"];
@@ -6877,6 +6887,7 @@ function enterGame(config) {
     onGameReady(state2, openingNarrative) {
       gameState = state2;
       const session2 = getSession();
+      window.__mmPlayerId = session2.playerId;
       initInventoryApi(gameState, session2.playerId, renderAllPanels, (text, style) => {
         eventsFeed.addBlock(text, style);
       });

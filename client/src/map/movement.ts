@@ -52,13 +52,13 @@ export class PlayerController {
       const ty = this.y + dy;
 
       const exit = this.map.exits.find(e => e.x === tx && e.y === ty);
-      if (exit) { this.onInteract('exit', exit); return; }
+      if (exit) { this.onInteract('exit', exit); this.syncPosition(); return; }
 
       const npc = this.map.npcs.find(n => n.x === tx && n.y === ty);
-      if (npc) { this.onInteract('npc', npc); return; }
+      if (npc) { this.onInteract('npc', npc); this.syncPosition(); return; }
 
       const item = this.map.items.find(i => i.x === tx && i.y === ty);
-      if (item) { this.onInteract('item', item); return; }
+      if (item) { this.onInteract('item', item); this.syncPosition(); return; }
     }
   }
 
@@ -106,9 +106,17 @@ export class PlayerController {
     return ch !== '#' && ch !== undefined && ch !== ' ';
   }
 
-  /** Send current position to server for chain sync. */
-  syncPosition(sendFn?: (x: number, y: number) => void): void {
-    if (sendFn) sendFn(this.x, this.y);
+  /** Send current position to server for chain sync. Fire-and-forget. */
+  syncPosition(): void {
+    const pid = (window as any).__mmPlayerId;
+    if (!pid) return;
+
+    // Fire-and-forget — don't block interaction
+    fetch('/api/position/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player_id: pid, x: this.x, y: this.y }),
+    }).catch(() => {});  // Best effort
   }
 
   loadMap(map: RoomMap): void {

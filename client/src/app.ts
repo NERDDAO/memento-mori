@@ -381,6 +381,7 @@ function enterGame(config: { playerName: string; walletAddress: string; isReturn
         gameState = state;
         // Init optimistic inventory API
         const session = getSession();
+        (window as any).__mmPlayerId = session.playerId;
         initInventoryApi(gameState, session.playerId, renderAllPanels, (text, style) => {
           eventsFeed.addBlock(text, style);
         });
