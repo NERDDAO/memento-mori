@@ -14,13 +14,12 @@ The current `RoundController` (`engine/src/memento/round_controller.py`) is a st
 Round closes (RoundManager batch window or solo fast-path)
   1. round_callback sends player actions to Matrix room
      (NPC agents see and respond to these)
-  2. Vector match action text against type descriptions → requested_types
-  3. stack.add(messages, requested_types) + trigger immediate processing
-  4. Graphiti add_episode extracts structured entities for matching types
-  5. CrewRouter reads extracted types → fires only relevant crews
-  6. NPC wait (event-driven, exits early when all respond or timeout)
-  7. Narrate (episode summary + crew results)
-  8. Post-turn (time advance, scene art fire-and-forget, state update)
+  2. stack.add(messages) + trigger immediate processing
+  3. Graphiti add_episode extracts with bonfire's registered types
+  4. NPC wait (event-driven, exits early when all respond or timeout)
+  5. WorldReactionCrew creates new entities/quests/lore from extracted seeds
+  6. Narrate (episode summary + world reaction results)
+  7. Post-turn (time advance, scene art fire-and-forget, state update)
 ```
 
 ### What Changes vs. What Stays
@@ -105,69 +104,21 @@ class LoreSeed(BaseModel):
 
 **Important distinction:** Inline actions (combat, movement, trade, inventory) are resolved by NPC agents via MCP tool calls during the round. The custom types above are for **world reactions** — things the world should create or change in response to what happened. The WorldReactionCrew reads these seeds and orchestrates entity creation.
 
-### 2. Type Selector (Vector Matching)
+### 2. Bonfire Custom Types CRUD (Delve)
 
-Runs in the engine (called by `EngineMatrixListener` after receiving the batch from Matrix, before pushing to Delve stack). Embeds type descriptions once at startup, then cosine similarity against incoming action text.
+Custom types are set **once per bonfire** via API, not per-message. With only 4 world seed types, there's no need for vector matching or per-call type selection — Graphiti is smart enough to only extract types that apply. We always pass all registered types; Graphiti skips types that don't match the content.
 
-```python
-# engine/src/memento/type_selector.py
+This is essentially an **ontology CRUD service** — register your schemas on the bonfire, Delve uses them for all episode extraction.
 
-class TypeSelector:
-    """Vector-match action text against RPG type descriptions."""
+**Delve changes:**
 
-    def __init__(self, threshold: float = 0.3):
-        self.threshold = threshold  # lenient — over-include is fine
-        self.types: dict[str, type[BaseModel]] = {}
-        self.embeddings: dict[str, list[float]] = {}
+- New API endpoint: `PUT /bonfires/{bonfire_id}/custom_types` — set custom entity types for a bonfire
+- New API endpoint: `GET /bonfires/{bonfire_id}/custom_types` — read current types
+- Bonfire model gets `custom_entity_types: list[str]` field (type names from the registry)
+- `_process_stack_background()` reads the bonfire's custom types and passes them to `create_single_episode(custom_types_config=...)`
+- World seed type classes registered in `custom_types.py` alongside existing types (User, TaxonomyLabel, etc.)
 
-    def register(self, name: str, model: type[BaseModel]) -> None:
-        """Register a type. Embeds the docstring for matching."""
-        self.types[name] = model
-        self.embeddings[name] = embed(model.__doc__ or name)
-
-    def select(self, action_text: str) -> list[str]:
-        """Return type names whose descriptions are similar to the action."""
-        action_emb = embed(action_text)
-        selected = []
-        for name, type_emb in self.embeddings.items():
-            if cosine_similarity(action_emb, type_emb) >= self.threshold:
-                selected.append(name)
-        return selected
-```
-
-Lenient threshold (0.3) means "when in doubt, include it." Graphiti won't extract a type that doesn't apply — no harm in over-requesting. The type descriptions in the Pydantic docstrings are the matching corpus.
-
-### 3. Delve Stack Extension — Per-Caller Custom Types
-
-Extends the Delve stack to accept `requested_types` per message. At process time, the stack unions all requested types across messages and passes them to episode creation.
-
-**Delve changes (delve/ repo):**
-
-- `StackMessage` gets optional `requested_types: list[str]` field
-- `Stack` model gets `requested_types: list[str]` field (accumulated across adds)
-- `stack.add()` merges message types into the stack's accumulated set
-- `_process_stack_background()` reads the accumulated set, resolves type names via a type registry, passes to `create_single_episode(custom_types_config=...)`
-- Stack clears `requested_types` after processing (same lifecycle as clearing messages)
-
-**Type registry:**
-
-A dict mapping type names to Pydantic models. RPG types are registered at bonfire configuration time. Starts as a simple module-level dict, can evolve to config-driven later.
-
-```python
-# delve: type_registry.py
-ENTITY_REGISTRY: dict[str, type[BaseModel]] = {
-    # Built-in
-    "User": User,
-    "TaxonomyLabel": TaxonomyLabel,
-    "Update": Update,
-    # RPG types (registered by memento-mori bonfire)
-    "CombatAction": CombatAction,
-    "QuestInteraction": QuestInteraction,
-    "SocialInteraction": SocialInteraction,
-    "TradeAction": TradeAction,
-    "MovementAction": MovementAction,
-}
-```
+**No per-message changes:** StackMessage stays unchanged. No `requested_types` field needed.
 
 **Immediate processing:** The game engine triggers stack processing immediately after adding messages (bypass the 20-min cycle). The existing `process_stack_task` can be invoked on demand.
 
@@ -220,7 +171,6 @@ class TurnController:
         location_uuid: str,
         actions: list[dict],
         transport: Transport,
-        type_selector: TypeSelector,
         world_reaction: WorldReactionCrew,
         npc_wait: float = 15.0,
     ): ...
@@ -234,25 +184,23 @@ class TurnController:
             return "", self._build_state_update(warnings=["round_failed"])
 
     def _run_inner(self) -> tuple[str, dict]:
-        # 1. Type selection (vector match — zero LLM calls)
-        requested_types = self.type_selector.select(self.combined_action)
+        # 1. Ingest to Delve stack + trigger processing
+        #    (bonfire's registered types applied automatically)
+        episode = self._ingest_and_extract()
 
-        # 2. Ingest to Delve stack + trigger processing
-        episode = self._ingest_and_extract(requested_types)
-
-        # 3. NPC wait (event-driven) — NPCs respond to actions in Matrix
+        # 2. NPC wait (event-driven) — NPCs respond to actions in Matrix
         self._await_npcs()
 
-        # 4. World reactions — create new entities/quests/lore from seeds
+        # 3. World reactions — create new entities/quests/lore from seeds
         reaction_results = self.world_reaction.react(
             episode.get("entities", []),
             self._build_turn_context(),
         )
 
-        # 5. Narrate (episode summary + world reaction results)
+        # 4. Narrate (episode summary + world reaction results)
         narrative = self._narrate(episode, reaction_results)
 
-        # 6. Post-turn
+        # 5. Post-turn
         if narrative:
             self._post_turn()
 
@@ -354,7 +302,6 @@ Note: Combat, movement, and trade are resolved inline by NPC MCP tool calls duri
 **New files (memento-mori):**
 - `engine/src/memento/turn_controller.py` — main orchestrator
 - `engine/src/memento/rpg_types.py` — Pydantic custom types
-- `engine/src/memento/type_selector.py` — vector matching for type selection
 - `engine/src/memento/world_reaction.py` — WorldReactionCrew orchestrator for entity creation from seeds
 - `engine/src/memento/transport.py` — Transport protocol + MatrixTransport + NullTransport
 - `engine/src/memento/lock_manager.py` — per-location locks
@@ -367,10 +314,10 @@ Note: Combat, movement, and trade are resolved inline by NPC MCP tool calls duri
 - `gateway/src/gateway/round_callback.py` — unchanged (still sends actions to Matrix; type selection happens in the engine)
 
 **New/modified files (delve):**
-- `src/infrastructure/dto/requests.py` — add `requested_types` to StackMessage
-- `src/infrastructure/database/models/stack.py` — add `requested_types` field
-- `src/core/services/stack_service.py` — merge requested types at process time
-- `src/core/services/knowledge_graph/custom_types.py` — register RPG types (or new registry file)
+- `src/api/routes/bonfire_routes.py` — add custom types CRUD endpoints
+- `src/infrastructure/database/models/bonfire.py` — add `custom_entity_types` field
+- `src/core/services/stack_service.py` — read bonfire's custom types at process time
+- `src/core/services/knowledge_graph/custom_types.py` — register world seed types
 
 **Tests:**
 - New tests for TurnController, WorldReactionCrew, TypeSelector, LocationLockManager
@@ -387,6 +334,4 @@ Note: Combat, movement, and trade are resolved inline by NPC MCP tool calls duri
 
 ## Open Decisions
 
-- **Embedding model for TypeSelector:** Use the same model as the vector store (already available via VectorStoreService), or a lightweight local model?
-- **Type registration mechanism:** Start with hardcoded dict in Delve. Evolve to config-driven (bonfire settings) if more consumers need custom types.
 - **Immediate stack processing trigger:** Expose as a dedicated API endpoint, or reuse the existing `process_stack_task` with an on-demand queue push?
