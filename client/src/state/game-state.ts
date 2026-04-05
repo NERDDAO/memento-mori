@@ -25,6 +25,26 @@ export interface LocationEntity {
   y?: number;
 }
 
+export interface WorldMapRoom {
+  id: string;
+  name: string;
+  visited: boolean;
+  direction?: string;
+  from_id?: string;
+}
+
+export interface WorldMapConnection {
+  from: string;
+  to: string;
+  direction: string;
+}
+
+export interface WorldMapData {
+  current: string;
+  rooms: WorldMapRoom[];
+  connections: WorldMapConnection[];
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
@@ -71,6 +91,7 @@ export interface GameState {
     disposition: string;
   }>;
   roomMap: RoomMap | null;
+  worldMap: WorldMapData | null;
 }
 
 export function createInitialState(playerName: string): GameState {
@@ -97,6 +118,7 @@ export function createInitialState(playerName: string): GameState {
     quests: [],
     factions: [],
     roomMap: null,
+    worldMap: null,
   };
 }
 
