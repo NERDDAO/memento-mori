@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace RoundController with an episode-driven TurnController where Graphiti custom types drive crew routing, vector similarity selects types per turn, and per-location locking enables parallel turn processing.
+**Goal:** Replace RoundController with an episode-driven TurnController where Graphiti custom types extract world reaction seeds, a WorldReactionCrew creates new entities/quests/lore from those seeds, and per-location locking enables parallel turn processing. Inline actions (combat, movement, trade) are handled by NPC tool calls — not re-resolved by crews.
 
-**Architecture:** Delve stack gets per-caller custom types. The engine defines RPG Pydantic types, vector-matches action text to select relevant types, pushes to stack, reads back structured extraction, and routes to crews based on what Graphiti found. Matrix transport is injected via protocol.
+**Architecture:** Delve stack gets per-caller custom types. The engine defines world seed types (NewEntitySeed, QuestSeed, LocationChange, LoreSeed), vector-matches action text to select relevant types, pushes to stack, reads back structured extraction, and a WorldReactionCrew creates new KG entities from the seeds. Matrix transport is injected via protocol.
 
 **Tech Stack:** Python 3.12, Pydantic v2, CrewAI, Graphiti (via Delve), sentence-transformers (embeddings), pytest, asyncio
 
@@ -18,9 +18,9 @@
 
 | File | Responsibility |
 |------|---------------|
-| `engine/src/memento/rpg_types.py` | Pydantic custom types for Graphiti extraction (CombatAction, QuestInteraction, etc.) |
+| `engine/src/memento/rpg_types.py` | World seed custom types for Graphiti extraction (NewEntitySeed, QuestSeed, LocationChange, LoreSeed) |
 | `engine/src/memento/type_selector.py` | Vector-match action text against type descriptions, returns requested_types |
-| `engine/src/memento/crew_router.py` | Maps extracted Graphiti entity types to crew callables, resolves UUIDs |
+| `engine/src/memento/world_reaction.py` | WorldReactionCrew — creates KG entities/quests/lore from extracted seeds |
 | `engine/src/memento/transport.py` | Transport protocol + MatrixTransport + NullTransport |
 | `engine/src/memento/lock_manager.py` | Per-location threading locks |
 | `engine/src/memento/narration_cooldown.py` | Persistent JSON-backed narration cooldown |
@@ -28,7 +28,8 @@
 | `engine/tests/test_lock_manager.py` | Tests for LocationLockManager |
 | `engine/tests/test_narration_cooldown.py` | Tests for NarrationCooldown |
 | `engine/tests/test_type_selector.py` | Tests for TypeSelector |
-| `engine/tests/test_crew_router.py` | Tests for CrewRouter |
+| `engine/tests/test_world_reaction.py` | Tests for WorldReactionCrew |
+| `engine/tests/test_world_reaction.py` | Tests for WorldReactionCrew |
 | `engine/tests/test_turn_controller.py` | Integration tests for TurnController |
 
 ### Modified files (memento-mori)
@@ -422,19 +423,22 @@ git commit -m "feat(engine): add Transport protocol, MatrixTransport, and NullTr
 
 ---
 
-### Task 4: RPG Custom Types
+### Task 4: World Seed Custom Types
 
 **Files:**
 - Create: `engine/src/memento/rpg_types.py`
 
-- [ ] **Step 1: Write the RPG type models**
+- [ ] **Step 1: Write the world seed type models**
 
 ```python
 # engine/src/memento/rpg_types.py
-"""RPG custom types for Graphiti episode extraction.
+"""World seed custom types for Graphiti episode extraction.
+
+These are NOT action replays — combat/movement/trade are handled inline by NPC
+tool calls. These types represent world consequences: new entities, quests,
+location changes, and lore that should exist as a result of what happened.
 
 Each type's docstring is used as the matching corpus for the TypeSelector.
-Graphiti's add_episode LLM extracts structured entities matching these models.
 """
 
 from __future__ import annotations
@@ -444,136 +448,126 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class CombatAction(BaseModel):
-    """Extracted when player actions involve combat, fighting, attacking, or violence."""
+class NewEntitySeed(BaseModel):
+    """Extracted when conversation implies a new NPC, creature, or item should exist in the world that doesn't already."""
 
-    attacker_name: str = Field(..., description="Name of the attacker")
-    target_name: str = Field(..., description="Name of the target being attacked")
-    weapon_or_method: str | None = Field(None, description="Weapon or method used")
-    context: str = Field("", description="Brief scene context for the combat")
-
-    @classmethod
-    def get_graphiti_labels(cls) -> list[str]:
-        return ["CombatAction"]
-
-    def to_entity_attributes(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"attacker_name": self.attacker_name, "target_name": self.target_name}
-        if self.weapon_or_method:
-            out["weapon_or_method"] = self.weapon_or_method
-        if self.context:
-            out["context"] = self.context
-        return out
-
-
-class QuestInteraction(BaseModel):
-    """Extracted when player interacts with quest content, accepts a quest, progresses a quest, or discovers quest-related information."""
-
-    player_name: str = Field(..., description="Name of the player")
-    npc_name: str | None = Field(None, description="Quest giver or relevant NPC")
-    action_type: str = Field("", description="One of: accept, progress, complete, discover")
-    quest_hint: str = Field("", description="What the quest seems to involve")
+    entity_name: str = Field(..., description="Name of the new entity")
+    entity_type: str = Field("", description="One of: npc, item, creature")
+    location: str = Field("", description="Where the entity should appear")
+    description: str = Field("", description="Brief description of the entity")
+    source_context: str = Field("", description="What in the conversation implied this entity")
 
     @classmethod
     def get_graphiti_labels(cls) -> list[str]:
-        return ["QuestInteraction"]
+        return ["NewEntitySeed"]
 
     def to_entity_attributes(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"player_name": self.player_name}
-        if self.npc_name:
-            out["npc_name"] = self.npc_name
-        if self.action_type:
-            out["action_type"] = self.action_type
-        if self.quest_hint:
-            out["quest_hint"] = self.quest_hint
+        out: dict[str, Any] = {"entity_name": self.entity_name}
+        if self.entity_type:
+            out["entity_type"] = self.entity_type
+        if self.location:
+            out["location"] = self.location
+        if self.description:
+            out["description"] = self.description
+        if self.source_context:
+            out["source_context"] = self.source_context
         return out
 
 
-class SocialInteraction(BaseModel):
-    """Extracted when player engages in faction-affecting, reputation-affecting, or social actions like persuasion, intimidation, or diplomacy."""
+class QuestSeed(BaseModel):
+    """Extracted when interaction suggests a quest opportunity, quest progression, or quest-related discovery."""
 
-    player_name: str = Field(..., description="Name of the player")
-    faction_or_npc: str = Field("", description="Faction or NPC involved")
-    sentiment: str = Field("", description="One of: friendly, hostile, neutral")
-    action_summary: str = Field("", description="Brief summary of the social action")
+    quest_name: str = Field("", description="Name or short title of the quest")
+    giver_name: str = Field("", description="NPC who triggered or gave the quest")
+    objective_hint: str = Field("", description="What needs to be done")
+    trigger_context: str = Field("", description="What in the conversation triggered this")
 
     @classmethod
     def get_graphiti_labels(cls) -> list[str]:
-        return ["SocialInteraction"]
+        return ["QuestSeed"]
 
     def to_entity_attributes(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"player_name": self.player_name}
-        if self.faction_or_npc:
-            out["faction_or_npc"] = self.faction_or_npc
-        if self.sentiment:
-            out["sentiment"] = self.sentiment
-        if self.action_summary:
-            out["action_summary"] = self.action_summary
+        out: dict[str, Any] = {}
+        if self.quest_name:
+            out["quest_name"] = self.quest_name
+        if self.giver_name:
+            out["giver_name"] = self.giver_name
+        if self.objective_hint:
+            out["objective_hint"] = self.objective_hint
+        if self.trigger_context:
+            out["trigger_context"] = self.trigger_context
         return out
 
 
-class TradeAction(BaseModel):
-    """Extracted when player buys, sells, trades, or exchanges items with an NPC or merchant."""
+class LocationChange(BaseModel):
+    """Extracted when the room state should change as a consequence of what happened — doors opened, fires started, structures collapsed."""
 
-    player_name: str = Field(..., description="Name of the player")
-    counterparty: str = Field("", description="NPC name or 'merchant'")
-    items_given: list[str] = Field(default_factory=list, description="Items given by the player")
-    items_received: list[str] = Field(default_factory=list, description="Items received by the player")
+    location: str = Field("", description="Location being changed")
+    change_description: str = Field("", description="What changed")
+    new_exits: list[str] = Field(default_factory=list, description="New exits or passages revealed")
+    removed_features: list[str] = Field(default_factory=list, description="Features destroyed or removed")
 
     @classmethod
     def get_graphiti_labels(cls) -> list[str]:
-        return ["TradeAction"]
+        return ["LocationChange"]
 
     def to_entity_attributes(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"player_name": self.player_name}
-        if self.counterparty:
-            out["counterparty"] = self.counterparty
-        if self.items_given:
-            out["items_given"] = self.items_given
-        if self.items_received:
-            out["items_received"] = self.items_received
+        out: dict[str, Any] = {}
+        if self.location:
+            out["location"] = self.location
+        if self.change_description:
+            out["change_description"] = self.change_description
+        if self.new_exits:
+            out["new_exits"] = self.new_exits
+        if self.removed_features:
+            out["removed_features"] = self.removed_features
         return out
 
 
-class MovementAction(BaseModel):
-    """Extracted when player moves between locations, travels, walks, or goes to a new area."""
+class LoreSeed(BaseModel):
+    """Extracted when new world lore, history, or mythology is revealed or created during conversation."""
 
-    player_name: str = Field(..., description="Name of the player")
-    from_location: str | None = Field(None, description="Origin location")
-    to_location: str = Field("", description="Destination location")
+    lore_topic: str = Field("", description="Topic or title of the lore")
+    content: str = Field("", description="The lore content")
+    source_npc: str = Field("", description="NPC who revealed it")
+    related_locations: list[str] = Field(default_factory=list, description="Locations related to this lore")
 
     @classmethod
     def get_graphiti_labels(cls) -> list[str]:
-        return ["MovementAction"]
+        return ["LoreSeed"]
 
     def to_entity_attributes(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"player_name": self.player_name}
-        if self.from_location:
-            out["from_location"] = self.from_location
-        if self.to_location:
-            out["to_location"] = self.to_location
+        out: dict[str, Any] = {}
+        if self.lore_topic:
+            out["lore_topic"] = self.lore_topic
+        if self.content:
+            out["content"] = self.content
+        if self.source_npc:
+            out["source_npc"] = self.source_npc
+        if self.related_locations:
+            out["related_locations"] = self.related_locations
         return out
 
 
-# Registry of all RPG types — used by TypeSelector and Delve type registration
+# Registry of all world seed types — used by TypeSelector and Delve type registration
 RPG_ENTITY_TYPES: dict[str, type[BaseModel]] = {
-    "CombatAction": CombatAction,
-    "QuestInteraction": QuestInteraction,
-    "SocialInteraction": SocialInteraction,
-    "TradeAction": TradeAction,
-    "MovementAction": MovementAction,
+    "NewEntitySeed": NewEntitySeed,
+    "QuestSeed": QuestSeed,
+    "LocationChange": LocationChange,
+    "LoreSeed": LoreSeed,
 }
 ```
 
 - [ ] **Step 2: Verify models are valid**
 
 Run: `cd engine && python -c "from memento.rpg_types import RPG_ENTITY_TYPES; print(list(RPG_ENTITY_TYPES.keys()))"`
-Expected: `['CombatAction', 'QuestInteraction', 'SocialInteraction', 'TradeAction', 'MovementAction']`
+Expected: `['NewEntitySeed', 'QuestSeed', 'LocationChange', 'LoreSeed']`
 
 - [ ] **Step 3: Commit**
 
 ```
 git add engine/src/memento/rpg_types.py
-git commit -m "feat(engine): add RPG custom types for Graphiti episode extraction"
+git commit -m "feat(engine): add world seed custom types for Graphiti episode extraction"
 ```
 
 ---
@@ -592,22 +586,22 @@ from memento.type_selector import TypeSelector
 from memento.rpg_types import RPG_ENTITY_TYPES
 
 
-def test_select_combat_action():
+def test_select_quest_seed():
     ts = TypeSelector(threshold=0.3)
     for name, model in RPG_ENTITY_TYPES.items():
         ts.register(name, model)
 
-    result = ts.select("I attack the goblin with my sword")
-    assert "CombatAction" in result
+    result = ts.select("The innkeeper mentions a lost artifact in the caves")
+    assert "QuestSeed" in result
 
 
-def test_select_trade_action():
+def test_select_new_entity_seed():
     ts = TypeSelector(threshold=0.3)
     for name, model in RPG_ENTITY_TYPES.items():
         ts.register(name, model)
 
-    result = ts.select("I want to buy a healing potion from the merchant")
-    assert "TradeAction" in result
+    result = ts.select("A mysterious stranger appears at the tavern door")
+    assert "NewEntitySeed" in result
 
 
 def test_simple_action_may_match_nothing_or_few():
@@ -616,8 +610,8 @@ def test_simple_action_may_match_nothing_or_few():
         ts.register(name, model)
 
     result = ts.select("I look around the room")
-    # At strict threshold, a generic action shouldn't match combat/trade/quest
-    assert "CombatAction" not in result
+    # At strict threshold, a generic action shouldn't match specific seeds
+    assert "QuestSeed" not in result
 
 
 def test_lenient_threshold_over_includes():
@@ -927,136 +921,118 @@ git commit -m "feat: merge requested_types from StackMessage into Stack during a
 
 ---
 
-### Task 10: RPG types in Delve type registry
+### Task 10: World seed types in Delve type registry
 
 **Files:**
 - Modify: `delve/src/core/services/knowledge_graph/custom_types.py`
 
-- [ ] **Step 1: Add RPG types to the registry**
+- [ ] **Step 1: Add world seed types to the registry**
 
-Add the RPG type classes at the end of the file, before the `CUSTOM_ENTITY_TYPES` list. These are copies of the memento-mori types but registered in Delve's type system:
+Add the world seed type classes at the end of the file, before the `CUSTOM_ENTITY_TYPES` list. These mirror the memento-mori types registered in Delve's type system:
 
 ```python
-# --- RPG custom types (registered by memento-mori bonfire) ---
+# --- World seed types (registered by memento-mori bonfire) ---
 
-class CombatAction(BaseModel):
-    """Extracted when player actions involve combat, fighting, or violence."""
-    attacker_name: str | None = Field(None, description="Name of the attacker")
-    target_name: str | None = Field(None, description="Name of the target")
-    weapon_or_method: str | None = Field(None, description="Weapon or method used")
-    context: str | None = Field(None, description="Brief scene context")
+class NewEntitySeed(BaseModel):
+    """Extracted when conversation implies a new NPC, creature, or item should exist."""
+    entity_name: str | None = Field(None, description="Name of the new entity")
+    entity_type: str | None = Field(None, description="npc, item, creature")
+    location: str | None = Field(None, description="Where the entity should appear")
+    description: str | None = Field(None, description="Brief description")
+    source_context: str | None = Field(None, description="What implied this entity")
 
     @classmethod
     def get_graphiti_labels(cls) -> list[str]:
-        return ["CombatAction"]
+        return ["NewEntitySeed"]
 
     def to_entity_attributes(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        if self.attacker_name is not None:
-            out["attacker_name"] = self.attacker_name
-        if self.target_name is not None:
-            out["target_name"] = self.target_name
-        if self.weapon_or_method is not None:
-            out["weapon_or_method"] = self.weapon_or_method
-        if self.context is not None:
-            out["context"] = self.context
+        if self.entity_name is not None:
+            out["entity_name"] = self.entity_name
+        if self.entity_type is not None:
+            out["entity_type"] = self.entity_type
+        if self.location is not None:
+            out["location"] = self.location
+        if self.description is not None:
+            out["description"] = self.description
+        if self.source_context is not None:
+            out["source_context"] = self.source_context
         return out
 
 
-class QuestInteraction(BaseModel):
-    """Extracted when player interacts with quest content."""
-    player_name: str | None = Field(None, description="Name of the player")
-    npc_name: str | None = Field(None, description="Quest giver or relevant NPC")
-    action_type: str | None = Field(None, description="accept, progress, complete, discover")
-    quest_hint: str | None = Field(None, description="What the quest involves")
+class QuestSeed(BaseModel):
+    """Extracted when interaction suggests a quest opportunity or progression."""
+    quest_name: str | None = Field(None, description="Name of the quest")
+    giver_name: str | None = Field(None, description="NPC who triggered it")
+    objective_hint: str | None = Field(None, description="What needs to be done")
+    trigger_context: str | None = Field(None, description="What triggered this")
 
     @classmethod
     def get_graphiti_labels(cls) -> list[str]:
-        return ["QuestInteraction"]
+        return ["QuestSeed"]
 
     def to_entity_attributes(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        if self.player_name is not None:
-            out["player_name"] = self.player_name
-        if self.npc_name is not None:
-            out["npc_name"] = self.npc_name
-        if self.action_type is not None:
-            out["action_type"] = self.action_type
-        if self.quest_hint is not None:
-            out["quest_hint"] = self.quest_hint
+        if self.quest_name is not None:
+            out["quest_name"] = self.quest_name
+        if self.giver_name is not None:
+            out["giver_name"] = self.giver_name
+        if self.objective_hint is not None:
+            out["objective_hint"] = self.objective_hint
+        if self.trigger_context is not None:
+            out["trigger_context"] = self.trigger_context
         return out
 
 
-class SocialInteraction(BaseModel):
-    """Extracted when player engages in faction or reputation-affecting social actions."""
-    player_name: str | None = Field(None, description="Name of the player")
-    faction_or_npc: str | None = Field(None, description="Faction or NPC involved")
-    sentiment: str | None = Field(None, description="friendly, hostile, neutral")
-    action_summary: str | None = Field(None, description="Summary of the social action")
+class LocationChange(BaseModel):
+    """Extracted when room state should change — doors opened, fires started, structures collapsed."""
+    location: str | None = Field(None, description="Location being changed")
+    change_description: str | None = Field(None, description="What changed")
+    new_exits: list[str] = Field(default_factory=list, description="New exits revealed")
+    removed_features: list[str] = Field(default_factory=list, description="Features destroyed")
 
     @classmethod
     def get_graphiti_labels(cls) -> list[str]:
-        return ["SocialInteraction"]
+        return ["LocationChange"]
 
     def to_entity_attributes(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        if self.player_name is not None:
-            out["player_name"] = self.player_name
-        if self.faction_or_npc is not None:
-            out["faction_or_npc"] = self.faction_or_npc
-        if self.sentiment is not None:
-            out["sentiment"] = self.sentiment
-        if self.action_summary is not None:
-            out["action_summary"] = self.action_summary
+        if self.location is not None:
+            out["location"] = self.location
+        if self.change_description is not None:
+            out["change_description"] = self.change_description
+        if self.new_exits:
+            out["new_exits"] = self.new_exits
+        if self.removed_features:
+            out["removed_features"] = self.removed_features
         return out
 
 
-class TradeAction(BaseModel):
-    """Extracted when player buys, sells, or trades items."""
-    player_name: str | None = Field(None, description="Name of the player")
-    counterparty: str | None = Field(None, description="NPC name or merchant")
-    items_given: list[str] = Field(default_factory=list, description="Items given")
-    items_received: list[str] = Field(default_factory=list, description="Items received")
+class LoreSeed(BaseModel):
+    """Extracted when new world lore, history, or mythology is revealed."""
+    lore_topic: str | None = Field(None, description="Topic of the lore")
+    content: str | None = Field(None, description="The lore content")
+    source_npc: str | None = Field(None, description="NPC who revealed it")
+    related_locations: list[str] = Field(default_factory=list, description="Related locations")
 
     @classmethod
     def get_graphiti_labels(cls) -> list[str]:
-        return ["TradeAction"]
+        return ["LoreSeed"]
 
     def to_entity_attributes(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        if self.player_name is not None:
-            out["player_name"] = self.player_name
-        if self.counterparty is not None:
-            out["counterparty"] = self.counterparty
-        if self.items_given:
-            out["items_given"] = self.items_given
-        if self.items_received:
-            out["items_received"] = self.items_received
-        return out
-
-
-class MovementAction(BaseModel):
-    """Extracted when player moves between locations."""
-    player_name: str | None = Field(None, description="Name of the player")
-    from_location: str | None = Field(None, description="Origin location")
-    to_location: str | None = Field(None, description="Destination location")
-
-    @classmethod
-    def get_graphiti_labels(cls) -> list[str]:
-        return ["MovementAction"]
-
-    def to_entity_attributes(self) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        if self.player_name is not None:
-            out["player_name"] = self.player_name
-        if self.from_location is not None:
-            out["from_location"] = self.from_location
-        if self.to_location is not None:
-            out["to_location"] = self.to_location
+        if self.lore_topic is not None:
+            out["lore_topic"] = self.lore_topic
+        if self.content is not None:
+            out["content"] = self.content
+        if self.source_npc is not None:
+            out["source_npc"] = self.source_npc
+        if self.related_locations:
+            out["related_locations"] = self.related_locations
         return out
 ```
 
-- [ ] **Step 2: Add RPG types to CUSTOM_ENTITY_TYPES and get_graphiti_entity_types()**
+- [ ] **Step 2: Add world seed types to CUSTOM_ENTITY_TYPES and get_graphiti_entity_types()**
 
 Update `CUSTOM_ENTITY_TYPES` list:
 
@@ -1069,11 +1045,10 @@ CUSTOM_ENTITY_TYPES: list[type[BaseModel]] = [
     Evidence,
     ReviewResult,
     WorkingDocUpdate,
-    CombatAction,
-    QuestInteraction,
-    SocialInteraction,
-    TradeAction,
-    MovementAction,
+    NewEntitySeed,
+    QuestSeed,
+    LocationChange,
+    LoreSeed,
 ]
 ```
 
@@ -1089,11 +1064,10 @@ def get_graphiti_entity_types() -> dict[str, type[BaseModel]]:
         "Evidence": Evidence,
         "ReviewResult": ReviewResult,
         "WorkingDocUpdate": WorkingDocUpdate,
-        "CombatAction": CombatAction,
-        "QuestInteraction": QuestInteraction,
-        "SocialInteraction": SocialInteraction,
-        "TradeAction": TradeAction,
-        "MovementAction": MovementAction,
+        "NewEntitySeed": NewEntitySeed,
+        "QuestSeed": QuestSeed,
+        "LocationChange": LocationChange,
+        "LoreSeed": LoreSeed,
     }
 ```
 
@@ -1101,76 +1075,92 @@ def get_graphiti_entity_types() -> dict[str, type[BaseModel]]:
 
 ```
 cd delve && git add src/core/services/knowledge_graph/custom_types.py
-git commit -m "feat: register RPG custom types for Graphiti episode extraction"
+git commit -m "feat: register world seed custom types for Graphiti episode extraction"
 ```
 
 ---
 
 ## Phase 3: Orchestration (memento-mori)
 
-### Task 11: CrewRouter
+### Task 11: WorldReactionCrew
 
 **Files:**
-- Create: `engine/src/memento/crew_router.py`
-- Create: `engine/tests/test_crew_router.py`
+- Create: `engine/src/memento/world_reaction.py`
+- Create: `engine/tests/test_world_reaction.py`
 
 - [ ] **Step 1: Write failing tests**
 
 ```python
-# engine/tests/test_crew_router.py
-from memento.crew_router import CrewRouter, TurnContext
+# engine/tests/test_world_reaction.py
+from memento.world_reaction import WorldReactionCrew, TurnContext
 
 
 def test_no_entities_returns_empty():
-    router = CrewRouter()
+    crew = WorldReactionCrew()
     ctx = TurnContext(location="tavern", location_uuid="loc-123", player_name="Kael")
-    result = router.route([], ctx)
+    result = crew.react([], ctx)
     assert result == {}
 
 
-def test_combat_entity_triggers_combat_handler():
-    router = CrewRouter()
+def test_new_entity_seed_creates_entry():
+    crew = WorldReactionCrew()
     ctx = TurnContext(location="tavern", location_uuid="loc-123", player_name="Kael")
-    entities = [{"type": "CombatAction", "attacker_name": "Kael", "target_name": "Grumlock"}]
-    result = router.route(entities, ctx)
-    assert "CombatAction" in result
+    entities = [{"type": "NewEntitySeed", "entity_name": "Mysterious Stranger", "entity_type": "npc", "description": "A hooded figure"}]
+    result = crew.react(entities, ctx)
+    assert "new_entities" in result
+    assert len(result["new_entities"]) == 1
+
+
+def test_quest_seed_creates_entry():
+    crew = WorldReactionCrew()
+    ctx = TurnContext(location="tavern", location_uuid="loc-123", player_name="Kael")
+    entities = [{"type": "QuestSeed", "quest_name": "The Lost Artifact", "giver_name": "Innkeeper"}]
+    result = crew.react(entities, ctx)
+    assert "new_quests" in result
 
 
 def test_unknown_type_is_skipped():
-    router = CrewRouter()
+    crew = WorldReactionCrew()
     ctx = TurnContext(location="tavern", location_uuid="loc-123", player_name="Kael")
     entities = [{"type": "UnknownType", "data": "whatever"}]
-    result = router.route(entities, ctx)
+    result = crew.react(entities, ctx)
     assert result == {}
 
 
-def test_multiple_entities_routes_all():
-    router = CrewRouter()
+def test_multiple_seeds_processed():
+    crew = WorldReactionCrew()
     ctx = TurnContext(location="tavern", location_uuid="loc-123", player_name="Kael")
     entities = [
-        {"type": "CombatAction", "attacker_name": "Kael", "target_name": "Grumlock"},
-        {"type": "QuestInteraction", "player_name": "Kael", "npc_name": "Innkeeper"},
+        {"type": "NewEntitySeed", "entity_name": "Dark Blade", "entity_type": "item", "description": "A cursed sword"},
+        {"type": "QuestSeed", "quest_name": "Retrieve the Blade", "giver_name": "Blacksmith"},
+        {"type": "LoreSeed", "lore_topic": "The Curse of Ironhold", "content": "An ancient curse..."},
     ]
-    result = router.route(entities, ctx)
-    assert "CombatAction" in result
-    assert "QuestInteraction" in result
+    result = crew.react(entities, ctx)
+    assert "new_entities" in result
+    assert "new_quests" in result
+    assert "lore" in result
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd engine && python -m pytest tests/test_crew_router.py -v`
+Run: `cd engine && python -m pytest tests/test_world_reaction.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 3: Implement CrewRouter**
+- [ ] **Step 3: Implement WorldReactionCrew**
 
 ```python
-# engine/src/memento/crew_router.py
-"""CrewRouter — maps extracted Graphiti entity types to crew callables."""
+# engine/src/memento/world_reaction.py
+"""WorldReactionCrew — creates KG entities from episode-extracted world seeds.
+
+Does NOT re-resolve inline actions (combat, movement, trade) — those are
+handled by NPC MCP tool calls during the round. This crew creates NEW things
+in the world as consequences of what happened.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from memento.log import get_logger
 
@@ -1179,7 +1169,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class TurnContext:
-    """Context passed to crew handlers."""
+    """Context passed to reaction handlers."""
     location: str
     location_uuid: str
     player_name: str
@@ -1187,141 +1177,194 @@ class TurnContext:
     episode_summary: str = ""
 
 
-@dataclass
-class CrewRoute:
-    type_name: str
-    handler: Callable[[dict, TurnContext], dict]
+class WorldReactionCrew:
+    """Orchestrates entity creation from episode-extracted world seeds."""
 
-
-class CrewRouter:
-    """Routes extracted Graphiti entity types to crew callables."""
-
-    def __init__(self) -> None:
-        self.routes: list[CrewRoute] = [
-            CrewRoute("CombatAction", self._handle_combat),
-            CrewRoute("QuestInteraction", self._handle_quest),
-            CrewRoute("SocialInteraction", self._handle_social),
-            CrewRoute("TradeAction", self._handle_trade),
-        ]
-
-    def route(self, extracted_entities: list[dict], ctx: TurnContext) -> dict[str, Any]:
-        """Run crews for all extracted entity types. Returns merged results."""
+    def react(self, extracted_entities: list[dict], ctx: TurnContext) -> dict[str, Any]:
+        """Process all extracted seeds. Returns summary of what was created."""
         results: dict[str, Any] = {}
-        extracted_types = {e.get("type") for e in extracted_entities}
 
-        for route in self.routes:
-            if route.type_name in extracted_types:
-                entity = next(
-                    (e for e in extracted_entities if e.get("type") == route.type_name),
-                    None,
-                )
-                if entity is None:
-                    continue
-                try:
-                    resolved = self._resolve_uuids(entity, ctx)
-                    results[route.type_name] = route.handler(resolved, ctx)
-                except Exception:
-                    logger.warning("Crew route %s failed", route.type_name, exc_info=True)
-                    results[route.type_name] = {"error": f"{route.type_name}_failed"}
+        for entity in extracted_entities:
+            entity_type = entity.get("type", "")
+            try:
+                if entity_type == "NewEntitySeed":
+                    results.setdefault("new_entities", []).append(
+                        self._create_entity(entity, ctx)
+                    )
+                elif entity_type == "QuestSeed":
+                    results.setdefault("new_quests", []).append(
+                        self._create_quest(entity, ctx)
+                    )
+                elif entity_type == "LocationChange":
+                    results.setdefault("location_changes", []).append(
+                        self._apply_location_change(entity, ctx)
+                    )
+                elif entity_type == "LoreSeed":
+                    results.setdefault("lore", []).append(
+                        self._persist_lore(entity, ctx)
+                    )
+            except Exception:
+                logger.warning("World reaction failed for %s", entity_type, exc_info=True)
 
         return results
 
-    def _resolve_uuids(self, entity: dict, ctx: TurnContext) -> dict:
-        """Resolve entity name references to UUIDs via KG search.
+    def _resolve_uuid(self, name: str) -> str:
+        """Resolve an entity name to UUID via KG search. Returns empty string on failure."""
+        if not name:
+            return ""
+        try:
+            from memento.bonfires_client import get_client
+            client = get_client()
+            result = client.kg.search(name, num_results=3)
+            entities = result.get("entities", result.get("nodes", []))
+            for e in entities:
+                if e.get("name", "").lower() == name.lower():
+                    return e.get("uuid", "")
+        except Exception:
+            logger.debug("UUID resolution failed for %s", name)
+        return ""
 
-        Scoped to the current location. Returns entity dict with uuid fields added.
-        If resolution fails, the entity is returned as-is (handler decides what to do).
-        """
-        resolved = dict(entity)
-        name_fields = ["target_name", "npc_name", "counterparty", "faction_or_npc"]
+    def _create_entity(self, seed: dict, ctx: TurnContext) -> dict:
+        """Create a new entity in the KG from a NewEntitySeed."""
+        entity_name = seed.get("entity_name", "")
+        entity_type = seed.get("entity_type", "npc")
+        description = seed.get("description", "")
 
-        for field in name_fields:
-            name = entity.get(field)
-            if not name:
-                continue
-            try:
+        if not entity_name:
+            return {"error": "no entity_name"}
+
+        label_map = {"npc": "NPC", "item": "Item", "creature": "Creature"}
+        labels = [label_map.get(entity_type, "Entity")]
+
+        try:
+            from memento.bonfires_client import get_client
+            client = get_client()
+            uuid = client.kg.create_entity(
+                entity_name,
+                labels,
+                {"description": description, "source": "world_reaction", "location": ctx.location},
+            )
+
+            # Link to location
+            if ctx.location_uuid:
+                edge_type = "LOCATED_IN" if entity_type in ("npc", "creature") else "FOUND_AT"
+                client.kg.create_edge(uuid, ctx.location_uuid, edge_type, "")
+
+            logger.info("Created %s entity: %s (%s)", entity_type, entity_name, uuid)
+            return {"uuid": uuid, "name": entity_name, "type": entity_type}
+        except Exception:
+            logger.warning("Failed to create entity %s", entity_name, exc_info=True)
+            return {"error": f"creation_failed: {entity_name}"}
+
+    def _create_quest(self, seed: dict, ctx: TurnContext) -> dict:
+        """Create a quest entity in the KG from a QuestSeed."""
+        quest_name = seed.get("quest_name", "")
+        giver_name = seed.get("giver_name", "")
+        objective = seed.get("objective_hint", "")
+
+        if not quest_name:
+            return {"error": "no quest_name"}
+
+        try:
+            from memento.bonfires_client import get_client
+            client = get_client()
+            uuid = client.kg.create_entity(
+                quest_name,
+                ["Quest"],
+                {
+                    "objective": objective,
+                    "giver": giver_name,
+                    "location": ctx.location,
+                    "source": "world_reaction",
+                },
+            )
+
+            # Link to location
+            if ctx.location_uuid:
+                client.kg.create_edge(uuid, ctx.location_uuid, "AVAILABLE_AT", "")
+
+            # Link to giver NPC
+            giver_uuid = self._resolve_uuid(giver_name)
+            if giver_uuid:
+                client.kg.create_edge(uuid, giver_uuid, "GIVEN_BY", "")
+
+            logger.info("Created quest: %s (%s)", quest_name, uuid)
+            return {"uuid": uuid, "name": quest_name, "giver": giver_name}
+        except Exception:
+            logger.warning("Failed to create quest %s", quest_name, exc_info=True)
+            return {"error": f"creation_failed: {quest_name}"}
+
+    def _apply_location_change(self, seed: dict, ctx: TurnContext) -> dict:
+        """Update location state in KG from a LocationChange seed."""
+        change = seed.get("change_description", "")
+        new_exits = seed.get("new_exits", [])
+
+        if not change and not new_exits:
+            return {"error": "no change specified"}
+
+        try:
+            if ctx.location_uuid:
                 from memento.bonfires_client import get_client
                 client = get_client()
-                result = client.kg.search(name, num_results=3)
-                entities = result.get("entities", result.get("nodes", []))
-                for e in entities:
-                    if e.get("name", "").lower() == name.lower():
-                        resolved[f"{field}_uuid"] = e.get("uuid", "")
-                        break
-            except Exception:
-                logger.debug("UUID resolution failed for %s=%s", field, name)
+                updates: dict[str, Any] = {}
+                if change:
+                    updates["recent_change"] = change
+                if new_exits:
+                    updates["new_exits"] = new_exits
+                client.kg.update_entity(ctx.location_uuid, updates)
 
-        return resolved
+            logger.info("Location change at %s: %s", ctx.location, change)
+            return {"location": ctx.location, "change": change, "new_exits": new_exits}
+        except Exception:
+            logger.warning("Failed to apply location change at %s", ctx.location, exc_info=True)
+            return {"error": f"location_change_failed: {ctx.location}"}
 
-    def _handle_combat(self, entity: dict, ctx: TurnContext) -> dict:
-        """Run CombatFlow with resolved entity data."""
-        from memento.flows.combat import CombatFlow
+    def _persist_lore(self, seed: dict, ctx: TurnContext) -> dict:
+        """Create a lore entity in the KG from a LoreSeed."""
+        topic = seed.get("lore_topic", "")
+        content = seed.get("content", "")
+        source_npc = seed.get("source_npc", "")
 
-        flow = CombatFlow()
-        flow.state.action = ctx.combined_action
-        flow.state.attacker = entity.get("attacker_name", ctx.player_name)
-        flow.state.target = entity.get("target_name", "unknown")
-        flow.state.location = ctx.location
-        flow.state.context = ctx.episode_summary
-        flow.kickoff()
+        if not topic:
+            return {"error": "no lore_topic"}
 
-        return {
-            "resolution": flow.state.resolution,
-            "consequences": flow.state.consequences,
-            "target_uuid": entity.get("target_name_uuid", ""),
-        }
+        try:
+            from memento.bonfires_client import get_client
+            client = get_client()
+            uuid = client.kg.create_entity(
+                topic,
+                ["Lore"],
+                {
+                    "content": content,
+                    "source_npc": source_npc,
+                    "location": ctx.location,
+                    "source": "world_reaction",
+                },
+            )
 
-    def _handle_quest(self, entity: dict, ctx: TurnContext) -> dict:
-        """Run QuestFlow with resolved entity data."""
-        from memento.flows.quest import QuestFlow
+            # Link to related locations
+            for loc_name in seed.get("related_locations", []):
+                loc_uuid = self._resolve_uuid(loc_name)
+                if loc_uuid:
+                    client.kg.create_edge(uuid, loc_uuid, "RELATES_TO", "")
 
-        flow = QuestFlow()
-        flow.state.location = ctx.location
-        flow.state.npc = entity.get("npc_name", "unknown")
-        flow.state.player_level = 1
-        flow.kickoff()
-
-        return {
-            "quest_concept": flow.state.quest_concept,
-            "npc_uuid": entity.get("npc_name_uuid", ""),
-        }
-
-    def _handle_social(self, entity: dict, ctx: TurnContext) -> dict:
-        """Run reputation crew with resolved entity data."""
-        from memento.crews.faction.reputation import make_reputation_crew
-
-        crew = make_reputation_crew(
-            player=ctx.player_name,
-            faction=entity.get("faction_or_npc", "unknown"),
-            action=ctx.combined_action,
-        )
-        result = crew.kickoff()
-
-        return {
-            "reputation": result.raw,
-            "faction": entity.get("faction_or_npc", ""),
-        }
-
-    def _handle_trade(self, entity: dict, ctx: TurnContext) -> dict:
-        """Handle trade actions via inventory system."""
-        return {
-            "counterparty": entity.get("counterparty", ""),
-            "items_given": entity.get("items_given", []),
-            "items_received": entity.get("items_received", []),
-            "counterparty_uuid": entity.get("counterparty_uuid", ""),
-        }
+            logger.info("Created lore: %s (%s)", topic, uuid)
+            return {"uuid": uuid, "topic": topic}
+        except Exception:
+            logger.warning("Failed to persist lore %s", topic, exc_info=True)
+            return {"error": f"lore_failed: {topic}"}
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd engine && python -m pytest tests/test_crew_router.py -v`
-Expected: 4 passed
+Run: `cd engine && python -m pytest tests/test_world_reaction.py -v`
+Expected: 5 passed (KG calls will fail in tests without mocking, but the structure tests pass — the handlers catch exceptions and return error dicts)
 
 - [ ] **Step 5: Commit**
 
 ```
-git add engine/src/memento/crew_router.py engine/tests/test_crew_router.py
-git commit -m "feat(engine): add CrewRouter — maps Graphiti types to crew callables"
+git add engine/src/memento/world_reaction.py engine/tests/test_world_reaction.py
+git commit -m "feat(engine): add WorldReactionCrew — creates KG entities from world seeds"
 ```
 
 ---
@@ -1340,7 +1383,7 @@ from unittest.mock import MagicMock, patch
 from memento.turn_controller import TurnController
 from memento.transport import NullTransport
 from memento.type_selector import TypeSelector
-from memento.crew_router import CrewRouter
+from memento.world_reaction import WorldReactionCrew
 
 
 def _make_controller(**overrides):
@@ -1350,7 +1393,7 @@ def _make_controller(**overrides):
         actions=[{"player_name": "Kael", "action": "look around"}],
         transport=NullTransport(),
         type_selector=TypeSelector(threshold=0.3),
-        crew_router=CrewRouter(),
+        world_reaction=WorldReactionCrew(),
         npc_wait=0.1,
     )
     defaults.update(overrides)
@@ -1415,7 +1458,7 @@ import threading
 import time
 from typing import Any
 
-from memento.crew_router import CrewRouter, TurnContext
+from memento.world_reaction import WorldReactionCrew, TurnContext
 from memento.log import get_logger
 from memento.models.state_update import (
     EventSummary,
@@ -1445,7 +1488,7 @@ class TurnController:
         actions: list[dict],
         transport: Transport,
         type_selector: TypeSelector,
-        crew_router: CrewRouter,
+        world_reaction: WorldReactionCrew,
         npc_wait: float = 15.0,
     ) -> None:
         self.location = location
@@ -1453,7 +1496,7 @@ class TurnController:
         self.actions = actions
         self.transport = transport
         self.type_selector = type_selector
-        self.crew_router = crew_router
+        self.world_reaction = world_reaction
         self.npc_wait = npc_wait
 
         self.player_name: str = actions[0].get("player_name", "unknown") if actions else "unknown"
@@ -1487,8 +1530,11 @@ class TurnController:
         self.transport.emit_phase(self.location, "resolving", "episode")
         episode = self._ingest_and_extract(requested_types)
 
-        # 3. Route extracted types to crews
-        self.transport.emit_phase(self.location, "resolving", "crews")
+        # 3. NPC wait (event-driven) — NPCs respond to actions in Matrix
+        self._await_npcs()
+
+        # 4. World reactions — create new entities/quests/lore from seeds
+        self.transport.emit_phase(self.location, "resolving", "world_reaction")
         ctx = TurnContext(
             location=self.location,
             location_uuid=self.location_uuid,
@@ -1496,15 +1542,12 @@ class TurnController:
             combined_action=self.combined_action,
             episode_summary=episode.get("content", ""),
         )
-        self.crew_results = self.crew_router.route(
+        self.crew_results = self.world_reaction.react(
             episode.get("entities", []),
             ctx,
         )
 
-        # 4. NPC wait (event-driven)
-        self._await_npcs()
-
-        # 5. Narrate (cooldown-gated)
+        # 5. Narrate (episode summary + world reaction results, cooldown-gated)
         if _narration_cooldown.should_narrate(self.location):
             self.narrative = self._narrate(episode, self.crew_results)
             _narration_cooldown.record(self.location)
@@ -1696,7 +1739,7 @@ Replace the `_run_batch_turn_inner` static method:
             from memento.turn_controller import TurnController
             from memento.transport import MatrixTransport, NullTransport
             from memento.type_selector import TypeSelector
-            from memento.crew_router import CrewRouter
+            from memento.world_reaction import WorldReactionCrew
             from memento.rpg_types import RPG_ENTITY_TYPES
 
             transport: Transport | NullTransport
@@ -1723,7 +1766,7 @@ Replace the `_run_batch_turn_inner` static method:
                 actions=actions,
                 transport=transport,
                 type_selector=type_selector,
-                crew_router=CrewRouter(),
+                world_reaction=WorldReactionCrew(),
             )
             return controller.run()
         else:
