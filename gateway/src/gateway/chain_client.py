@@ -11,6 +11,7 @@ MUD_INDEXER_URL = os.getenv("MUD_INDEXER_URL", "http://localhost:3333")
 
 ALLOWED_TABLES = frozenset({
     "Characters", "Deaths", "Items",
+    "Position", "EntitiesAtPosition", "Terrain",
 })
 
 # Label → MUD table mapping for canonical verification
@@ -23,6 +24,7 @@ LABEL_TABLE_MAP: dict[str, str] = {
     "Weapon": "Items",
     "Armor": "Items",
     "Consumable": "Items",
+    "Location": "Terrain",
 }
 
 
@@ -266,3 +268,56 @@ async def fetch_death_info(character_id: str) -> dict | None:
         except httpx.HTTPError as e:
             logger.warning(f"Death info query failed: {e}")
             return None
+
+
+async def fetch_position(entity_id: str) -> dict | None:
+    """Fetch entity position from onchain Position table."""
+    hex_id = uuid_to_bytes32_hex(entity_id)
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{MUD_INDEXER_URL}/api/tables/Position/{hex_id}")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        logger.debug("Position fetch failed for %s", entity_id)
+    return None
+
+
+async def fetch_terrain(location_id: str) -> dict | None:
+    """Fetch room terrain from onchain Terrain table."""
+    hex_id = uuid_to_bytes32_hex(location_id)
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{MUD_INDEXER_URL}/api/tables/Terrain/{hex_id}")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        logger.debug("Terrain fetch failed for %s", location_id)
+    return None
+
+
+async def write_position(entity_id: str, location_id: str, x: int, y: int) -> bool:
+    """Write entity position onchain via World contract."""
+    try:
+        from gateway.chain_writer import call_system
+        return await call_system("memento__setPosition", [
+            uuid_to_bytes32_hex(entity_id),
+            uuid_to_bytes32_hex(location_id),
+            x, y,
+        ])
+    except Exception:
+        logger.warning("Position write failed for %s", entity_id, exc_info=True)
+        return False
+
+
+async def write_terrain(location_id: str, width: int, height: int, terrain_bytes: bytes) -> bool:
+    """Write room terrain onchain via World contract."""
+    try:
+        from gateway.chain_writer import call_system
+        return await call_system("memento__setTerrain", [
+            uuid_to_bytes32_hex(location_id),
+            width, height, terrain_bytes,
+        ])
+    except Exception:
+        logger.warning("Terrain write failed for %s", location_id, exc_info=True)
+        return False
