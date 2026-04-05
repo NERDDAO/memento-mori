@@ -7,12 +7,12 @@ import {
   Characters,
   Deaths,
   Items,
-  Locations,
-  WorldEvents,
-  Episodes,
-  Reputation
+  Position,
+  PositionData,
+  EntitiesAtPosition,
+  Terrain
 } from "../src/codegen/index.sol";
-import { EntityType, EventType } from "../src/codegen/common.sol";
+import { EntityType } from "../src/codegen/common.sol";
 
 contract MementoTest is MudTest {
   IWorld world;
@@ -42,18 +42,14 @@ contract MementoTest is MudTest {
     bytes32 charId = bytes32(uint256(2));
     world.memento__registerCharacter(charId, "Morwen", address(0xCAFE), EntityType.Character);
 
-    // Kill
     world.memento__killCharacter(charId, "eaten by dragon", "Dragon's Lair", 42);
 
-    // Character should be dead
     assertFalse(Characters.getAlive(charId));
 
-    // Death record should exist
     bytes32 deathId = keccak256(abi.encodePacked(charId, block.timestamp));
     assertEq(Deaths.getCharacterId(deathId), charId);
     assertEq(Deaths.getLevel(deathId), 1);
     assertEq(Deaths.getTick(deathId), 42);
-    assertEq(Deaths.getTimestamp(deathId), block.timestamp);
     assertEq(Deaths.getCause(deathId), "eaten by dragon");
     assertEq(Deaths.getLocation(deathId), "Dragon's Lair");
   }
@@ -76,7 +72,6 @@ contract MementoTest is MudTest {
     bytes32 locationId = bytes32(uint256(100));
     bytes32 ownerId = bytes32(uint256(200));
 
-    // Register item at a location (no owner)
     world.memento__registerItem(itemId, "Rusty Sword", "common", bytes32(0), locationId);
 
     assertEq(Items.getName(itemId), "Rusty Sword");
@@ -84,11 +79,10 @@ contract MementoTest is MudTest {
     assertEq(Items.getLocationId(itemId), locationId);
     assertEq(Items.getOwnerId(itemId), bytes32(0));
 
-    // Transfer to owner
     world.memento__transferItem(itemId, ownerId);
 
     assertEq(Items.getOwnerId(itemId), ownerId);
-    assertEq(Items.getLocationId(itemId), bytes32(0)); // location cleared on transfer
+    assertEq(Items.getLocationId(itemId), bytes32(0));
   }
 
   function testDropItem() public {
@@ -96,11 +90,9 @@ contract MementoTest is MudTest {
     bytes32 ownerId = bytes32(uint256(201));
     bytes32 locationId = bytes32(uint256(101));
 
-    // Register item with an owner
     world.memento__registerItem(itemId, "Health Potion", "rare", ownerId, bytes32(0));
     assertEq(Items.getOwnerId(itemId), ownerId);
 
-    // Drop it
     world.memento__dropItem(itemId, locationId);
 
     assertEq(Items.getOwnerId(itemId), bytes32(0));
@@ -108,97 +100,75 @@ contract MementoTest is MudTest {
   }
 
   // ---------------------------------------------------------------------------
-  // LocationSystem
+  // PositionSystem
   // ---------------------------------------------------------------------------
 
-  function testRegisterAndDiscoverLocation() public {
-    bytes32 locId = bytes32(uint256(20));
-    address alice = address(0xA11CE);
-    address bob = address(0xB0B);
+  function testSetAndMovePosition() public {
+    bytes32 entityId = bytes32(uint256(60));
+    bytes32 locationId = bytes32(uint256(61));
 
-    // Register with no discoverer
-    world.memento__registerLocation(locId, "Crypt of Echoes", "Shadowfen", address(0));
+    // Set up terrain first (3x3 all walkable floor)
+    bytes memory terrain = new bytes(9);
+    for (uint256 i = 0; i < 9; i++) {
+      terrain[i] = bytes1(uint8(1)); // TILE_FLOOR
+    }
+    world.memento__setTerrain(locationId, 3, 3, terrain);
 
-    assertEq(Locations.getName(locId), "Crypt of Echoes");
-    assertEq(Locations.getRegion(locId), "Shadowfen");
-    assertEq(Locations.getDiscoveredBy(locId), address(0));
+    // Set position
+    world.memento__setPosition(entityId, locationId, 1, 1);
 
-    // First discovery sets discoverer
-    world.memento__discoverLocation(locId, alice);
-    assertEq(Locations.getDiscoveredBy(locId), alice);
-    uint256 discoveredAt = Locations.getDiscoveredAt(locId);
-    assertGt(discoveredAt, 0);
+    PositionData memory pos = Position.get(entityId);
+    assertEq(pos.locationId, locationId);
+    assertEq(pos.x, 1);
+    assertEq(pos.y, 1);
 
-    // Second discovery should NOT overwrite
-    world.memento__discoverLocation(locId, bob);
-    assertEq(Locations.getDiscoveredBy(locId), alice);
-    assertEq(Locations.getDiscoveredAt(locId), discoveredAt);
+    // Check reverse index
+    bytes32[] memory entities = EntitiesAtPosition.getEntities(locationId, 1, 1);
+    assertEq(entities.length, 1);
+    assertEq(entities[0], entityId);
+
+    // Move
+    world.memento__moveEntity(entityId, 2, 2);
+
+    pos = Position.get(entityId);
+    assertEq(pos.x, 2);
+    assertEq(pos.y, 2);
+
+    // Old tile should be empty
+    entities = EntitiesAtPosition.getEntities(locationId, 1, 1);
+    assertEq(entities.length, 0);
+
+    // New tile should have the entity
+    entities = EntitiesAtPosition.getEntities(locationId, 2, 2);
+    assertEq(entities.length, 1);
+    assertEq(entities[0], entityId);
   }
 
   // ---------------------------------------------------------------------------
-  // EventSystem
+  // TerrainSystem
   // ---------------------------------------------------------------------------
 
-  function testRecordEvent() public {
-    bytes32 eventId = bytes32(uint256(30));
-    world.memento__recordEvent(
-      eventId,
-      EventType.CombatOutcome,
-      "Kael,Morwen",
-      "Arena",
-      "Kael defeated Morwen in single combat",
-      7
-    );
+  function testSetTerrain() public {
+    bytes32 locationId = bytes32(uint256(70));
 
-    assertEq(uint8(WorldEvents.getEventType(eventId)), uint8(EventType.CombatOutcome));
-    assertEq(WorldEvents.getTick(eventId), 7);
-    assertEq(WorldEvents.getTimestamp(eventId), block.timestamp);
-    assertEq(WorldEvents.getActors(eventId), "Kael,Morwen");
-    assertEq(WorldEvents.getLocation(eventId), "Arena");
-    assertEq(WorldEvents.getSummary(eventId), "Kael defeated Morwen in single combat");
-  }
+    bytes memory terrain = new bytes(6); // 3x2
+    terrain[0] = bytes1(uint8(2)); // wall
+    terrain[1] = bytes1(uint8(1)); // floor
+    terrain[2] = bytes1(uint8(3)); // exit
+    terrain[3] = bytes1(uint8(1)); // floor
+    terrain[4] = bytes1(uint8(4)); // water
+    terrain[5] = bytes1(uint8(1)); // floor
 
-  // ---------------------------------------------------------------------------
-  // EpisodeSystem
-  // ---------------------------------------------------------------------------
+    world.memento__setTerrain(locationId, 3, 2, terrain);
 
-  function testRecordEpisode() public {
-    bytes32 epId = bytes32(uint256(40));
-    bytes32 contentHash = keccak256(abi.encodePacked("episode-content-json"));
+    assertEq(Terrain.getWidth(locationId), 3);
+    assertEq(Terrain.getHeight(locationId), 2);
 
-    world.memento__recordEpisode(epId, contentHash, 99);
-
-    assertEq(Episodes.getTick(epId), 99);
-    assertEq(Episodes.getTimestamp(epId), block.timestamp);
-    assertEq(Episodes.getContentHash(epId), contentHash);
-  }
-
-  // ---------------------------------------------------------------------------
-  // ReputationSystem
-  // ---------------------------------------------------------------------------
-
-  function testReputation() public {
-    address player = address(0xF00D);
-    bytes32 factionId = bytes32(uint256(50));
-
-    // Start at 0, add 25
-    world.memento__updateReputation(player, factionId, 25);
-    assertEq(Reputation.getStanding(player, factionId), 25);
-
-    // Add 50 more -> 75
-    world.memento__updateReputation(player, factionId, 50);
-    assertEq(Reputation.getStanding(player, factionId), 75);
-
-    // Try to exceed 100 -> should clamp at 100
-    world.memento__updateReputation(player, factionId, 50);
-    assertEq(Reputation.getStanding(player, factionId), 100);
-
-    // Large negative to go below -100 -> should clamp at -100
-    world.memento__updateReputation(player, factionId, -250);
-    assertEq(Reputation.getStanding(player, factionId), -100);
-
-    // Bring back toward zero
-    world.memento__updateReputation(player, factionId, 100);
-    assertEq(Reputation.getStanding(player, factionId), 0);
+    // Walkability checks
+    assertTrue(world.memento__isWalkable(locationId, 1, 0));  // floor
+    assertTrue(world.memento__isWalkable(locationId, 2, 0));  // exit
+    assertTrue(world.memento__isWalkable(locationId, 1, 1));  // water
+    assertFalse(world.memento__isWalkable(locationId, 0, 0)); // wall
+    assertFalse(world.memento__isWalkable(locationId, -1, 0)); // out of bounds
   }
 }

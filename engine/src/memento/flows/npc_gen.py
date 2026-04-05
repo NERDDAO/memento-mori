@@ -109,6 +109,23 @@ class NPCGenerationFlow(Flow[NPCGenState]):
             except Exception:
                 _logger.debug("Attribute persistence skipped for NPC at %s", self.state.location_name)
 
+            # Generate ASCII art for the new NPC in background
+            try:
+                npc_uuid = re.search(r"UUID:\s*([a-f0-9-]+)", result.raw, re.IGNORECASE)
+                if npc_uuid:
+                    import threading
+                    from memento.flows.enrichment import enrich_entity_art
+                    _uid = npc_uuid.group(1)
+                    _name = concept[:50]
+                    _desc = concept[:500]
+                    threading.Thread(
+                        target=enrich_entity_art,
+                        args=(_uid, _name, "npc", _desc, {}),
+                        daemon=True,
+                    ).start()
+            except Exception:
+                _logger.debug("Art generation skipped for NPC at %s", self.state.location_name)
+
             # Spawn Bonfires agent for this NPC
             try:
                 from memento.agent_controller import get_agent_controller

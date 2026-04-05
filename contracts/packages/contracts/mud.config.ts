@@ -36,10 +36,10 @@ export default defineWorld({
         id: "bytes32",
         ownerId: "bytes32",
         locationId: "bytes32",
+        quantity: "uint32",
         name: "string",
         rarity: "string",
         slotType: "string",
-        quantity: "uint32",
       },
       key: ["id"],
     },
@@ -56,6 +56,35 @@ export default defineWorld({
         metadata: "string",
       },
       key: ["id"],
+    },
+
+    // --- Spatial index (onchain coordinate system) ---
+    Position: {
+      schema: {
+        id: "bytes32",
+        locationId: "bytes32",
+        x: "int32",
+        y: "int32",
+      },
+      key: ["id"],
+    },
+    EntitiesAtPosition: {
+      schema: {
+        locationId: "bytes32",
+        x: "int32",
+        y: "int32",
+        entities: "bytes32[]",
+      },
+      key: ["locationId", "x", "y"],
+    },
+    Terrain: {
+      schema: {
+        locationId: "bytes32",
+        width: "uint32",
+        height: "uint32",
+        terrain: "bytes",
+      },
+      key: ["locationId"],
     },
   },
 });

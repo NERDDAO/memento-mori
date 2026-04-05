@@ -29,6 +29,11 @@ const session: Session = {
 let ws: WebSocket | null = null;
 let onMessage: ((msg: import('../types/ws-messages').WsMessage) => void) | null = null;
 let onConnectionChange: ((connected: boolean) => void) | null = null;
+let errorHandler: ((msg: string) => void) | null = null;
+
+export function setErrorHandler(handler: (msg: string) => void): void {
+  errorHandler = handler;
+}
 
 export function setConnectionHandler(handler: (connected: boolean) => void): void {
   onConnectionChange = handler;
@@ -120,13 +125,21 @@ function connectWebSocket(): void {
 }
 
 export async function sendAction(action: string): Promise<void> {
-  await fetch(`${GATEWAY_URL}/api/action`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      player_id: session.playerId,
-      action: action,
-      location: session.currentLocation,
-    }),
-  });
+  try {
+    const resp = await fetch(`${GATEWAY_URL}/api/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        player_id: session.playerId,
+        action: action,
+        location: session.currentLocation,
+      }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => 'Unknown error');
+      if (errorHandler) errorHandler(`Action failed: ${text}`);
+    }
+  } catch (e) {
+    if (errorHandler) errorHandler('Connection lost — action not sent.');
+  }
 }

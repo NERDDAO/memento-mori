@@ -19,8 +19,10 @@ import { ResourceId } from "@latticexyz/store/src/ResourceId.sol";
 struct ItemsData {
   bytes32 ownerId;
   bytes32 locationId;
+  uint32 quantity;
   string name;
   string rarity;
+  string slotType;
 }
 
 library Items {
@@ -28,12 +30,12 @@ library Items {
   ResourceId constant _tableId = ResourceId.wrap(0x74626d656d656e746f000000000000004974656d730000000000000000000000);
 
   FieldLayout constant _fieldLayout =
-    FieldLayout.wrap(0x0040020220200000000000000000000000000000000000000000000000000000);
+    FieldLayout.wrap(0x0044030320200400000000000000000000000000000000000000000000000000);
 
   // Hex-encoded key schema of (bytes32)
   Schema constant _keySchema = Schema.wrap(0x002001005f000000000000000000000000000000000000000000000000000000);
-  // Hex-encoded value schema of (bytes32, bytes32, string, string)
-  Schema constant _valueSchema = Schema.wrap(0x004002025f5fc5c5000000000000000000000000000000000000000000000000);
+  // Hex-encoded value schema of (bytes32, bytes32, uint32, string, string, string)
+  Schema constant _valueSchema = Schema.wrap(0x004403035f5f03c5c5c500000000000000000000000000000000000000000000);
 
   /**
    * @notice Get the table's key field names.
@@ -49,11 +51,13 @@ library Items {
    * @return fieldNames An array of strings with the names of value fields.
    */
   function getFieldNames() internal pure returns (string[] memory fieldNames) {
-    fieldNames = new string[](4);
+    fieldNames = new string[](6);
     fieldNames[0] = "ownerId";
     fieldNames[1] = "locationId";
-    fieldNames[2] = "name";
-    fieldNames[3] = "rarity";
+    fieldNames[2] = "quantity";
+    fieldNames[3] = "name";
+    fieldNames[4] = "rarity";
+    fieldNames[5] = "slotType";
   }
 
   /**
@@ -152,6 +156,48 @@ library Items {
     _keyTuple[0] = id;
 
     StoreCore.setStaticField(_tableId, _keyTuple, 1, abi.encodePacked((locationId)), _fieldLayout);
+  }
+
+  /**
+   * @notice Get quantity.
+   */
+  function getQuantity(bytes32 id) internal view returns (uint32 quantity) {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    bytes32 _blob = StoreSwitch.getStaticField(_tableId, _keyTuple, 2, _fieldLayout);
+    return (uint32(bytes4(_blob)));
+  }
+
+  /**
+   * @notice Get quantity.
+   */
+  function _getQuantity(bytes32 id) internal view returns (uint32 quantity) {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    bytes32 _blob = StoreCore.getStaticField(_tableId, _keyTuple, 2, _fieldLayout);
+    return (uint32(bytes4(_blob)));
+  }
+
+  /**
+   * @notice Set quantity.
+   */
+  function setQuantity(bytes32 id, uint32 quantity) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    StoreSwitch.setStaticField(_tableId, _keyTuple, 2, abi.encodePacked((quantity)), _fieldLayout);
+  }
+
+  /**
+   * @notice Set quantity.
+   */
+  function _setQuantity(bytes32 id, uint32 quantity) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    StoreCore.setStaticField(_tableId, _keyTuple, 2, abi.encodePacked((quantity)), _fieldLayout);
   }
 
   /**
@@ -479,6 +525,168 @@ library Items {
   }
 
   /**
+   * @notice Get slotType.
+   */
+  function getSlotType(bytes32 id) internal view returns (string memory slotType) {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    bytes memory _blob = StoreSwitch.getDynamicField(_tableId, _keyTuple, 2);
+    return (string(_blob));
+  }
+
+  /**
+   * @notice Get slotType.
+   */
+  function _getSlotType(bytes32 id) internal view returns (string memory slotType) {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    bytes memory _blob = StoreCore.getDynamicField(_tableId, _keyTuple, 2);
+    return (string(_blob));
+  }
+
+  /**
+   * @notice Set slotType.
+   */
+  function setSlotType(bytes32 id, string memory slotType) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    StoreSwitch.setDynamicField(_tableId, _keyTuple, 2, bytes((slotType)));
+  }
+
+  /**
+   * @notice Set slotType.
+   */
+  function _setSlotType(bytes32 id, string memory slotType) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    StoreCore.setDynamicField(_tableId, _keyTuple, 2, bytes((slotType)));
+  }
+
+  /**
+   * @notice Get the length of slotType.
+   */
+  function lengthSlotType(bytes32 id) internal view returns (uint256) {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    uint256 _byteLength = StoreSwitch.getDynamicFieldLength(_tableId, _keyTuple, 2);
+    unchecked {
+      return _byteLength / 1;
+    }
+  }
+
+  /**
+   * @notice Get the length of slotType.
+   */
+  function _lengthSlotType(bytes32 id) internal view returns (uint256) {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    uint256 _byteLength = StoreCore.getDynamicFieldLength(_tableId, _keyTuple, 2);
+    unchecked {
+      return _byteLength / 1;
+    }
+  }
+
+  /**
+   * @notice Get an item of slotType.
+   * @dev Reverts with Store_IndexOutOfBounds if `_index` is out of bounds for the array.
+   */
+  function getItemSlotType(bytes32 id, uint256 _index) internal view returns (string memory) {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    unchecked {
+      bytes memory _blob = StoreSwitch.getDynamicFieldSlice(_tableId, _keyTuple, 2, _index * 1, (_index + 1) * 1);
+      return (string(_blob));
+    }
+  }
+
+  /**
+   * @notice Get an item of slotType.
+   * @dev Reverts with Store_IndexOutOfBounds if `_index` is out of bounds for the array.
+   */
+  function _getItemSlotType(bytes32 id, uint256 _index) internal view returns (string memory) {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    unchecked {
+      bytes memory _blob = StoreCore.getDynamicFieldSlice(_tableId, _keyTuple, 2, _index * 1, (_index + 1) * 1);
+      return (string(_blob));
+    }
+  }
+
+  /**
+   * @notice Push a slice to slotType.
+   */
+  function pushSlotType(bytes32 id, string memory _slice) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    StoreSwitch.pushToDynamicField(_tableId, _keyTuple, 2, bytes((_slice)));
+  }
+
+  /**
+   * @notice Push a slice to slotType.
+   */
+  function _pushSlotType(bytes32 id, string memory _slice) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    StoreCore.pushToDynamicField(_tableId, _keyTuple, 2, bytes((_slice)));
+  }
+
+  /**
+   * @notice Pop a slice from slotType.
+   */
+  function popSlotType(bytes32 id) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    StoreSwitch.popFromDynamicField(_tableId, _keyTuple, 2, 1);
+  }
+
+  /**
+   * @notice Pop a slice from slotType.
+   */
+  function _popSlotType(bytes32 id) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    StoreCore.popFromDynamicField(_tableId, _keyTuple, 2, 1);
+  }
+
+  /**
+   * @notice Update a slice of slotType at `_index`.
+   */
+  function updateSlotType(bytes32 id, uint256 _index, string memory _slice) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    unchecked {
+      bytes memory _encoded = bytes((_slice));
+      StoreSwitch.spliceDynamicData(_tableId, _keyTuple, 2, uint40(_index * 1), uint40(_encoded.length), _encoded);
+    }
+  }
+
+  /**
+   * @notice Update a slice of slotType at `_index`.
+   */
+  function _updateSlotType(bytes32 id, uint256 _index, string memory _slice) internal {
+    bytes32[] memory _keyTuple = new bytes32[](1);
+    _keyTuple[0] = id;
+
+    unchecked {
+      bytes memory _encoded = bytes((_slice));
+      StoreCore.spliceDynamicData(_tableId, _keyTuple, 2, uint40(_index * 1), uint40(_encoded.length), _encoded);
+    }
+  }
+
+  /**
    * @notice Get the full data.
    */
   function get(bytes32 id) internal view returns (ItemsData memory _table) {
@@ -511,11 +719,19 @@ library Items {
   /**
    * @notice Set the full data using individual values.
    */
-  function set(bytes32 id, bytes32 ownerId, bytes32 locationId, string memory name, string memory rarity) internal {
-    bytes memory _staticData = encodeStatic(ownerId, locationId);
+  function set(
+    bytes32 id,
+    bytes32 ownerId,
+    bytes32 locationId,
+    uint32 quantity,
+    string memory name,
+    string memory rarity,
+    string memory slotType
+  ) internal {
+    bytes memory _staticData = encodeStatic(ownerId, locationId, quantity);
 
-    EncodedLengths _encodedLengths = encodeLengths(name, rarity);
-    bytes memory _dynamicData = encodeDynamic(name, rarity);
+    EncodedLengths _encodedLengths = encodeLengths(name, rarity, slotType);
+    bytes memory _dynamicData = encodeDynamic(name, rarity, slotType);
 
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
@@ -526,11 +742,19 @@ library Items {
   /**
    * @notice Set the full data using individual values.
    */
-  function _set(bytes32 id, bytes32 ownerId, bytes32 locationId, string memory name, string memory rarity) internal {
-    bytes memory _staticData = encodeStatic(ownerId, locationId);
+  function _set(
+    bytes32 id,
+    bytes32 ownerId,
+    bytes32 locationId,
+    uint32 quantity,
+    string memory name,
+    string memory rarity,
+    string memory slotType
+  ) internal {
+    bytes memory _staticData = encodeStatic(ownerId, locationId, quantity);
 
-    EncodedLengths _encodedLengths = encodeLengths(name, rarity);
-    bytes memory _dynamicData = encodeDynamic(name, rarity);
+    EncodedLengths _encodedLengths = encodeLengths(name, rarity, slotType);
+    bytes memory _dynamicData = encodeDynamic(name, rarity, slotType);
 
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
@@ -542,10 +766,10 @@ library Items {
    * @notice Set the full data using the data struct.
    */
   function set(bytes32 id, ItemsData memory _table) internal {
-    bytes memory _staticData = encodeStatic(_table.ownerId, _table.locationId);
+    bytes memory _staticData = encodeStatic(_table.ownerId, _table.locationId, _table.quantity);
 
-    EncodedLengths _encodedLengths = encodeLengths(_table.name, _table.rarity);
-    bytes memory _dynamicData = encodeDynamic(_table.name, _table.rarity);
+    EncodedLengths _encodedLengths = encodeLengths(_table.name, _table.rarity, _table.slotType);
+    bytes memory _dynamicData = encodeDynamic(_table.name, _table.rarity, _table.slotType);
 
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
@@ -557,10 +781,10 @@ library Items {
    * @notice Set the full data using the data struct.
    */
   function _set(bytes32 id, ItemsData memory _table) internal {
-    bytes memory _staticData = encodeStatic(_table.ownerId, _table.locationId);
+    bytes memory _staticData = encodeStatic(_table.ownerId, _table.locationId, _table.quantity);
 
-    EncodedLengths _encodedLengths = encodeLengths(_table.name, _table.rarity);
-    bytes memory _dynamicData = encodeDynamic(_table.name, _table.rarity);
+    EncodedLengths _encodedLengths = encodeLengths(_table.name, _table.rarity, _table.slotType);
+    bytes memory _dynamicData = encodeDynamic(_table.name, _table.rarity, _table.slotType);
 
     bytes32[] memory _keyTuple = new bytes32[](1);
     _keyTuple[0] = id;
@@ -571,10 +795,14 @@ library Items {
   /**
    * @notice Decode the tightly packed blob of static data using this table's field layout.
    */
-  function decodeStatic(bytes memory _blob) internal pure returns (bytes32 ownerId, bytes32 locationId) {
+  function decodeStatic(
+    bytes memory _blob
+  ) internal pure returns (bytes32 ownerId, bytes32 locationId, uint32 quantity) {
     ownerId = (Bytes.getBytes32(_blob, 0));
 
     locationId = (Bytes.getBytes32(_blob, 32));
+
+    quantity = (uint32(Bytes.getBytes4(_blob, 64)));
   }
 
   /**
@@ -583,7 +811,7 @@ library Items {
   function decodeDynamic(
     EncodedLengths _encodedLengths,
     bytes memory _blob
-  ) internal pure returns (string memory name, string memory rarity) {
+  ) internal pure returns (string memory name, string memory rarity, string memory slotType) {
     uint256 _start;
     uint256 _end;
     unchecked {
@@ -596,6 +824,12 @@ library Items {
       _end += _encodedLengths.atIndex(1);
     }
     rarity = (string(SliceLib.getSubslice(_blob, _start, _end).toBytes()));
+
+    _start = _end;
+    unchecked {
+      _end += _encodedLengths.atIndex(2);
+    }
+    slotType = (string(SliceLib.getSubslice(_blob, _start, _end).toBytes()));
   }
 
   /**
@@ -609,9 +843,9 @@ library Items {
     EncodedLengths _encodedLengths,
     bytes memory _dynamicData
   ) internal pure returns (ItemsData memory _table) {
-    (_table.ownerId, _table.locationId) = decodeStatic(_staticData);
+    (_table.ownerId, _table.locationId, _table.quantity) = decodeStatic(_staticData);
 
-    (_table.name, _table.rarity) = decodeDynamic(_encodedLengths, _dynamicData);
+    (_table.name, _table.rarity, _table.slotType) = decodeDynamic(_encodedLengths, _dynamicData);
   }
 
   /**
@@ -638,8 +872,8 @@ library Items {
    * @notice Tightly pack static (fixed length) data using this table's schema.
    * @return The static data, encoded into a sequence of bytes.
    */
-  function encodeStatic(bytes32 ownerId, bytes32 locationId) internal pure returns (bytes memory) {
-    return abi.encodePacked(ownerId, locationId);
+  function encodeStatic(bytes32 ownerId, bytes32 locationId, uint32 quantity) internal pure returns (bytes memory) {
+    return abi.encodePacked(ownerId, locationId, quantity);
   }
 
   /**
@@ -648,11 +882,12 @@ library Items {
    */
   function encodeLengths(
     string memory name,
-    string memory rarity
+    string memory rarity,
+    string memory slotType
   ) internal pure returns (EncodedLengths _encodedLengths) {
     // Lengths are effectively checked during copy by 2**40 bytes exceeding gas limits
     unchecked {
-      _encodedLengths = EncodedLengthsLib.pack(bytes(name).length, bytes(rarity).length);
+      _encodedLengths = EncodedLengthsLib.pack(bytes(name).length, bytes(rarity).length, bytes(slotType).length);
     }
   }
 
@@ -660,8 +895,12 @@ library Items {
    * @notice Tightly pack dynamic (variable length) data using this table's schema.
    * @return The dynamic data, encoded into a sequence of bytes.
    */
-  function encodeDynamic(string memory name, string memory rarity) internal pure returns (bytes memory) {
-    return abi.encodePacked(bytes((name)), bytes((rarity)));
+  function encodeDynamic(
+    string memory name,
+    string memory rarity,
+    string memory slotType
+  ) internal pure returns (bytes memory) {
+    return abi.encodePacked(bytes((name)), bytes((rarity)), bytes((slotType)));
   }
 
   /**
@@ -673,13 +912,15 @@ library Items {
   function encode(
     bytes32 ownerId,
     bytes32 locationId,
+    uint32 quantity,
     string memory name,
-    string memory rarity
+    string memory rarity,
+    string memory slotType
   ) internal pure returns (bytes memory, EncodedLengths, bytes memory) {
-    bytes memory _staticData = encodeStatic(ownerId, locationId);
+    bytes memory _staticData = encodeStatic(ownerId, locationId, quantity);
 
-    EncodedLengths _encodedLengths = encodeLengths(name, rarity);
-    bytes memory _dynamicData = encodeDynamic(name, rarity);
+    EncodedLengths _encodedLengths = encodeLengths(name, rarity, slotType);
+    bytes memory _dynamicData = encodeDynamic(name, rarity, slotType);
 
     return (_staticData, _encodedLengths, _dynamicData);
   }

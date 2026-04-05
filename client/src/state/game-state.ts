@@ -21,6 +21,29 @@ export interface LocationEntity {
   id: string;
   role?: string;
   ascii_art?: string;  // cached ASCII art
+  x?: number;
+  y?: number;
+}
+
+export interface WorldMapRoom {
+  id: string;
+  name: string;
+  visited: boolean;
+  direction?: string;
+  from_id?: string;
+}
+
+export interface WorldMapConnection {
+  from: string;
+  to: string;
+  direction: string;
+}
+
+export interface WorldMapData {
+  current: string;
+  current_id: string;
+  rooms: WorldMapRoom[];
+  connections: WorldMapConnection[];
 }
 
 export interface InventoryItem {
@@ -69,6 +92,7 @@ export interface GameState {
     disposition: string;
   }>;
   roomMap: RoomMap | null;
+  worldMap: WorldMapData | null;
 }
 
 export function createInitialState(playerName: string): GameState {
@@ -95,6 +119,7 @@ export function createInitialState(playerName: string): GameState {
     quests: [],
     factions: [],
     roomMap: null,
+    worldMap: null,
   };
 }
 
@@ -118,6 +143,8 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
         id: n.id || '',
         role: n.role || '',
         ascii_art: existing?.ascii_art,
+        x: n.x,
+        y: n.y,
       };
     });
   }
@@ -129,6 +156,8 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
         id: i.id || '',
         role: i.role || '',
         ascii_art: existing?.ascii_art,
+        x: i.x,
+        y: i.y,
       };
     });
   }
@@ -165,6 +194,8 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
           id: n.id || '',
           role: n.role || '',
           ascii_art: existing?.ascii_art,
+          x: n.x,
+          y: n.y,
         };
       });
     }
@@ -175,6 +206,8 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
           name: i.name || '',
           id: i.id || '',
           ascii_art: existing?.ascii_art,
+          x: i.x,
+          y: i.y,
         };
       });
     }
@@ -195,6 +228,25 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
       reputation: f.reputation || 0,
       disposition: f.disposition || 'neutral',
     }));
+  }
+}
+
+/** Update a field on an entity across both location and roomMap (if present). */
+export function syncEntityField(
+  gs: GameState,
+  entityId: string,
+  updates: Partial<{ x: number; y: number; ascii_art: string }>,
+): void {
+  // Update in location.npcs and location.items
+  const locEntity = gs.location.npcs.find(n => n.id === entityId)
+    || gs.location.items.find(i => i.id === entityId);
+  if (locEntity) Object.assign(locEntity, updates);
+
+  // Update in roomMap.npcs and roomMap.items
+  if (gs.roomMap) {
+    const rmEntity = gs.roomMap.npcs.find((n: any) => n.id === entityId)
+      || gs.roomMap.items.find((i: any) => i.id === entityId);
+    if (rmEntity) Object.assign(rmEntity, updates);
   }
 }
 

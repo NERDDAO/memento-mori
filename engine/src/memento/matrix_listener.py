@@ -1,21 +1,19 @@
-"""Matrix listener — watches location rooms, dispatches to RoundController."""
+"""Matrix listener — watches location rooms, dispatches to TurnController/RoundController."""
 
 from __future__ import annotations
 
 import asyncio
 import os
-import threading
 
 from nio import AsyncClient, InviteMemberEvent, MatrixRoom, RoomMessageText
 
+from memento.lock_manager import LocationLockManager
 from memento.log import get_logger
 
 logger = get_logger(__name__)
 
-
-# Global lock — serializes all RoundController execution across threads.
-# Prevents concurrent KG mutations and world-time races.
-_turn_lock = threading.Lock()
+# Feature flag — set MEMENTO_USE_TURN_CONTROLLER=1 to use the new episode-driven pipeline
+_USE_TURN_CONTROLLER = os.getenv("MEMENTO_USE_TURN_CONTROLLER", "").lower() in ("1", "true", "yes")
 
 
 class EngineMatrixListener:
@@ -58,6 +56,12 @@ class EngineMatrixListener:
         # Auto-join on invite
         self.client.add_event_callback(self._on_invite, InviteMemberEvent)  # type: ignore[arg-type]
         self.client.add_event_callback(self._on_action, RoomMessageText)  # type: ignore[arg-type]
+
+        # Start periodic heartbeat check (world evolution)
+        heartbeat_interval = int(os.getenv("MEMENTO_HEARTBEAT_INTERVAL", "300"))
+        if heartbeat_interval > 0:
+            asyncio.create_task(self._heartbeat_loop(heartbeat_interval))
+
         logger.info("Listening for player actions...")
         await self.client.sync_forever(timeout=30000)
 
@@ -94,6 +98,19 @@ class EngineMatrixListener:
             location = room.display_name or ""
             if location:
                 await asyncio.to_thread(self._reconcile_single_location, location)
+
+    @staticmethod
+    async def _heartbeat_loop(interval: int) -> None:
+        """Periodic heartbeat — checks stack and runs world evolution if needed."""
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                from memento.heartbeat import HeartbeatRunner
+                result = await asyncio.to_thread(HeartbeatRunner().run)
+                if not result.get("skipped"):
+                    logger.info("Heartbeat: %s", result)
+            except Exception:
+                logger.warning("Heartbeat loop failed (non-fatal)", exc_info=True)
 
     @staticmethod
     def _reconcile_single_location(location_name: str) -> None:
@@ -152,8 +169,9 @@ class EngineMatrixListener:
     def _run_turn(player_id: str, location_name: str, action: str,
                   matrix_client=None, room_id: str = "",
                   loop=None) -> tuple[str, dict]:
-        """Run RoundController synchronously (called from thread). Returns (narrative, state_update)."""
-        with _turn_lock:
+        """Run turn with per-location locking. Returns (narrative, state_update)."""
+        lock = LocationLockManager.acquire(location_name)
+        with lock:
             return EngineMatrixListener._run_turn_inner(
                 player_id, location_name, action, matrix_client, room_id, loop
             )
@@ -177,8 +195,9 @@ class EngineMatrixListener:
     def _run_batch_turn(location_name: str, actions: list[dict],
                         matrix_client=None, room_id: str = "",
                         loop=None) -> tuple[str, dict]:
-        """Run RoundController with multiple actions. Returns (narrative, state_update)."""
-        with _turn_lock:
+        """Run turn with per-location locking. Returns (narrative, state_update)."""
+        lock = LocationLockManager.acquire(location_name)
+        with lock:
             return EngineMatrixListener._run_batch_turn_inner(
                 location_name, actions, matrix_client, room_id, loop
             )
@@ -187,8 +206,32 @@ class EngineMatrixListener:
     def _run_batch_turn_inner(location_name: str, actions: list[dict],
                               matrix_client=None, room_id: str = "",
                               loop=None) -> tuple[str, dict]:
-        from memento.round_controller import RoundController
+        if _USE_TURN_CONTROLLER:
+            from memento.turn_controller import TurnController
+            from memento.transport import MatrixTransport, NullTransport
 
+            if matrix_client and room_id and loop:
+                transport = MatrixTransport(matrix_client, room_id, loop)
+            else:
+                transport = NullTransport()
+
+            # Resolve location UUID
+            location_uuid = ""
+            try:
+                from memento.tools.kg import _resolve_entity_uuid
+                location_uuid = _resolve_entity_uuid(location_name) or ""
+            except Exception:
+                pass
+
+            controller = TurnController(
+                location=location_name,
+                location_uuid=location_uuid,
+                actions=actions,
+                transport=transport,
+            )
+            return controller.run()
+
+        from memento.round_controller import RoundController
         controller = RoundController(
             location=location_name,
             actions=actions,

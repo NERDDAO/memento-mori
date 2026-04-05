@@ -33,9 +33,54 @@ async def lifespan(app: FastAPI):
         await bridge.connect()
         round_manager.on_round_close(make_round_callback(bridge, ws_hub))
         round_manager.on_action(make_action_callback(ws_hub))
+
+    # Seed ontology types on Delve for this bonfire
+    _seed_ontology()
+
     yield
     if bridge:
         await bridge.disconnect()
+
+
+def _seed_ontology() -> None:
+    """Register world seed extraction types on the bonfire's Delve ontology."""
+    try:
+        from memento.bonfires_client import get_client
+        from memento.rpg_types import RPG_ENTITY_TYPES
+
+        client = get_client()
+
+        # Convert Pydantic models to OntologyLabel format for Delve
+        entity_labels = []
+        for name, model in RPG_ENTITY_TYPES.items():
+            schema = model.model_json_schema()
+            fields = {}
+            properties = schema.get("properties", {})
+            required_fields = set(schema.get("required", []))
+            for fname, fprop in properties.items():
+                ftype = fprop.get("type", "string")
+                # Map JSON Schema types to OntologyField types
+                type_map = {"string": "str", "integer": "int", "number": "float", "boolean": "bool"}
+                if ftype == "array" and fprop.get("items", {}).get("type") == "string":
+                    resolved_type = "list[str]"
+                else:
+                    resolved_type = type_map.get(ftype, "str")
+                fields[fname] = {
+                    "type": resolved_type,
+                    "description": fprop.get("description", ""),
+                    "required": fname in required_fields,
+                }
+            entity_labels.append({
+                "name": name,
+                "description": model.__doc__ or "",
+                "labels": [name],
+                "fields": fields,
+            })
+
+        client.ontology.set_extraction_types(entity_labels)
+        logger.info("Seeded ontology types: %s", [l["name"] for l in entity_labels])
+    except Exception:
+        logger.warning("Failed to seed ontology types (non-fatal)", exc_info=True)
 
 
 app = FastAPI(title="Memento Mori Gateway", lifespan=lifespan)
@@ -53,7 +98,7 @@ async def health():
 
 
 # Include routes
-from gateway.routes import action, session, state, entity, chain, engine, inventory, codex
+from gateway.routes import action, session, state, entity, chain, engine, inventory, codex, chronicle
 app.include_router(action.router, prefix="/api")
 app.include_router(session.router, prefix="/api")
 app.include_router(state.router, prefix="/api")
@@ -62,6 +107,7 @@ app.include_router(chain.router, prefix="/api")
 app.include_router(engine.router, prefix="/api")
 app.include_router(inventory.router, prefix="/api")
 app.include_router(codex.router, prefix="/api")
+app.include_router(chronicle.router, prefix="/api")
 
 # WebSocket endpoint
 from fastapi import WebSocket, WebSocketDisconnect

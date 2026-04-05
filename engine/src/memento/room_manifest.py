@@ -88,6 +88,28 @@ def get_room_manifest(location_uuid: str) -> dict[str, Any]:
     manifest["id"] = location_uuid
     manifest["name"] = location_name
 
+    # Overlay with onchain terrain if available
+    try:
+        import asyncio
+        from gateway.chain_client import fetch_terrain
+        from memento.terrain import unpack_terrain
+
+        loop = asyncio.new_event_loop()
+        chain_terrain = loop.run_until_complete(fetch_terrain(location_uuid))
+        loop.close()
+
+        if chain_terrain and isinstance(chain_terrain, dict):
+            terrain_bytes = chain_terrain.get("terrain")
+            chain_width = chain_terrain.get("width", 0)
+            chain_height = chain_terrain.get("height", 0)
+            if terrain_bytes and chain_width and chain_height:
+                manifest["tiles"] = unpack_terrain(terrain_bytes, chain_width, chain_height)
+                manifest["width"] = chain_width
+                manifest["height"] = chain_height
+                logger.debug("Using onchain terrain for %s", location_uuid)
+    except Exception:
+        pass  # Fall back to KG terrain
+
     # Extract summary (plain text, not JSON blob)
     summary = entity.get("summary", "")
     if isinstance(summary, str) and summary.startswith("{"):
@@ -99,6 +121,7 @@ def get_room_manifest(location_uuid: str) -> dict[str, Any]:
     manifest["summary"] = summary
 
     # 3. Get entities AT this location via incoming LOCATED_IN edges
+    stored_room_map = dict(manifest)  # save before mutations — used for position lookups
     npcs: list[dict] = list(manifest.get("npcs", []))
     items: list[dict] = list(manifest.get("items", []))
     players: list[dict] = []
@@ -117,16 +140,32 @@ def get_room_manifest(location_uuid: str) -> dict[str, Any]:
             source_name = source.get("name", "Unknown")
 
             if labels & NPC_LABELS:
+                # Look up position from stored room_map
+                stored_x, stored_y = 0, 0
+                for stored_npc in stored_room_map.get("npcs", []):
+                    if stored_npc.get("id") == source_id or stored_npc.get("name", "").lower() == source_name.lower():
+                        stored_x = stored_npc.get("x", 0)
+                        stored_y = stored_npc.get("y", 0)
+                        break
                 npcs.append({
                     "id": source_id,
                     "name": source_name,
-                    "x": 0, "y": 0, "ch": source_name[0].upper() if source_name else "?",
+                    "x": stored_x, "y": stored_y,
+                    "ch": source_name[0].upper() if source_name else "?",
                 })
             elif labels & ITEM_LABELS:
+                # Look up position from stored room_map
+                stored_x, stored_y = 0, 0
+                for stored_item in stored_room_map.get("items", []):
+                    if stored_item.get("id") == source_id or stored_item.get("name", "").lower() == source_name.lower():
+                        stored_x = stored_item.get("x", 0)
+                        stored_y = stored_item.get("y", 0)
+                        break
                 items.append({
                     "id": source_id,
                     "name": source_name,
-                    "x": 0, "y": 0, "ch": "!",
+                    "x": stored_x, "y": stored_y,
+                    "ch": "!",
                 })
             elif "Player" in labels:
                 players.append({

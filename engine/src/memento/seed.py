@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from memento.bonfires_client import get_client
 from memento.log import get_logger
@@ -217,7 +216,15 @@ def seed_threshold() -> dict:
                 "ch": npc["ch"], "name": npc["name"],
                 "id": npc_uuid,
             })
-        except Exception as e:
+            try:
+                import asyncio
+                from gateway.chain_client import write_position
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(write_position(npc_uuid, uuid, npc["x"], npc["y"]))
+                loop.close()
+            except Exception:
+                pass
+        except Exception:
             logger.warning("NPC creation failed: %s", npc["name"], exc_info=True)
             npc_entries.append({
                 "x": npc["x"], "y": npc["y"],
@@ -256,7 +263,15 @@ def seed_threshold() -> dict:
                 "ch": item["ch"], "name": item["name"],
                 "id": item_uuid,
             })
-        except Exception as e:
+            try:
+                import asyncio
+                from gateway.chain_client import write_position
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(write_position(item_uuid, uuid, item["x"], item["y"]))
+                loop.close()
+            except Exception:
+                pass
+        except Exception:
             logger.warning("Item creation failed: %s", item["name"], exc_info=True)
             item_entries.append({
                 "x": item["x"], "y": item["y"],
@@ -273,16 +288,66 @@ def seed_threshold() -> dict:
         {"x": 17, "y": 17, "ch": "+", "direction": "south", "target": "The Wastes"},
     ]
 
-    # Update the entity with the complete map
-    client.kg.update_entity(uuid, "The Threshold", ["Location"], json.dumps({
-        "summary": THRESHOLD_MAP["npcs"][0]["name"] if THRESHOLD_MAP["npcs"] else "",
-        "room_map": json.dumps(THRESHOLD_MAP),
-    }))
+    # Update the entity with the complete map — store room_map in summary as JSON.
+    # Pass labels=None so the CRUD service uses direct Cypher SET (not node.save()
+    # which mangles JSON strings in Kuzu).
+    summary_data = {
+        "summary": "A vast stone chamber at the boundary between worlds. The air hums with residual energy.",
+        "room_map": THRESHOLD_MAP,
+    }
+    client.kg.update_entity(uuid, "The Threshold", None, json.dumps(summary_data))
+
+    # Pack terrain bytes for future onchain storage
+    room_map = THRESHOLD_MAP
+    try:
+        from memento.terrain import pack_terrain
+        tiles = room_map.get("tiles", []) if isinstance(room_map, dict) else []
+        width = room_map.get("width", 35) if isinstance(room_map, dict) else 35
+        height = room_map.get("height", 18) if isinstance(room_map, dict) else 18
+        if tiles:
+            terrain_bytes = pack_terrain(tiles, width, height)
+            logger.info("Packed Threshold terrain: %dx%d (%d bytes)", width, height, len(terrain_bytes))
+            import asyncio
+            try:
+                from gateway.chain_client import write_terrain, write_position
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(write_terrain(uuid, width, height, terrain_bytes))
+                loop.close()
+                logger.info("Wrote Threshold terrain onchain")
+            except Exception:
+                logger.debug("Terrain chain write skipped", exc_info=True)
+    except Exception:
+        logger.debug("Terrain packing failed for Threshold", exc_info=True)
 
     # Save all UUIDs to world.json for future lookups
     world["threshold_uuid"] = uuid
     world["npcs"] = {n["name"]: n["id"] for n in npc_entries}
     world["items"] = {i["name"]: i["id"] for i in item_entries}
+
+    # Spawn room narrator for The Threshold + master narrator
+    from memento.agent_controller import get_agent_controller
+    ctrl = get_agent_controller()
+
+    master_id = world.get("master_narrator_agent_id", "")
+    if not master_id:
+        master_id = ctrl.spawn_master_narrator()
+        if master_id:
+            world["master_narrator_agent_id"] = master_id
+
+    narrator_id = world.get("threshold_narrator_agent_id", "")
+    if not narrator_id:
+        narrator_id = ctrl.spawn_room_narrator(
+            location_name="The Threshold",
+            location_uuid=uuid,
+            location_description=(
+                "A desolate crossroads tavern at the edge of the known world. "
+                "The Bleeding Lantern serves as a waypoint for weary travelers."
+            ),
+            master_narrator_agent_id=master_id,
+        )
+        if narrator_id:
+            world["threshold_narrator_agent_id"] = narrator_id
+
     _save_world(world)
 
     return {"uuid": uuid, "map": THRESHOLD_MAP, "created": True}

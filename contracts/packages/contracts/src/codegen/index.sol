@@ -7,3 +7,6 @@ import { Characters, CharactersData } from "./tables/Characters.sol";
 import { Deaths, DeathsData } from "./tables/Deaths.sol";
 import { Items, ItemsData } from "./tables/Items.sol";
 import { Epochs, EpochsData } from "./tables/Epochs.sol";
+import { Position, PositionData } from "./tables/Position.sol";
+import { EntitiesAtPosition } from "./tables/EntitiesAtPosition.sol";
+import { Terrain, TerrainData } from "./tables/Terrain.sol";

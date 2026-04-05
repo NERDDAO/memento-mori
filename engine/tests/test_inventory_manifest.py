@@ -222,7 +222,8 @@ def test_reconcile_expires_orphaned_edges():
     mock.kg.update_edge.assert_called_once()
     call_args = mock.kg.update_edge.call_args
     assert call_args[0][0] == "edge-uuid-1"
-    assert "expired_at" in call_args[0][1]
+    # update_edge uses kwargs: update_edge(edge_uuid, expired_at=now)
+    assert "expired_at" in call_args[1]
 
 
 def test_reconcile_noop_when_in_sync():

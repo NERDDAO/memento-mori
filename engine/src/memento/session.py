@@ -96,6 +96,11 @@ class SessionManager:
         try:
             if loc_uuid:
                 client.kg.create_edge(player_uuid, loc_uuid, "LOCATED_IN", "")
+                # Mark location as visited by this player
+                try:
+                    client.kg.create_edge(player_uuid, loc_uuid, "VISITED_BY", "")
+                except Exception:
+                    pass
                 from memento.room_manifest import get_room_manifest
                 room_map = get_room_manifest(loc_uuid)
         except Exception as e:
@@ -273,6 +278,13 @@ class SessionManager:
                     break
         except Exception:
             logger.debug("Location edge lookup failed for %s", player_id)
+
+        # Mark current location as visited (idempotent)
+        if location_uuid := loc_uuid:
+            try:
+                client.kg.create_edge(player_id, location_uuid, "VISITED_BY", "")
+            except Exception:
+                pass
 
         # Get room manifest (or Threshold fallback)
         if loc_uuid:

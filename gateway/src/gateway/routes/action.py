@@ -6,6 +6,37 @@ from pydantic import BaseModel, Field, field_validator
 router = APIRouter()
 
 
+class PositionSyncRequest(BaseModel):
+    player_id: str
+    x: int
+    y: int
+
+
+@router.post("/position/sync")
+async def sync_position(req: PositionSyncRequest):
+    """Sync player position to chain. Called on interaction, not every move.
+
+    Client moves optimistically (WASD is instant). Position is synced to chain
+    on interaction (talk, pickup, use exit) to confirm the player's actual location.
+    If chain rejects (invalid tile), client should snap back.
+    """
+    try:
+        from gateway.routes.codex import _get_location_uuid
+        location_uuid = await _get_location_uuid(req.player_id)
+
+        if not location_uuid:
+            return {"success": True}  # Can't resolve, but don't block player
+
+        from gateway.chain_client import write_position
+        success = await write_position(req.player_id, location_uuid, req.x, req.y)
+
+        return {"success": success}
+    except Exception:
+        import logging
+        logging.getLogger(__name__).debug("Position sync failed", exc_info=True)
+        return {"success": True}  # Don't block player on chain errors
+
+
 class ActionRequest(BaseModel):
     player_id: str = Field(..., min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9_-]+$')
     action: str = Field(..., min_length=1, max_length=500)

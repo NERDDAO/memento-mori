@@ -51,6 +51,12 @@ _SCHEMAS: dict[str, dict[str, str]] = {
 }
 
 
+def needs_art(attributes: dict) -> bool:
+    """Return True if the entity is missing ASCII art."""
+    val = attributes.get("ascii_art")
+    return val is None or val == "" or val == []
+
+
 def needs_enrichment(entity_type: str, attributes: dict) -> list[str]:
     """Return a list of attribute fields that are missing or empty for the given entity type.
 
@@ -76,5 +82,6 @@ __all__ = [
     "NPC_ATTRIBUTE_FIELDS",
     "ITEM_ATTRIBUTE_FIELDS",
     "LOCATION_ATTRIBUTE_FIELDS",
+    "needs_art",
     "needs_enrichment",
 ]

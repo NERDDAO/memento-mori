@@ -51,6 +51,7 @@ export interface StatusMessage {
   type: 'status';
   tick?: number;
   chain?: boolean;
+  activity?: string;
 }
 
 export interface PlayerJoinedMessage {
@@ -84,6 +85,39 @@ export interface RoomItemsChangedMessage {
   type: 'room_items_changed';
 }
 
+export interface CodexRefreshMessage {
+  type: 'codex_refresh';
+  entity_id?: string;
+}
+
+export interface NpcLeftMessage {
+  type: 'npc_left';
+  npc_name: string;
+}
+
+export interface NpcJoinedMessage {
+  type: 'npc_joined';
+  npc_name: string;
+  npc_id?: string;
+}
+
+export interface PositionUpdateMessage {
+  type: 'position_update';
+  entity_id: string;
+  x: number;
+  y: number;
+}
+
+export interface EpisodeFeedMessage {
+  type: 'episode_feed';
+  episode_uuid: string;
+  agent_id: string;
+  name: string;
+  summary: string;
+  location: string;
+  timestamp: string;
+}
+
 export type WsMessage =
   | NarrativeMessage
   | DeathFeedMessage
@@ -96,4 +130,9 @@ export type WsMessage =
   | PlayerLeftMessage
   | PresenceMessage
   | StateUpdateMessage
-  | RoomItemsChangedMessage;
+  | RoomItemsChangedMessage
+  | CodexRefreshMessage
+  | NpcLeftMessage
+  | NpcJoinedMessage
+  | PositionUpdateMessage
+  | EpisodeFeedMessage;

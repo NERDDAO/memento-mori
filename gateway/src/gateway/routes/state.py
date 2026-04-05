@@ -133,6 +133,133 @@ async def get_world_map():
         return {"rooms": [], "connections": []}
 
 
+@router.get("/worldmap/{player_id}")
+async def get_player_world_map(player_id: str):
+    """Get fog-of-war world map — only visited rooms + adjacent unknowns."""
+    try:
+        from memento.bonfires_client import get_client
+        import json
+
+        client = await asyncio.to_thread(get_client)
+
+        # Get player's visited locations via VISITED_BY edges
+        visited_edges = await asyncio.to_thread(
+            client.kg.get_edges, player_id, direction="outgoing", edge_type="VISITED_BY"
+        )
+        visited_ids: set[str] = set()
+        for edge in visited_edges:
+            # SDK returns nested {target: {uuid, name}} structure
+            target = edge.get("target", {})
+            target_id = target.get("uuid", "") if isinstance(target, dict) else edge.get("target_node_uuid", "")
+            if target_id:
+                visited_ids.add(target_id)
+
+        # Resolve current location UUID from KG LOCATED_IN edge
+        current_id = ""
+        current_name = ""
+        try:
+            loc_edges = await asyncio.to_thread(
+                client.kg.get_edges, player_id, direction="outgoing", edge_type="LOCATED_IN"
+            )
+            for le in loc_edges:
+                target = le.get("target", {})
+                if isinstance(target, dict):
+                    current_id = target.get("uuid", "")
+                    current_name = target.get("name", "")
+                if current_id:
+                    break
+        except Exception:
+            pass
+        # Fallback to ws_hub for name only
+        if not current_name:
+            from gateway.app import ws_hub
+            current_name = ws_hub.player_locations.get(player_id, "") if ws_hub else ""
+
+        rooms = []
+        all_connections = []
+
+        for loc_id in visited_ids:
+            try:
+                entity = await asyncio.to_thread(client.kg.get_entity, loc_id)
+                if isinstance(entity, dict) and "entity" in entity:
+                    entity = entity["entity"]
+                name = entity.get("name", "Unknown")
+                rooms.append({"id": loc_id, "name": name, "visited": True})
+
+                # Get exits from room_map stored in summary or attributes
+                summary = entity.get("summary", "")
+                rm = {}
+                if isinstance(summary, str) and summary.startswith("{"):
+                    try:
+                        parsed = json.loads(summary)
+                        if "exits" in parsed:
+                            rm = parsed
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                # Also check attributes for room_map
+                attrs = entity.get("attributes", {})
+                if isinstance(attrs, str):
+                    try:
+                        attrs = json.loads(attrs)
+                    except (json.JSONDecodeError, TypeError):
+                        attrs = {}
+                if not rm and isinstance(attrs, dict) and "room_map" in attrs:
+                    rm_val = attrs["room_map"]
+                    if isinstance(rm_val, str):
+                        try:
+                            rm = json.loads(rm_val)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    elif isinstance(rm_val, dict):
+                        rm = rm_val
+
+                for exit_info in rm.get("exits", []):
+                    target = exit_info.get("target", "")
+                    direction = exit_info.get("direction", "")
+                    target_id = exit_info.get("target_id", "")
+                    if direction:
+                        all_connections.append({
+                            "from_id": loc_id,
+                            "from_name": name,
+                            "to_id": target_id,
+                            "to_name": target,
+                            "direction": direction,
+                        })
+            except Exception:
+                continue
+
+        # Add unknown rooms (adjacent to visited but not visited)
+        seen_unknown = set()
+        for conn in all_connections:
+            to_id = conn["to_id"]
+            to_name = conn["to_name"]
+            key = to_id or to_name
+            if key and to_id not in visited_ids and key not in seen_unknown:
+                seen_unknown.add(key)
+                rooms.append({
+                    "id": to_id or "",
+                    "name": "?",
+                    "visited": False,
+                    "direction": conn["direction"],
+                    "from_id": conn["from_id"],
+                })
+
+        return {
+            "current": current_name,
+            "current_id": current_id,
+            "rooms": rooms,
+            "connections": [
+                {"from": c["from_name"], "to": c["to_name"], "direction": c["direction"]}
+                for c in all_connections
+            ],
+        }
+    except Exception:
+        import logging
+        logging.getLogger(__name__).error("Player world map failed", exc_info=True)
+        return {"current": "", "rooms": [], "connections": []}
+
+
 class ManifestRequest(BaseModel):
     location_uuid: str
 
