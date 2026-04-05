@@ -9,6 +9,7 @@ Gates narration on a 30s cooldown per location to prevent world-event stacking.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from typing import Any, TYPE_CHECKING
 
@@ -60,21 +61,25 @@ def _record_narration(location: str) -> None:
 # NPC response tracker — shared between gateway bridge and round controller
 # ---------------------------------------------------------------------------
 _npc_responses: dict[str, set[str]] = {}
+_npc_lock = threading.Lock()
 
 
 def record_npc_responded(location: str, npc_username: str) -> None:
     """Record that an NPC sent a message at a location during the current round."""
-    _npc_responses.setdefault(location, set()).add(npc_username)
+    with _npc_lock:
+        _npc_responses.setdefault(location, set()).add(npc_username)
 
 
 def clear_npc_responses(location: str) -> None:
     """Reset response tracking for a new round at this location."""
-    _npc_responses.pop(location, None)
+    with _npc_lock:
+        _npc_responses.pop(location, None)
 
 
 def npc_response_count(location: str) -> int:
     """Return how many unique NPCs have responded at this location."""
-    return len(_npc_responses.get(location, set()))
+    with _npc_lock:
+        return len(_npc_responses.get(location, set()))
 
 
 # ---------------------------------------------------------------------------
@@ -426,14 +431,14 @@ class RoundController:
             )
             self.narrative = ""
 
-        # 5b. Fire-and-forget scene art (disabled until KG caching is fixed)
-        # if self.narrative:
-        #     import threading
-        #     threading.Thread(
-        #         target=self.request_art,
-        #         args=(self.context[:500],),
-        #         daemon=True,
-        #     ).start()
+        # 5b. Fire-and-forget scene art
+        if self.narrative:
+            import threading
+            threading.Thread(
+                target=self.request_art,
+                args=(self.context[:500],),
+                daemon=True,
+            ).start()
 
         # 6. Post-turn bookkeeping (memory, time advance)
         if self.narrative:
