@@ -116,7 +116,8 @@ class TurnController:
             client = get_client()
             episode = client.kg.get_latest_episode()
             if episode:
-                context = episode.get("content", "") or episode.get("summary", "") or ""
+                raw = episode.get("content") or episode.get("summary") or ""
+                context = str(raw) if not isinstance(raw, str) else raw
         except Exception:
             logger.debug("Could not read latest episode for narration context", exc_info=True)
 
