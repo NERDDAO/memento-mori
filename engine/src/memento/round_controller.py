@@ -77,6 +77,31 @@ def npc_response_count(location: str) -> int:
     return len(_npc_responses.get(location, set()))
 
 
+# ---------------------------------------------------------------------------
+# Proximity helpers — room-level position cache and interaction gate
+# ---------------------------------------------------------------------------
+INTERACTION_RADIUS = 3
+
+
+def _build_position_cache(room_map: dict) -> dict[str, tuple[int, int]]:
+    """Build name→(x,y) lookup from room map. One dict, O(1) per entity."""
+    cache: dict[str, tuple[int, int]] = {}
+    for npc in room_map.get("npcs", []):
+        cache[npc.get("name", "").lower()] = (npc.get("x", 0), npc.get("y", 0))
+    for item in room_map.get("items", []):
+        cache[item.get("name", "").lower()] = (item.get("x", 0), item.get("y", 0))
+    return cache
+
+
+def check_proximity(
+    player_pos: tuple[int, int],
+    target_pos: tuple[int, int],
+    max_distance: int = INTERACTION_RADIUS,
+) -> bool:
+    """Check if player is within interaction range (Manhattan distance)."""
+    return abs(player_pos[0] - target_pos[0]) + abs(player_pos[1] - target_pos[1]) <= max_distance
+
+
 def query_active_quests(player_uuid: str) -> list[dict]:
     """Query KG for player's active quests via edge traversal (UUID-based)."""
     if not player_uuid:

@@ -73,6 +73,62 @@ async def get_state(req: StateRequest):
         if req.entity_name.lower() in summary.lower():
             recent.append(summary[:200])
 
+    # Build spatial awareness — find the NPC's location and room positions
+    spatial: dict = {}
+    try:
+        entity_uuid = entity.get("uuid", entity.get("id", ""))
+        if entity_uuid:
+            # Find LOCATED_IN edge to get current location UUID
+            loc_edges = await asyncio.to_thread(
+                client.kg.get_edges, entity_uuid,
+                direction="outgoing", edge_type="LOCATED_IN",
+            )
+            if loc_edges:
+                loc_target = loc_edges[0].get("target", {})
+                loc_uuid = loc_target.get("uuid", loc_target.get("id", ""))
+                if loc_uuid:
+                    from memento.room_manifest import get_room_manifest
+                    room_map = await asyncio.to_thread(get_room_manifest, loc_uuid)
+
+                    # Find this NPC's own position in the room
+                    own_x, own_y = 0, 0
+                    entity_lower = req.entity_name.lower()
+                    for npc in room_map.get("npcs", []):
+                        if npc.get("name", "").lower() == entity_lower:
+                            own_x, own_y = npc.get("x", 0), npc.get("y", 0)
+                            break
+
+                    spatial["room_width"] = room_map.get("width", 35)
+                    spatial["room_height"] = room_map.get("height", 18)
+                    spatial["own_position"] = {"x": own_x, "y": own_y}
+
+                    # All other entities in the room with positions
+                    positions = []
+                    for npc in room_map.get("npcs", []):
+                        positions.append({
+                            "type": "NPC",
+                            "name": npc.get("name", "?"),
+                            "x": npc.get("x", 0),
+                            "y": npc.get("y", 0),
+                        })
+                    for item in room_map.get("items", []):
+                        positions.append({
+                            "type": "ITEM",
+                            "name": item.get("name", "?"),
+                            "x": item.get("x", 0),
+                            "y": item.get("y", 0),
+                        })
+                    for player in room_map.get("players", []):
+                        positions.append({
+                            "type": "PLAYER",
+                            "name": player.get("name", "?"),
+                            "x": player.get("x", 0),
+                            "y": player.get("y", 0),
+                        })
+                    spatial["room_entities"] = positions
+    except Exception:
+        logger.debug("Spatial lookup failed for %s", req.entity_name, exc_info=True)
+
     return {
         "name": entity.get("name", req.entity_name),
         "labels": entity.get("labels", []),
@@ -83,6 +139,7 @@ async def get_state(req: StateRequest):
             for e in edges[:10]
         ],
         "recent_events": recent,
+        **spatial,
     }
 
 
