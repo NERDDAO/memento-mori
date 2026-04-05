@@ -38,6 +38,37 @@ class MatrixBridge:
         self.location_to_room: dict[str, str] = {}
         self.player_tokens: dict[str, str] = {}  # player_id -> matrix access_token
 
+    def _push_to_stack(self, text: str, sender: str, location: str) -> None:
+        """Push a message to the narrator agent's Delve stack for heartbeat processing.
+
+        All game messages (player actions, NPC responses, narrator text) flow
+        through the narrator agent's stack. The heartbeat processes them periodically.
+        Fire-and-forget — failures are logged but don't block message flow.
+        """
+        if not text or not text.strip():
+            return
+        try:
+            from memento.bonfires_client import get_client
+            from datetime import datetime, UTC
+            client = get_client()
+            agent_id = client.config.agent_id
+            from bonfires.sdk.http import _post
+            _post(
+                client.config,
+                f"/agents/{agent_id}/stack/add",
+                body={
+                    "messages": [{
+                        "text": f"[{location}] {sender}: {text[:2000]}",
+                        "userId": sender,
+                        "chatId": location or "unknown",
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "role": "user",
+                    }],
+                },
+            )
+        except Exception:
+            logger.debug("Stack push failed (non-fatal)", exc_info=True)
+
     async def connect(self) -> None:
         """Connect to Matrix homeserver as narrator bot."""
         self.client = AsyncClient(self.homeserver)
@@ -146,6 +177,8 @@ class MatrixBridge:
         if rpg_type == "narrative":
             logger.info("Narrator message at %s (sender=%s)", room.display_name, event.sender)
             location = self.room_to_location.get(room.room_id, "")
+            # Tee narrative to Delve stack for heartbeat processing
+            self._push_to_stack(event.body, "narrator", location or room.display_name or "")
             state_update = rpg_meta.get("state_update", {})
             player_id = rpg_meta.get("player_id", "")
 
@@ -242,6 +275,8 @@ class MatrixBridge:
 
             if not is_status:
                 logger.info("NPC %s spoke at %s", npc_name, location)
+                # Tee NPC message to Delve stack for heartbeat processing
+                self._push_to_stack(text, npc_name, location or room.display_name or "")
                 # Track response for event-driven NPC phase
                 try:
                     from memento.round_controller import record_npc_responded
