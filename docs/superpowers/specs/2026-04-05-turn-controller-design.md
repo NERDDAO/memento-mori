@@ -36,11 +36,11 @@ Round closes (RoundManager batch window or solo fast-path)
 **Changes:**
 - `RoundController` replaced by `TurnController` (new file)
 - Global `_turn_lock` replaced by per-location `LocationLockManager`
-- Event detection replaced by Delve episode extraction with custom types
-- Classification/detector/merge crews eliminated
+- Event detection replaced by Delve episode extraction with world seed custom types
+- Classification/detector/merge crews eliminated — inline actions handled by NPC tools
 - Context crew eliminated (episode summary replaces it)
 - Plausibility check eliminated — entity resolution handles structural impossibility (target not here, item not owned); creative impossibility ("I fly to the moon") is handled by the narration crew which narrates failed actions as in-world failures
-- New `CrewRouter` maps extracted types to crew callables
+- New `WorldReactionCrew` creates entities/quests/lore from episode-extracted seeds
 - NPC wait: fixed 15s sleep replaced by event-driven poll with early exit
 - Narration cooldown: module-level dict replaced by persistent JSON file
 - Transport protocol decouples Matrix from controller logic
@@ -50,67 +50,60 @@ Round closes (RoundManager batch window or solo fast-path)
 
 ## Components
 
-### 1. RPG Custom Types
+### 1. RPG Custom Types — World Reaction Seeds
 
-Pydantic models registered with Delve's Graphiti as custom entity types. Graphiti's `add_episode` LLM extracts structured entities matching these models from room messages.
+Pydantic models registered with Delve's Graphiti as custom entity types. These are **not action replays** — combat, movement, and inventory are already handled inline by NPC tool calls during the round. These types represent **world consequences** that the episode extraction discovers: new entities, quests, location changes, and lore that should exist as a result of what happened.
 
 ```python
 # engine/src/memento/rpg_types.py
 
-class CombatAction(BaseModel):
-    """Extracted when player actions involve combat or violence."""
-    attacker_name: str
-    target_name: str
-    weapon_or_method: str | None = None
-    context: str = ""
+class NewEntitySeed(BaseModel):
+    """Extracted when conversation implies a new NPC, creature, or item should exist in the world."""
+    entity_name: str
+    entity_type: str = ""      # npc, item, creature
+    location: str = ""
+    description: str = ""
+    source_context: str = ""   # what in the conversation implied this entity
 
     @classmethod
     def get_graphiti_labels(cls) -> list[str]:
-        return ["CombatAction"]
+        return ["NewEntitySeed"]
 
-class QuestInteraction(BaseModel):
-    """Extracted when player interacts with quest-related content."""
-    player_name: str
-    npc_name: str | None = None
-    action_type: str = ""      # accept, progress, complete, discover
-    quest_hint: str = ""
-
-    @classmethod
-    def get_graphiti_labels(cls) -> list[str]:
-        return ["QuestInteraction"]
-
-class SocialInteraction(BaseModel):
-    """Extracted when player engages in faction or reputation-affecting actions."""
-    player_name: str
-    faction_or_npc: str = ""
-    sentiment: str = ""        # friendly, hostile, neutral
-    action_summary: str = ""
+class QuestSeed(BaseModel):
+    """Extracted when interaction suggests a quest opportunity or quest progression."""
+    quest_name: str = ""
+    giver_name: str = ""       # NPC who triggered it
+    objective_hint: str = ""   # what needs to be done
+    trigger_context: str = ""  # what in the conversation triggered this
 
     @classmethod
     def get_graphiti_labels(cls) -> list[str]:
-        return ["SocialInteraction"]
+        return ["QuestSeed"]
 
-class TradeAction(BaseModel):
-    """Extracted when player buys, sells, or trades items."""
-    player_name: str
-    counterparty: str = ""
-    items_given: list[str] = []
-    items_received: list[str] = []
-
-    @classmethod
-    def get_graphiti_labels(cls) -> list[str]:
-        return ["TradeAction"]
-
-class MovementAction(BaseModel):
-    """Extracted when player moves between locations."""
-    player_name: str
-    from_location: str | None = None
-    to_location: str = ""
+class LocationChange(BaseModel):
+    """Extracted when the room state should change as a consequence of actions."""
+    location: str = ""
+    change_description: str = ""  # "door opened", "fire started", "rubble collapsed"
+    new_exits: list[str] = []     # new exits/passages revealed
+    removed_features: list[str] = []  # features destroyed/removed
 
     @classmethod
     def get_graphiti_labels(cls) -> list[str]:
-        return ["MovementAction"]
+        return ["LocationChange"]
+
+class LoreSeed(BaseModel):
+    """Extracted when new world lore is revealed or created during conversation."""
+    lore_topic: str = ""
+    content: str = ""
+    source_npc: str = ""       # who revealed it
+    related_locations: list[str] = []
+
+    @classmethod
+    def get_graphiti_labels(cls) -> list[str]:
+        return ["LoreSeed"]
 ```
+
+**Important distinction:** Inline actions (combat, movement, trade, inventory) are resolved by NPC agents via MCP tool calls during the round. The custom types above are for **world reactions** — things the world should create or change in response to what happened. The WorldReactionCrew reads these seeds and orchestrates entity creation.
 
 ### 2. Type Selector (Vector Matching)
 
@@ -178,40 +171,40 @@ ENTITY_REGISTRY: dict[str, type[BaseModel]] = {
 
 **Immediate processing:** The game engine triggers stack processing immediately after adding messages (bypass the 20-min cycle). The existing `process_stack_task` can be invoked on demand.
 
-### 4. CrewRouter
+### 4. WorldReactionCrew
 
-Maps extracted Graphiti entity types to crew callables. Checks which custom type entities were extracted from the episode and fires corresponding crews with resolved UUIDs.
+An orchestrator crew that reads extracted world seeds from the episode and creates new entities, quests, location changes, and lore in the KG. Does NOT re-resolve inline actions (combat, movement) — those are already handled by NPC tool calls.
 
 ```python
-# engine/src/memento/crew_router.py
+# engine/src/memento/world_reaction.py
 
-@dataclass
-class CrewRoute:
-    type_name: str
-    handler: Callable[[dict, TurnContext], dict]
+class WorldReactionCrew:
+    """Orchestrates entity creation from episode-extracted world seeds."""
 
-class CrewRouter:
-    def __init__(self):
-        self.routes: list[CrewRoute] = [
-            CrewRoute("CombatAction", self._handle_combat),
-            CrewRoute("QuestInteraction", self._handle_quest),
-            CrewRoute("SocialInteraction", self._handle_social),
-            CrewRoute("TradeAction", self._handle_trade),
-        ]
-
-    def route(self, extracted_entities: list[dict], ctx: TurnContext) -> dict:
-        """Run crews for all extracted entity types. Returns merged results."""
+    def react(self, extracted_entities: list[dict], ctx: TurnContext) -> dict:
+        """Process all extracted seeds. Returns summary of what was created."""
         results = {}
-        extracted_types = {e.get("type") for e in extracted_entities}
-        for route in self.routes:
-            if route.type_name in extracted_types:
-                entity = next(e for e in extracted_entities if e["type"] == route.type_name)
-                resolved = self._resolve_uuids(entity)
-                results[route.type_name] = route.handler(resolved, ctx)
+        for entity in extracted_entities:
+            entity_type = entity.get("type", "")
+            try:
+                if entity_type == "NewEntitySeed":
+                    results["new_entities"] = results.get("new_entities", [])
+                    results["new_entities"].append(self._create_entity(entity, ctx))
+                elif entity_type == "QuestSeed":
+                    results["new_quests"] = results.get("new_quests", [])
+                    results["new_quests"].append(self._create_quest(entity, ctx))
+                elif entity_type == "LocationChange":
+                    results["location_changes"] = results.get("location_changes", [])
+                    results["location_changes"].append(self._apply_location_change(entity, ctx))
+                elif entity_type == "LoreSeed":
+                    results["lore"] = results.get("lore", [])
+                    results["lore"].append(self._persist_lore(entity, ctx))
+            except Exception:
+                logger.warning("World reaction failed for %s", entity_type, exc_info=True)
         return results
 ```
 
-Entity name-to-UUID resolution uses `kg.search()` scoped to the current location. If resolution fails (entity not at this location), the route is skipped — world state acts as the plausibility check.
+Each handler creates KG entities/edges via the Bonfires SDK. Entity resolution for existing entities (NPCs, items, locations referenced by name) uses `kg.search()` to find UUIDs — this is the inline resolution that happens during seed processing, not a separate step.
 
 ### 5. TurnController
 
@@ -228,7 +221,7 @@ class TurnController:
         actions: list[dict],
         transport: Transport,
         type_selector: TypeSelector,
-        crew_router: CrewRouter,
+        world_reaction: WorldReactionCrew,
         npc_wait: float = 15.0,
     ): ...
 
@@ -247,17 +240,17 @@ class TurnController:
         # 2. Ingest to Delve stack + trigger processing
         episode = self._ingest_and_extract(requested_types)
 
-        # 3. Route extracted types to crews
-        crew_results = self.crew_router.route(
+        # 3. NPC wait (event-driven) — NPCs respond to actions in Matrix
+        self._await_npcs()
+
+        # 4. World reactions — create new entities/quests/lore from seeds
+        reaction_results = self.world_reaction.react(
             episode.get("entities", []),
             self._build_turn_context(),
         )
 
-        # 4. NPC wait (event-driven)
-        self._await_npcs()
-
-        # 5. Narrate
-        narrative = self._narrate(episode, crew_results)
+        # 5. Narrate (episode summary + world reaction results)
+        narrative = self._narrate(episode, reaction_results)
 
         # 6. Post-turn
         if narrative:
@@ -351,8 +344,10 @@ class StateUpdate(BaseModel):
 | Scenario | Current | New |
 |----------|---------|-----|
 | Simple action ("look around") | 5-8 calls | 2 (Graphiti + narration) |
-| Combat action | 5-8 calls | 3-4 (Graphiti + CombatFlow + narration) |
-| Multi-event (combat + quest) | 7-10 calls | 4-5 (Graphiti + Combat + Quest + narration) |
+| Action with world consequences | 5-8 calls | 2-3 (Graphiti + narration + world reaction KG writes) |
+| Combat (resolved by NPC tools) | 5-8 calls | 2 (Graphiti + narration — combat handled inline by tools) |
+
+Note: Combat, movement, and trade are resolved inline by NPC MCP tool calls during the round. The engine's LLM budget is only Graphiti extraction + narration. WorldReactionCrew creates KG entities but doesn't need LLM calls — it writes structured data from Graphiti's extraction.
 
 ## Files Affected
 
@@ -360,7 +355,7 @@ class StateUpdate(BaseModel):
 - `engine/src/memento/turn_controller.py` — main orchestrator
 - `engine/src/memento/rpg_types.py` — Pydantic custom types
 - `engine/src/memento/type_selector.py` — vector matching for type selection
-- `engine/src/memento/crew_router.py` — type-to-crew routing
+- `engine/src/memento/world_reaction.py` — WorldReactionCrew orchestrator for entity creation from seeds
 - `engine/src/memento/transport.py` — Transport protocol + MatrixTransport + NullTransport
 - `engine/src/memento/lock_manager.py` — per-location locks
 - `engine/src/memento/narration_cooldown.py` — persistent cooldown
@@ -378,7 +373,7 @@ class StateUpdate(BaseModel):
 - `src/core/services/knowledge_graph/custom_types.py` — register RPG types (or new registry file)
 
 **Tests:**
-- New tests for TurnController, CrewRouter, TypeSelector, LocationLockManager
+- New tests for TurnController, WorldReactionCrew, TypeSelector, LocationLockManager
 - Update existing round_controller tests to use new interface
 - Test NullTransport integration
 - Test type selection vector matching
