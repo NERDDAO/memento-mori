@@ -231,6 +231,25 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
   }
 }
 
+/** Update a field on an entity across both location and roomMap (if present). */
+export function syncEntityField(
+  gs: GameState,
+  entityId: string,
+  updates: Partial<{ x: number; y: number; ascii_art: string }>,
+): void {
+  // Update in location.npcs and location.items
+  const locEntity = gs.location.npcs.find(n => n.id === entityId)
+    || gs.location.items.find(i => i.id === entityId);
+  if (locEntity) Object.assign(locEntity, updates);
+
+  // Update in roomMap.npcs and roomMap.items
+  if (gs.roomMap) {
+    const rmEntity = gs.roomMap.npcs.find((n: any) => n.id === entityId)
+      || gs.roomMap.items.find((i: any) => i.id === entityId);
+    if (rmEntity) Object.assign(rmEntity, updates);
+  }
+}
+
 /** Update DOM elements to reflect current state. */
 export function renderState(state: GameState): void {
   const set = (id: string, text: string) => {

@@ -4,7 +4,7 @@
  * Pure switch-dispatch over WsMessage, delegates side-effects via AppRefs.
  */
 
-import { applyStateUpdate, type GameState } from './state/game-state';
+import { applyStateUpdate, syncEntityField, type GameState } from './state/game-state';
 import { getSession } from './state/session';
 import { updateRoundState, type PhaseMessage as RoundPhaseMessage } from './state/round-state';
 import type { WsMessage } from './types/ws-messages';
@@ -46,6 +46,14 @@ export interface AppRefs {
   showDeathScreen: (cause: string) => void;
 }
 
+/** Tracks the last dialogue message from each NPC (keyed by display name). */
+const lastNpcMessages = new Map<string, string>();
+
+/** Retrieve the last stored NPC dialogue line for a given NPC name. */
+export function getLastNpcMessage(npcName: string): string {
+  return lastNpcMessages.get(npcName) || '';
+}
+
 export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
 
   /** Re-render every side panel from current game state. */
@@ -77,6 +85,7 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
           refs.eventsFeed.addBlock(msg.text || '', 'ooc');
         } else if (msg.npc) {
           // NPC dialogue — remove thinking indicator and show with name header
+          lastNpcMessages.set(msg.npc, msg.text || '');
           const npcKey = msg.npc_username || msg.npc.toLowerCase().replace(/\s+/g, '-');
           refs.narrative.removeBlockById(`npc-status-${npcKey}`);
           refs.narrative.addBlock(`${msg.npc}`, 'npc-name');
@@ -149,21 +158,7 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
         // Cache on the entity in game state
         const artLines = msg.lines || [];
         if (msg.entity_id && gameState) {
-          const npc = gameState.location.npcs.find(n => n.id === msg.entity_id);
-          const item = gameState.location.items.find(i => i.id === msg.entity_id);
-          const entity = npc || item;
-          if (entity) {
-            entity.ascii_art = artLines.join('\n');
-          }
-          // Also sync to roomMap for map renderer
-          if (gameState.roomMap) {
-            const rmNpc = gameState.roomMap.npcs.find((n: any) => n.id === msg.entity_id);
-            const rmItem = gameState.roomMap.items.find((i: any) => i.id === msg.entity_id);
-            const rmEntity: any = rmNpc || rmItem;
-            if (rmEntity) {
-              rmEntity.ascii_art = artLines.join('\n');
-            }
-          }
+          syncEntityField(gameState, msg.entity_id, { ascii_art: artLines.join('\n') });
         }
         // Update codex modal if it's open
         if (msg.entity_id && refs.codex?.active) {
@@ -222,19 +217,7 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
       }
       case 'position_update': {
         if (gameState && msg.entity_id) {
-          // Update roomMap
-          if (gameState.roomMap) {
-            const npc = gameState.roomMap.npcs.find(n => n.id === msg.entity_id);
-            if (npc) { npc.x = msg.x; npc.y = msg.y; }
-            const item = gameState.roomMap.items.find(i => i.id === msg.entity_id);
-            if (item) { item.x = msg.x; item.y = msg.y; }
-          }
-          // Also update location entities (denormalized)
-          const locNpc = gameState.location.npcs.find(n => n.id === msg.entity_id);
-          if (locNpc) { locNpc.x = msg.x; locNpc.y = msg.y; }
-          const locItem = gameState.location.items.find(i => i.id === msg.entity_id);
-          if (locItem) { locItem.x = msg.x; locItem.y = msg.y; }
-
+          syncEntityField(gameState, msg.entity_id, { x: msg.x, y: msg.y });
           updateMap(gameState, refs.handleAction);
         }
         break;
