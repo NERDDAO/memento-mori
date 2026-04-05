@@ -275,9 +275,9 @@ class MatrixBridge:
             else:
                 await self.ws_hub.broadcast_all(msg)
 
-            if not is_status:
+            if is_final:
                 logger.info("NPC %s spoke at %s", npc_name, location)
-                # Tee NPC message to Delve stack for heartbeat processing
+                # Tee final NPC message to Delve stack for heartbeat processing
                 self._push_to_stack(text, npc_name, location or room.display_name or "")
                 # Track response for event-driven NPC phase
                 try:

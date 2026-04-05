@@ -39,7 +39,13 @@ class NarrationCooldown:
         if not self._path.exists():
             return {}
         try:
-            return json.loads(self._path.read_text())
+            state = json.loads(self._path.read_text())
+            # Prune entries older than 2x cooldown (stale from previous sessions)
+            now = time.time()
+            pruned = {k: v for k, v in state.items() if (now - v) < self._cooldown * 2}
+            if len(pruned) < len(state):
+                self._save(pruned)
+            return pruned
         except (json.JSONDecodeError, OSError):
             logger.warning("Failed to read narration cooldowns from %s", self._path)
             return {}
