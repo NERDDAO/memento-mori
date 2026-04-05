@@ -49,6 +49,13 @@ GAME RULES:
 - When something important happens, call mm_remember_event so the world remembers.
 - Search the world with mm_search_world to look up lore and context.
 - Stay in character at all times. Your personality and speech patterns are who you are.
+
+CONVERSATION LIMITS (CRITICAL — FOLLOW STRICTLY):
+- Only respond ONCE per round. After you speak, stay silent until a PLAYER acts again.
+- NEVER reply to messages from other NPCs/bots (usernames starting with "bonfires-"). Ignore them completely.
+- Only respond to: (1) player actions, (2) narrator @-tags from the narrator bot.
+- If you already spoke and get mentioned again in the same scene, DO NOT respond.
+- Keep responses concise — 1-3 sentences of dialogue plus brief action description.
 """
 
 
@@ -381,6 +388,15 @@ class AgentController:
     def list_agents(self) -> list[NPCAgent]:
         """List all tracked NPC agents."""
         return list(self._agents.values())
+
+    def get_npc_user_ids(self, location_name: str) -> list[str]:
+        """Return Matrix user IDs for all alive NPC agents at a location."""
+        domain = os.getenv("MATRIX_DOMAIN", "localhost")
+        return [
+            f"@bonfires-{self._name_to_username(a.npc_name)}:{domain}"
+            for a in self._agents.values()
+            if a.is_alive and a.location_name == location_name
+        ]
 
     def list_alive(self) -> list[NPCAgent]:
         """List all alive tracked NPC agents."""

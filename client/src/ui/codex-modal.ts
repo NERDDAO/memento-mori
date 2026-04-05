@@ -10,6 +10,7 @@ export interface CodexModal {
   el: HTMLElement;
   open(entityId?: string): void;
   close(): void;
+  refreshEntityArt(entityId: string, lines: string[]): void;
   readonly active: boolean;
 }
 
@@ -96,7 +97,11 @@ function formatAddr(addr: string): string {
 
 // --- Factory ---
 
-export function createCodexModal(getState: () => GameState, playerId: () => string): CodexModal {
+export function createCodexModal(
+  getState: () => GameState,
+  playerId: () => string,
+  openArtViewer?: (name: string, art: string, color: string) => void,
+): CodexModal {
   const backdrop = document.createElement('div');
   backdrop.className = 'dialog-backdrop';
   backdrop.style.display = 'none';
@@ -443,6 +448,36 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
     }
     container.appendChild(headerSection);
 
+    // ASCII art section
+    const asciiArt = attrs.ascii_art;
+    if (asciiArt && typeof asciiArt === 'string') {
+      const artSection = document.createElement('div');
+      artSection.style.marginBottom = '8px';
+      artSection.style.cursor = 'pointer';
+      artSection.title = 'Click to enlarge';
+
+      const artPre = document.createElement('pre');
+      artPre.style.cssText =
+        'font-family:"Fira Code",Consolas,"Courier New",monospace;' +
+        'font-size:10px;line-height:1.15;margin:0;padding:8px;' +
+        'white-space:pre;overflow-x:auto;border-radius:2px;' +
+        'background:#0a0a10;letter-spacing:0.5px;tab-size:4;';
+      artPre.style.color = entityColor(entity);
+      artPre.style.border = `1px solid ${entityColor(entity)}33`;
+      artPre.textContent = asciiArt;
+
+      artSection.appendChild(artPre);
+      artSection.addEventListener('click', () => {
+        if (openArtViewer) openArtViewer(entity.name, asciiArt, entityColor(entity));
+      });
+      container.appendChild(artSection);
+    } else if (entity.type !== 'player') {
+      const placeholder = document.createElement('div');
+      placeholder.style.cssText = 'color:#3a3a48;font-size:10px;font-style:italic;margin-bottom:8px;';
+      placeholder.textContent = '[ art pending ]';
+      container.appendChild(placeholder);
+    }
+
     // Attributes section
     if (Object.keys(attrs).length > 0) {
       // NPC attributes
@@ -738,10 +773,24 @@ export function createCodexModal(getState: () => GameState, playerId: () => stri
     addSectionTo(container, label, text);
   }
 
+  function refreshEntityArt(entityId: string, lines: string[]) {
+    const artText = lines.join('\n');
+    const entity = _allEntities.find(e => e.id === entityId);
+    if (entity) {
+      if (!entity.attributes) entity.attributes = {};
+      entity.attributes.ascii_art = artText;
+      // Re-render if this entity is currently selected
+      if (_selectedId === entityId && backdrop.style.display !== 'none') {
+        render();
+      }
+    }
+  }
+
   return {
     el: backdrop,
     open,
     close,
+    refreshEntityArt,
     get active() {
       return backdrop.style.display !== 'none';
     },

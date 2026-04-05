@@ -5725,7 +5725,7 @@ function formatAddr(addr) {
     return "None";
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
-function createCodexModal(getState, playerId) {
+function createCodexModal(getState, playerId, openArtViewer) {
   const backdrop = document.createElement("div");
   backdrop.className = "dialog-backdrop";
   backdrop.style.display = "none";
@@ -6026,6 +6026,29 @@ function createCodexModal(getState, playerId) {
       headerSection.appendChild(summary);
     }
     container.appendChild(headerSection);
+    const asciiArt = attrs.ascii_art;
+    if (asciiArt && typeof asciiArt === "string") {
+      const artSection = document.createElement("div");
+      artSection.style.marginBottom = "8px";
+      artSection.style.cursor = "pointer";
+      artSection.title = "Click to enlarge";
+      const artPre = document.createElement("pre");
+      artPre.style.cssText = 'font-family:"Fira Code",Consolas,"Courier New",monospace;' + "font-size:10px;line-height:1.15;margin:0;padding:8px;" + "white-space:pre;overflow-x:auto;border-radius:2px;" + "background:#0a0a10;letter-spacing:0.5px;tab-size:4;";
+      artPre.style.color = entityColor(entity);
+      artPre.style.border = `1px solid ${entityColor(entity)}33`;
+      artPre.textContent = asciiArt;
+      artSection.appendChild(artPre);
+      artSection.addEventListener("click", () => {
+        if (openArtViewer)
+          openArtViewer(entity.name, asciiArt, entityColor(entity));
+      });
+      container.appendChild(artSection);
+    } else if (entity.type !== "player") {
+      const placeholder = document.createElement("div");
+      placeholder.style.cssText = "color:#3a3a48;font-size:10px;font-style:italic;margin-bottom:8px;";
+      placeholder.textContent = "[ art pending ]";
+      container.appendChild(placeholder);
+    }
     if (Object.keys(attrs).length > 0) {
       if (entity.type === "npc") {
         if (attrs.personality)
@@ -6325,9 +6348,73 @@ function createCodexModal(getState, playerId) {
   function addSection(container, label, text) {
     addSectionTo(container, label, text);
   }
+  function refreshEntityArt(entityId, lines) {
+    const artText = lines.join(`
+`);
+    const entity = _allEntities.find((e) => e.id === entityId);
+    if (entity) {
+      if (!entity.attributes)
+        entity.attributes = {};
+      entity.attributes.ascii_art = artText;
+      if (_selectedId === entityId && backdrop.style.display !== "none") {
+        render();
+      }
+    }
+  }
   return {
     el: backdrop,
     open,
+    close,
+    refreshEntityArt,
+    get active() {
+      return backdrop.style.display !== "none";
+    }
+  };
+}
+
+// src/ui/art-viewer.ts
+function createArtViewer() {
+  const backdrop = document.createElement("div");
+  backdrop.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.85);" + "display:none;align-items:center;justify-content:center;z-index:200;" + "flex-direction:column;cursor:pointer;";
+  const container = document.createElement("div");
+  container.style.cssText = "display:flex;flex-direction:column;align-items:center;" + "max-width:90vw;max-height:90vh;";
+  const title = document.createElement("div");
+  title.style.cssText = "font-size:14px;letter-spacing:2px;margin-bottom:12px;text-align:center;";
+  const pre = document.createElement("pre");
+  pre.style.cssText = 'font-family:"Fira Code",Consolas,"Courier New",monospace;' + "font-size:15px;line-height:1.2;margin:0;padding:16px;" + "border-radius:3px;white-space:pre;overflow:auto;" + "max-height:80vh;";
+  const hint = document.createElement("div");
+  hint.style.cssText = "color:#4a4a58;font-size:11px;margin-top:12px;text-align:center;";
+  hint.textContent = "[ESC] or click to close";
+  container.appendChild(title);
+  container.appendChild(pre);
+  container.appendChild(hint);
+  backdrop.appendChild(container);
+  function close() {
+    backdrop.style.display = "none";
+    pre.textContent = "";
+  }
+  backdrop.addEventListener("click", close);
+  container.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && backdrop.style.display !== "none") {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      close();
+    }
+  }, true);
+  return {
+    el: backdrop,
+    open(entityName, artText, color) {
+      title.textContent = `─ ${entityName} ─`;
+      title.style.color = color;
+      pre.textContent = artText;
+      pre.style.color = color;
+      pre.style.border = `1px solid ${color}33`;
+      backdrop.style.display = "flex";
+    },
     close,
     get active() {
       return backdrop.style.display !== "none";
@@ -6590,6 +6677,7 @@ var eventsFeed;
 var header;
 var npcDialog;
 var codex;
+var artViewer;
 var statusBar;
 var narrativeWin;
 var eventsWin;
@@ -6631,6 +6719,9 @@ function renderAllPanels() {
 }
 async function handleAction(action) {
   if (!action.trim() || action.length > 500)
+    return;
+  const phase = getRoundState().phase;
+  if (phase !== "ready" && phase !== "collecting")
     return;
   narrative.addBlock(`> ${action}`, "player-action");
   await sendAction(action);
@@ -6716,15 +6807,24 @@ function handleMessage(msg) {
       break;
     }
     case "entity_art": {
+      const artLines = msg.lines || [];
       if (msg.entity_id && gameState) {
         const npc = gameState.location.npcs.find((n) => n.id === msg.entity_id);
         const item = gameState.location.items.find((i) => i.id === msg.entity_id);
         const entity = npc || item;
         if (entity) {
-          entity.ascii_art = (msg.lines || []).join(`
+          entity.ascii_art = artLines.join(`
 `);
         }
       }
+      if (msg.entity_id && codex?.active) {
+        codex.refreshEntityArt(msg.entity_id, artLines);
+      }
+      break;
+    }
+    case "codex_refresh": {
+      if (codex?.active)
+        codex.open();
       break;
     }
     case "npc_status": {
@@ -6769,6 +6869,25 @@ function handleMessage(msg) {
         gameState.location.players = gameState.location.players.filter((p) => p.id !== msg.player_id);
         renderPresentPanel(presentWin.panel, gameState, handleAction);
         narrative.addBlock(`${msg.player_name} departed.`, "system");
+      }
+      break;
+    }
+    case "npc_left": {
+      if (gameState) {
+        const leftName = msg.npc_name.toLowerCase();
+        gameState.location.npcs = gameState.location.npcs.filter((n) => n.name.toLowerCase() !== leftName && !n.name.toLowerCase().startsWith(leftName));
+        renderPresentPanel(presentWin.panel, gameState, handleAction);
+      }
+      break;
+    }
+    case "npc_joined": {
+      if (gameState && msg.npc_name) {
+        const joinName = msg.npc_name.toLowerCase();
+        const exists = gameState.location.npcs.some((n) => n.name.toLowerCase() === joinName || n.name.toLowerCase().startsWith(joinName));
+        if (!exists) {
+          gameState.location.npcs.push({ name: msg.npc_name, id: msg.npc_id || "", role: "" });
+          renderPresentPanel(presentWin.panel, gameState, handleAction);
+        }
       }
       break;
     }
@@ -6990,7 +7109,9 @@ document.addEventListener("DOMContentLoaded", () => {
   mapWin.body.appendChild(mapCanvasWrap);
   mapWin.body.appendChild(worldMapWrap);
   initMapPanel(mapCanvasWrap, handleAction);
-  codex = createCodexModal(() => gameState, () => getSession().playerId);
+  artViewer = createArtViewer();
+  document.body.appendChild(artViewer.el);
+  codex = createCodexModal(() => gameState, () => getSession().playerId, artViewer.open);
   document.body.appendChild(codex.el);
   document.addEventListener("keydown", (e) => {
     if (e.key === "k" && document.activeElement?.tagName !== "INPUT") {

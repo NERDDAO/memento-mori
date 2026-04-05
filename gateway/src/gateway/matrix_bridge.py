@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections import defaultdict
 from typing import Any
 
 import aiohttp
@@ -12,6 +13,12 @@ from nio import AsyncClient, MatrixRoom, RoomMessageText
 from gateway.log import get_logger
 
 logger = get_logger(__name__)
+
+# Per-NPC message counter per room. Kick after N messages.
+_npc_msg_count: dict[tuple[str, str], int] = defaultdict(int)
+_NPC_MSG_BUDGET = 2
+# Dedup: track last message text per NPC to skip duplicate final messages
+_npc_last_text: dict[tuple[str, str], str] = {}
 
 
 class MatrixBridge:
@@ -47,6 +54,9 @@ class MatrixBridge:
 
             # Pre-populate known rooms
             await self._discover_rooms()
+
+            # Start periodic NPC rejoin loop
+            asyncio.create_task(self._npc_rejoin_loop())
         except Exception as e:
             logger.error("Connection failed", exc_info=True)
             self.connected = False
@@ -199,6 +209,24 @@ class MatrixBridge:
             # Check if this is a status message — marked by the agent runtime
             is_status = content.get("com.bonfires.status", False)
 
+            # Dedup: skip if this is the same text we just forwarded (agent sends
+            # final text as both an edit and a new message — deduplicate)
+            key = (room.room_id, sender)
+            if not is_status and text and text == _npc_last_text.get(key):
+                return
+            if not is_status:
+                _npc_last_text[key] = text
+
+            # Budget check — only count final messages (not edits/status).
+            is_final = not is_status and not is_replace
+            if is_final:
+                if _npc_msg_count[key] >= _NPC_MSG_BUDGET:
+                    logger.info("NPC %s over budget at %s — dropping", npc_name, location)
+                    return
+                _npc_msg_count[key] += 1
+                if _npc_msg_count[key] >= _NPC_MSG_BUDGET:
+                    await self._kick_npc_after_response(room.room_id, sender)
+
             msg = {
                 "type": "npc_status" if is_status else "narrative",
                 "text": text,
@@ -217,6 +245,122 @@ class MatrixBridge:
 
             if not is_status:
                 logger.info("NPC %s spoke at %s", npc_name, location)
+                # Track response for event-driven NPC phase
+                try:
+                    from memento.round_controller import record_npc_responded
+                    record_npc_responded(location or room.room_id, npc_username)
+                except ImportError:
+                    pass
+
+    async def _kick_npc_after_response(self, room_id: str, user_id: str) -> None:
+        """Kick an NPC bot from a room after it responds, preventing bot-to-bot loops.
+
+        Uses the narrator token (room admin) to kick. The NPC will be
+        re-invited before the next round via reinvite_npcs().
+        """
+        location = self.room_to_location.get(room_id, "")
+        npc_username = user_id.split(":")[0].lstrip("@")
+        npc_name = npc_username.replace("bonfires-", "").replace("_", " ").title()
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.homeserver}/_matrix/client/v3/rooms/{room_id}/kick",
+                    params={"access_token": self.token},
+                    json={"user_id": user_id, "reason": "Round complete — will rejoin next round"},
+                ) as resp:
+                    if resp.status == 200:
+                        logger.info("Kicked %s from %s after response", user_id, room_id)
+                        # Notify clients so Present panel updates
+                        if location:
+                            await self.ws_hub.broadcast_to_location(location, {
+                                "type": "npc_left",
+                                "npc_name": npc_name,
+                                "npc_username": npc_username,
+                            })
+                    else:
+                        body = await resp.text()
+                        logger.debug("Kick %s failed (%d): %s", user_id, resp.status, body[:100])
+        except Exception:
+            logger.debug("Kick request failed for %s", user_id, exc_info=True)
+
+    async def ensure_npcs_in_room(self, room_id: str) -> None:
+        """Ensure all NPC bots that were kicked are back in the room.
+
+        Scans room membership for bonfires-* users in 'leave' or 'invite' state
+        and rejoins them. Also resets message budgets.
+        """
+        as_token = os.getenv("MATRIX_AS_TOKEN", "")
+        if not as_token:
+            logger.info("ensure_npcs_in_room: no AS token")
+            return
+
+        location = self.room_to_location.get(room_id, "")
+
+        # Get current room members to find kicked NPCs
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{self.homeserver}/_matrix/client/v3/rooms/{room_id}/members",
+                    params={"access_token": self.token},
+                ) as resp:
+                    if resp.status != 200:
+                        logger.info("ensure_npcs_in_room: members fetch failed %d", resp.status)
+                        return
+                    data = await resp.json()
+
+                npc_members = [
+                    m for m in data.get("chunk", [])
+                    if m.get("state_key", "").startswith("@bonfires-")
+                    and not m.get("state_key", "").startswith("@bonfires-bot")
+                ]
+                for m in npc_members:
+                    logger.info("  NPC %s: %s", m["state_key"], m.get("content", {}).get("membership", "?"))
+
+                for member in npc_members:
+                    user_id = member["state_key"]
+                    membership = member.get("content", {}).get("membership", "")
+
+                    # Reset budget and dedup cache
+                    _npc_msg_count.pop((room_id, user_id), None)
+                    _npc_last_text.pop((room_id, user_id), None)
+
+                    if membership in ("leave", "invite", "ban"):
+                        npc_username = user_id.split(":")[0].lstrip("@")
+                        npc_name = npc_username.replace("bonfires-", "").replace("_", " ").title()
+
+                        # Invite + join
+                        await session.post(
+                            f"{self.homeserver}/_matrix/client/v3/rooms/{room_id}/invite",
+                            params={"access_token": self.token},
+                            json={"user_id": user_id},
+                        )
+                        async with session.post(
+                            f"{self.homeserver}/_matrix/client/v3/join/{room_id}",
+                            params={"access_token": as_token, "user_id": user_id},
+                            json={},
+                        ) as join_resp:
+                            if join_resp.status == 200:
+                                logger.info("Rejoined %s to %s", user_id, room_id)
+                                if location:
+                                    await self.ws_hub.broadcast_to_location(location, {
+                                        "type": "npc_joined",
+                                        "npc_name": npc_name,
+                                        "npc_username": npc_username,
+                                        "npc_id": "",
+                                    })
+        except Exception:
+            logger.debug("ensure_npcs_in_room failed for %s", room_id, exc_info=True)
+
+    async def _npc_rejoin_loop(self) -> None:
+        """Periodically ensure all kicked NPCs are back in their rooms."""
+        while self.connected:
+            await asyncio.sleep(30)
+            for room_id in list(self.room_to_location.keys()):
+                try:
+                    await self.ensure_npcs_in_room(room_id)
+                except Exception:
+                    pass
 
     async def register_player(self, player_name: str, player_id: str) -> str | None:
         """Register a Matrix user for a player. Returns access_token or None."""

@@ -30,6 +30,12 @@ def make_round_callback(bridge: MatrixBridge, ws_hub: WebSocketHub):
 
         room_id = await bridge.get_or_create_room(location)
 
+        # Step 0: Ensure all kicked NPCs are back in the room + reset budgets
+        try:
+            await bridge.ensure_npcs_in_room(room_id)
+        except Exception:
+            logger.debug("NPC rejoin failed for %s", location, exc_info=True)
+
         # Step 1: Send each player action as a readable message from the player
         # NPC agents see these and can respond
         for a in actions:

@@ -188,6 +188,18 @@ async def join_session(req: JoinSessionRequest, request: Request):
         if ws_hub:
             ws_hub.player_names[req.player_id] = result.get("player_name", "Unknown")
 
+        # Ensure NPCs are in the room (rejoin any that were kicked)
+        location_name = result.get("location_name", "The Threshold")
+        try:
+            if bridge and bridge.connected:
+                room_id = await bridge.get_or_create_room(location_name)
+                logger.info("Ensuring NPCs in room %s for %s", room_id, location_name)
+                await bridge.ensure_npcs_in_room(room_id)
+            else:
+                logger.info("Bridge not connected, skipping NPC rejoin")
+        except Exception:
+            logger.error("NPC rejoin on session join failed", exc_info=True)
+
         return JoinSessionResponse(
             player_id=req.player_id,
             session_id=f"session-{req.player_id[:8]}",

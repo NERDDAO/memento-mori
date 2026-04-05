@@ -255,7 +255,7 @@ async def get_codex(player_id: str, location_uuid: str | None = None):
     def _bg_enrich():
         import asyncio as _aio
         try:
-            from memento.flows.enrichment import enrich_room_entities
+            from memento.flows.enrichment import enrich_room_entities, enrich_room_art
             from gateway.app import ws_hub as _hub
             if not location_uuid:
                 return
@@ -283,6 +283,44 @@ async def get_codex(player_id: str, location_uuid: str | None = None):
                     })
                 )
                 loop.close()
+
+            # Generate ASCII art for entities missing it (runs after text enrichment
+            # so art crew has populated descriptions to work with)
+            def _on_art_ready(entity_id: str, art_text: str) -> None:
+                if not _hub:
+                    return
+                loop = _aio.new_event_loop()
+                loop.run_until_complete(
+                    _hub.send_to_player(player_id, {
+                        "type": "entity_art",
+                        "entity_id": entity_id,
+                        "lines": art_text.split("\n"),
+                    })
+                )
+                loop.close()
+
+            if _hub:
+                loop = _aio.new_event_loop()
+                loop.run_until_complete(
+                    _hub.send_to_player(player_id, {
+                        "type": "status",
+                        "activity": "Generating art...",
+                    })
+                )
+                loop.close()
+
+            enrich_room_art(location_uuid, on_art_ready=_on_art_ready)
+
+            # Tell client to refresh codex data now that enrichment + art are done
+            if _hub:
+                loop = _aio.new_event_loop()
+                loop.run_until_complete(
+                    _hub.send_to_player(player_id, {
+                        "type": "codex_refresh",
+                    })
+                )
+                loop.close()
+
         except Exception:
             logger.debug("Background enrichment failed", exc_info=True)
 

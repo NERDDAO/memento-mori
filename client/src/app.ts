@@ -6,7 +6,7 @@
 
 import { createInitialState, applyStateUpdate, type GameState } from './state/game-state';
 import { getSession, sendAction, setMessageHandler, setConnectionHandler, GATEWAY_URL } from './state/session';
-import { updateRoundState, type PhaseMessage as RoundPhaseMessage } from './state/round-state';
+import { getRoundState, updateRoundState, type PhaseMessage as RoundPhaseMessage } from './state/round-state';
 import type { WsMessage, PresencePlayer } from './types/ws-messages';
 import { setKnownEntities } from './renderer/text-renderer';
 import { initNarrative, type NarrativeController } from './panels/narrative';
@@ -25,6 +25,7 @@ import { createHeader, type WorldTime } from './ui/header';
 import { createDialog } from './ui/dialog';
 import { createInventoryModal } from './ui/inventory-modal';
 import { createCodexModal } from './ui/codex-modal';
+import { createArtViewer } from './ui/art-viewer';
 import { createStatusBar } from './ui/status';
 import { hasProvider, connectWallet, formatAddress, getAddress } from './chain/wallet';
 import type { RoomMap } from './map/types';
@@ -40,6 +41,7 @@ let eventsFeed: NarrativeController;
 let header: ReturnType<typeof createHeader>;
 let npcDialog: ReturnType<typeof createDialog>;
 let codex: ReturnType<typeof createCodexModal>;
+let artViewer: ReturnType<typeof createArtViewer>;
 let statusBar: ReturnType<typeof createStatusBar>;
 let narrativeWin: ReturnType<typeof createWindow>;
 let eventsWin: ReturnType<typeof createWindow>;
@@ -84,6 +86,9 @@ function renderAllPanels(): void {
 // --- Action handling ---
 async function handleAction(action: string): Promise<void> {
   if (!action.trim() || action.length > 500) return;
+  // Block actions during active round phases (resolving, npc_response)
+  const phase = getRoundState().phase;
+  if (phase !== 'ready' && phase !== 'collecting') return;
   narrative.addBlock(`> ${action}`, 'player-action');
   await sendAction(action);
 }
@@ -186,14 +191,24 @@ function handleMessage(msg: WsMessage): void {
     }
     case 'entity_art': {
       // Cache on the entity in game state
+      const artLines = msg.lines || [];
       if (msg.entity_id && gameState) {
         const npc = gameState.location.npcs.find(n => n.id === msg.entity_id);
         const item = gameState.location.items.find(i => i.id === msg.entity_id);
         const entity = npc || item;
         if (entity) {
-          entity.ascii_art = (msg.lines || []).join('\n');
+          entity.ascii_art = artLines.join('\n');
         }
       }
+      // Update codex modal if it's open
+      if (msg.entity_id && codex?.active) {
+        codex.refreshEntityArt(msg.entity_id, artLines);
+      }
+      break;
+    }
+    case 'codex_refresh': {
+      // Enrichment finished — re-fetch codex data if modal is open
+      if (codex?.active) codex.open();
       break;
     }
     case 'npc_status': {
@@ -237,6 +252,29 @@ function handleMessage(msg: WsMessage): void {
         gameState.location.players = gameState.location.players.filter(p => p.id !== msg.player_id);
         renderPresentPanel(presentWin.panel!, gameState, handleAction);
         narrative.addBlock(`${msg.player_name} departed.`, 'system');
+      }
+      break;
+    }
+    case 'npc_left': {
+      if (gameState) {
+        const leftName = (msg.npc_name as string).toLowerCase();
+        gameState.location.npcs = gameState.location.npcs.filter(n =>
+          n.name.toLowerCase() !== leftName && !n.name.toLowerCase().startsWith(leftName)
+        );
+        renderPresentPanel(presentWin.panel!, gameState, handleAction);
+      }
+      break;
+    }
+    case 'npc_joined': {
+      if (gameState && msg.npc_name) {
+        const joinName = (msg.npc_name as string).toLowerCase();
+        const exists = gameState.location.npcs.some(n =>
+          n.name.toLowerCase() === joinName || n.name.toLowerCase().startsWith(joinName)
+        );
+        if (!exists) {
+          gameState.location.npcs.push({ name: msg.npc_name, id: msg.npc_id || '', role: '' });
+          renderPresentPanel(presentWin.panel!, gameState, handleAction);
+        }
       }
       break;
     }
@@ -514,8 +552,10 @@ document.addEventListener('DOMContentLoaded', () => {
   mapWin.body.appendChild(worldMapWrap);
   initMapPanel(mapCanvasWrap, handleAction);
 
-  // 8b. Codex modal
-  codex = createCodexModal(() => gameState, () => getSession().playerId);
+  // 8b. Art viewer + Codex modal
+  artViewer = createArtViewer();
+  document.body.appendChild(artViewer.el);
+  codex = createCodexModal(() => gameState, () => getSession().playerId, artViewer.open);
   document.body.appendChild(codex.el);
 
   // 'k' key toggles codex modal (when input not focused)

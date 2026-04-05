@@ -56,6 +56,27 @@ def _record_narration(location: str) -> None:
     _last_narration[location] = time.monotonic()
 
 
+# ---------------------------------------------------------------------------
+# NPC response tracker — shared between gateway bridge and round controller
+# ---------------------------------------------------------------------------
+_npc_responses: dict[str, set[str]] = {}
+
+
+def record_npc_responded(location: str, npc_username: str) -> None:
+    """Record that an NPC sent a message at a location during the current round."""
+    _npc_responses.setdefault(location, set()).add(npc_username)
+
+
+def clear_npc_responses(location: str) -> None:
+    """Reset response tracking for a new round at this location."""
+    _npc_responses.pop(location, None)
+
+
+def npc_response_count(location: str) -> int:
+    """Return how many unique NPCs have responded at this location."""
+    return len(_npc_responses.get(location, set()))
+
+
 def query_active_quests(player_uuid: str) -> list[dict]:
     """Query KG for player's active quests via edge traversal (UUID-based)."""
     if not player_uuid:
@@ -192,14 +213,35 @@ class RoundController:
     # ------------------------------------------------------------------
 
     def await_npc_responses(self) -> None:
-        """Block the worker thread to give NPCs time to respond.
+        """Wait for NPC responses — event-driven with timeout.
 
-        The NPC responses end up in room history; the narration crew reads
-        them via context.  Future improvement: actively poll room messages
-        and return early once all expected NPCs have replied.
+        Skips entirely if no NPCs are present. Otherwise polls the shared
+        response tracker and exits early once at least one NPC has responded.
         """
+        from memento.agent_controller import get_agent_controller
+        controller = get_agent_controller()
+        npcs_here = controller.get_npc_user_ids(self.location)
+
+        if not npcs_here:
+            return  # No NPCs at this location — skip the phase
+
         self.emit_phase("npc_response")
-        time.sleep(self.npc_wait)
+        clear_npc_responses(self.location)
+
+        timeout = 30.0
+        min_wait = 3.0
+        poll_interval = 1.0
+        elapsed = 0.0
+
+        while elapsed < timeout:
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+
+            responded = npc_response_count(self.location)
+            if elapsed >= min_wait and responded > 0:
+                # At least one NPC responded — give a brief extra window then move on
+                time.sleep(2.0)
+                break
 
     # ------------------------------------------------------------------
     # Individual crew steps
