@@ -49,9 +49,36 @@ def _seed_ontology() -> None:
         from memento.rpg_types import RPG_ENTITY_TYPES
 
         client = get_client()
-        type_names = list(RPG_ENTITY_TYPES.keys())
-        client.ontology.set_extraction_types(type_names)
-        logger.info("Seeded ontology types: %s", type_names)
+
+        # Convert Pydantic models to OntologyLabel format for Delve
+        entity_labels = []
+        for name, model in RPG_ENTITY_TYPES.items():
+            schema = model.model_json_schema()
+            fields = {}
+            properties = schema.get("properties", {})
+            required_fields = set(schema.get("required", []))
+            for fname, fprop in properties.items():
+                ftype = fprop.get("type", "string")
+                # Map JSON Schema types to OntologyField types
+                type_map = {"string": "str", "integer": "int", "number": "float", "boolean": "bool"}
+                if ftype == "array" and fprop.get("items", {}).get("type") == "string":
+                    resolved_type = "list[str]"
+                else:
+                    resolved_type = type_map.get(ftype, "str")
+                fields[fname] = {
+                    "type": resolved_type,
+                    "description": fprop.get("description", ""),
+                    "required": fname in required_fields,
+                }
+            entity_labels.append({
+                "name": name,
+                "description": model.__doc__ or "",
+                "labels": [name],
+                "fields": fields,
+            })
+
+        client.ontology.set_extraction_types(entity_labels)
+        logger.info("Seeded ontology types: %s", [l["name"] for l in entity_labels])
     except Exception:
         logger.warning("Failed to seed ontology types (non-fatal)", exc_info=True)
 
