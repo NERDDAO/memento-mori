@@ -39,7 +39,7 @@ Round closes (RoundManager batch window or solo fast-path)
 - Event detection replaced by Delve episode extraction with custom types
 - Classification/detector/merge crews eliminated
 - Context crew eliminated (episode summary replaces it)
-- Plausibility check eliminated (KG entity resolution replaces it)
+- Plausibility check eliminated — entity resolution handles structural impossibility (target not here, item not owned); creative impossibility ("I fly to the moon") is handled by the narration crew which narrates failed actions as in-world failures
 - New `CrewRouter` maps extracted types to crew callables
 - NPC wait: fixed 15s sleep replaced by event-driven poll with early exit
 - Narration cooldown: module-level dict replaced by persistent JSON file
