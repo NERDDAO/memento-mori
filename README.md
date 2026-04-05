@@ -233,19 +233,19 @@ The enrichment crew fills missing attributes on room load using a lightweight LL
 
 ### Crews
 
-| Subsystem | Crews | Agents | Purpose |
-|-----------|:-----:|:------:|---------|
-| Context | 1 | 1 | KG search before narration |
-| Event Detection | 6 | 7 | Classify + detect (combat, inventory, quest, world) + merge |
-| Combat | 5 | 7 | Assess, resolve, consequences, permadeath |
-| World Gen | 4 | 6 | Regions, locations, exits |
-| NPC Gen | 4 | 5 | Concept, personality, stats, placement |
-| Item Gen | 3 | 3 | Concept, stats, balance |
-| Quest | 3 | 4 | Design, stages, dialogue |
-| Narrative | 2 | 5 | Narration + memory |
-| Faction | 2 | 3 | Generation + reputation |
-| Enrichment | 1 | 1 | Fill missing entity attributes |
-| **Total** | **31** | **42** | |
+| Subsystem | Crews | Purpose |
+|-----------|:-----:|---------|
+| Context | 1 | KG search before narration |
+| Event Detection | 6 | Classify + detect (combat, inventory, quest, world) + merge |
+| Combat | 5 | Assess, resolve, consequences, permadeath |
+| World Gen | 4 | Regions, locations, exits |
+| NPC Gen | 4 | Concept, personality, stats, placement |
+| Item Gen | 3 | Concept, stats, balance |
+| Quest | 3 | Design, stages, dialogue |
+| Narrative | 2 | Narration + memory |
+| Faction | 2 | Generation + reputation |
+| Enrichment | 1 | Fill missing entity attributes |
+| **Total** | **31** | |
 
 ## License
 
