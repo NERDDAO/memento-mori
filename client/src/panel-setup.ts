@@ -58,29 +58,34 @@ export function initPanels(
   const header = createHeader();
   mount('tui-header', header.el);
 
-  // 2. Create windows
-  const narrativeWin = createWindow({ title: 'Narrative', id: 'narrative-win', className: 'resizable' });
-  const eventsWin = createWindow({ title: 'Events', id: 'events-win' });
-  const mapWin = createWindow({ title: 'Map', id: 'map-win' });
-  const characterWin = createWindow({ title: 'Character', id: 'character-win', className: 'sidebar-win resizable', canvas: true });
-  const inventoryWin = createWindow({ title: 'Inventory', id: 'inventory-win', className: 'sidebar-win resizable', canvas: true });
-  const exitsWin = createWindow({ title: 'World', id: 'exits-win', className: 'sidebar-win resizable', canvas: true });
-  const presentWin = createWindow({ title: 'Present', id: 'present-win', className: 'sidebar-win resizable', canvas: true });
-  const questWin = createWindow({ title: 'Quests', id: 'quest-win', className: 'sidebar-win resizable', canvas: true });
-  const factionWin = createWindow({ title: 'Factions', id: 'faction-win', className: 'sidebar-win resizable', canvas: true });
-  const commandWin = createWindow({ title: 'Command', id: 'command-win' });
+  // 2. Create windows — inline panels are chromeless, overlay panels keep title bars
+  const narrativeWin = createWindow({ title: 'Narrative', id: 'narrative-win', chromeless: true });
+  const eventsWin = createWindow({ title: 'Events', id: 'events-win', chromeless: true });
+  const mapWin = createWindow({ title: 'Map', id: 'map-win', chromeless: true });
+  const characterWin = createWindow({ title: 'Character', id: 'character-win', className: 'sidebar-win', canvas: true, chromeless: true });
+  const inventoryWin = createWindow({ title: 'Inventory', id: 'inventory-win', className: 'sidebar-win', canvas: true, chromeless: true });
+  const presentWin = createWindow({ title: 'Present', id: 'present-win', className: 'sidebar-win', canvas: true, chromeless: true });
+  const commandWin = createWindow({ title: 'Command', id: 'command-win', chromeless: true });
+  // Overlay panels — keep chrome for context when floating
+  const exitsWin = createWindow({ title: 'World', id: 'exits-win', className: 'sidebar-win', canvas: true });
+  const questWin = createWindow({ title: 'Quests', id: 'quest-win', className: 'sidebar-win', canvas: true });
+  const factionWin = createWindow({ title: 'Factions', id: 'faction-win', className: 'sidebar-win', canvas: true });
 
-  // 3. Mount windows by replacing mount divs
+  // 3. Mount windows — inline panels replace mount divs, overlay panels go to body
   mount('narrative-mount', narrativeWin.el);
   mount('events-mount', eventsWin.el);
   mount('map-mount', mapWin.el);
   mount('character-mount', characterWin.el);
   mount('inventory-mount', inventoryWin.el);
-  mount('exits-mount', exitsWin.el);
   mount('present-mount', presentWin.el);
-  mount('quest-mount', questWin.el);
-  mount('faction-mount', factionWin.el);
   mount('command-mount', commandWin.el);
+
+  // Overlay panels — float over the game canvas, toggled by hotkeys
+  for (const win of [exitsWin, questWin, factionWin]) {
+    win.el.classList.add('overlay-panel');
+    document.body.appendChild(win.el);
+    win.hide();
+  }
 
   // Status bar
   const statusBar = createStatusBar();

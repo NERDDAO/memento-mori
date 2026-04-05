@@ -12,6 +12,17 @@ import {
   MONO_FONT,
 } from '../renderer/canvas-text';
 
+// ── Helpers ─────────────────────────────────────────────────────
+
+/** Brighten a hex color by ~30% for hover highlight. */
+function brightenColor(hex: string): string {
+  if (!hex || hex.length < 7) return '#ffffff';
+  const r = Math.min(255, parseInt(hex.slice(1, 3), 16) + 60);
+  const g = Math.min(255, parseInt(hex.slice(3, 5), 16) + 60);
+  const b = Math.min(255, parseInt(hex.slice(5, 7), 16) + 60);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
 // ── Types ────────────────────────────────────────────────────────
 
 export interface HitRegion {
@@ -40,8 +51,11 @@ export class TerminalPanel {
   private prevCells: CharCell[][] = [];
   private lastCells: CharCell[][] = [];  // last painted content for resize repaint
   private hitRegions: HitRegion[] = [];
+  private hoveredRegion: HitRegion | null = null;
   private resizeObserver: ResizeObserver;
   private boundClick: (e: MouseEvent) => void;
+  private boundMouseMove: (e: MouseEvent) => void;
+  private boundMouseLeave: () => void;
 
   constructor(opts: TerminalPanelOptions) {
     this.font = opts.font ?? MONO_FONT;
@@ -70,6 +84,12 @@ export class TerminalPanel {
     // Click handler
     this.boundClick = (e: MouseEvent) => this.handleClick(e);
     this.canvas.addEventListener('click', this.boundClick);
+
+    // Hover handlers
+    this.boundMouseMove = (e: MouseEvent) => this.handleMouseMove(e);
+    this.boundMouseLeave = () => this.handleMouseLeave();
+    this.canvas.addEventListener('mousemove', this.boundMouseMove);
+    this.canvas.addEventListener('mouseleave', this.boundMouseLeave);
   }
 
   /** Recalculate dimensions based on container size. */
@@ -176,9 +196,88 @@ export class TerminalPanel {
     }
   }
 
+  /** Highlight hit region on hover — brighten fg and add underline. */
+  private handleMouseMove(e: MouseEvent): void {
+    const rect = this.canvas.getBoundingClientRect();
+    const col = Math.floor((e.clientX - rect.left) / this.charSize.width);
+    const row = Math.floor((e.clientY - rect.top) / this.charSize.height);
+
+    let found: HitRegion | null = null;
+    for (const region of this.hitRegions) {
+      if (
+        col >= region.col &&
+        col < region.col + region.width &&
+        row >= region.row &&
+        row < region.row + region.height
+      ) {
+        found = region;
+        break;
+      }
+    }
+
+    if (found === this.hoveredRegion) return;
+
+    // Restore previous hovered region
+    if (this.hoveredRegion && this.lastCells.length > 0) {
+      this.repaintRegion(this.hoveredRegion, false);
+    }
+
+    this.hoveredRegion = found;
+
+    // Highlight new hovered region
+    if (found && this.lastCells.length > 0) {
+      this.repaintRegion(found, true);
+      this.canvas.style.cursor = 'pointer';
+    } else {
+      this.canvas.style.cursor = '';
+    }
+  }
+
+  private handleMouseLeave(): void {
+    if (this.hoveredRegion && this.lastCells.length > 0) {
+      this.repaintRegion(this.hoveredRegion, false);
+    }
+    this.hoveredRegion = null;
+    this.canvas.style.cursor = '';
+  }
+
+  /** Repaint a hit region with hover highlight (brighten fg + underline) or restore original. */
+  private repaintRegion(region: HitRegion, highlight: boolean): void {
+    const rowEnd = Math.min(region.row + region.height, this.lastCells.length);
+    for (let r = region.row; r < rowEnd; r++) {
+      const rowCells = this.lastCells[r];
+      if (!rowCells) continue;
+      const colEnd = Math.min(region.col + region.width, rowCells.length);
+      for (let c = region.col; c < colEnd; c++) {
+        const cell = rowCells[c];
+        if (!cell) continue;
+        const px = c * this.charSize.width;
+        const py = r * this.charSize.height;
+        this.ctx.clearRect(px, py, this.charSize.width, this.charSize.height);
+        if (highlight) {
+          const brightened: CharCell = {
+            char: cell.char,
+            fg: brightenColor(cell.fg),
+            bg: cell.bg,
+            attrs: (cell.attrs ?? 0) | 4, // add underline
+          };
+          fillCell(this.ctx, c, r, brightened, this.charSize);
+        } else {
+          fillCell(this.ctx, c, r, cell, this.charSize);
+          // Also update prevCells to match so diff paint works correctly
+          if (this.prevCells[r]?.[c]) {
+            this.prevCells[r][c] = { ...cell };
+          }
+        }
+      }
+    }
+  }
+
   /** Tear down observers and listeners. */
   destroy(): void {
     this.resizeObserver.disconnect();
     this.canvas.removeEventListener('click', this.boundClick);
+    this.canvas.removeEventListener('mousemove', this.boundMouseMove);
+    this.canvas.removeEventListener('mouseleave', this.boundMouseLeave);
   }
 }

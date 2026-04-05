@@ -6,6 +6,8 @@ export interface WindowOptions {
   className?: string;
   scrollable?: boolean;
   canvas?: boolean;
+  /** Skip title bar for seamless unified layout */
+  chromeless?: boolean;
 }
 
 export interface Window {
@@ -24,15 +26,17 @@ export function createWindow(opts: WindowOptions): Window {
   el.className = `win${opts.className ? ` ${opts.className}` : ''}`;
   if (opts.id) el.id = opts.id;
 
-  const titleBar = document.createElement('div');
-  titleBar.className = 'win-title';
-  titleBar.textContent = `\u2500 ${opts.title} \u2500`;
+  let titleBar: HTMLElement | null = null;
+  if (!opts.chromeless) {
+    titleBar = document.createElement('div');
+    titleBar.className = 'win-title';
+    titleBar.textContent = `\u2500 ${opts.title} \u2500`;
+    el.appendChild(titleBar);
+  }
 
   const body = document.createElement('div');
   body.className = 'win-body';
   if (opts.scrollable) body.style.overflowY = 'auto';
-
-  el.appendChild(titleBar);
   el.appendChild(body);
 
   // Create canvas-backed panel when requested
@@ -46,7 +50,7 @@ export function createWindow(opts: WindowOptions): Window {
     body,
     panel,
     setTitle(title: string) {
-      titleBar.textContent = `\u2500 ${title} \u2500`;
+      if (titleBar) titleBar.textContent = `\u2500 ${title} \u2500`;
     },
     show() { el.style.display = ''; },
     hide() { el.style.display = 'none'; },

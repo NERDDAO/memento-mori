@@ -176,7 +176,7 @@ document.addEventListener('DOMContentLoaded', () => {
   } = panels);
 
   // Hotkeys: m (map), i (inventory), k (codex), narrative-entity-click, npc-name-click
-  initHotkeys({ mapWin, invModal, codex, npcDialog, narrative });
+  initHotkeys({ exitsWin, questWin, factionWin, invModal, codex, npcDialog, narrative });
 
   // 9. Wire handlers
   const handleMessage = createMessageHandler({
@@ -215,7 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
     overlays.dismiss('death');
     overlays.show('char-create');
     narrative = initNarrative(narrativeWin.body);
-    initHotkeys({ mapWin, invModal, codex, npcDialog, narrative });
+    initHotkeys({ exitsWin, questWin, factionWin, invModal, codex, npcDialog, narrative });
     (document.getElementById('char-name-input') as HTMLInputElement).focus();
   });
 
