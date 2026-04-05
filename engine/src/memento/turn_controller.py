@@ -162,7 +162,15 @@ class TurnController:
             art = result.raw.strip()
 
             if art:
-                client.kg.update_entity(self.location_uuid, {"ascii_art": art})
+                # Get current entity to preserve name/labels
+                entity = client.kg.get_entity(self.location_uuid)
+                client.kg.update_entity(
+                    self.location_uuid,
+                    entity.get("name", self.location),
+                    entity.get("labels", ["Location"]),
+                    entity.get("summary", ""),
+                    attributes={"ascii_art": art},
+                )
                 self.transport.emit_art(self.location, art)
         except Exception:
             logger.warning("Art generation failed for %s", self.location, exc_info=True)
