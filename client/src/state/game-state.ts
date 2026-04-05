@@ -21,6 +21,8 @@ export interface LocationEntity {
   id: string;
   role?: string;
   ascii_art?: string;  // cached ASCII art
+  x?: number;
+  y?: number;
 }
 
 export interface InventoryItem {
@@ -118,6 +120,8 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
         id: n.id || '',
         role: n.role || '',
         ascii_art: existing?.ascii_art,
+        x: n.x,
+        y: n.y,
       };
     });
   }
@@ -129,6 +133,8 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
         id: i.id || '',
         role: i.role || '',
         ascii_art: existing?.ascii_art,
+        x: i.x,
+        y: i.y,
       };
     });
   }
@@ -165,6 +171,8 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
           id: n.id || '',
           role: n.role || '',
           ascii_art: existing?.ascii_art,
+          x: n.x,
+          y: n.y,
         };
       });
     }
@@ -175,6 +183,8 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
           name: i.name || '',
           id: i.id || '',
           ascii_art: existing?.ascii_art,
+          x: i.x,
+          y: i.y,
         };
       });
     }

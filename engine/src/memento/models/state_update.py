@@ -19,6 +19,8 @@ class EntityRefUpdate(BaseModel):
     id: str = ""
     role: str = ""
     ascii_art: str | None = None  # cached ASCII art for this entity
+    x: int = 0
+    y: int = 0
 
 
 class InventoryItemUpdate(BaseModel):

@@ -29,6 +29,8 @@ from memento.models.state_update import (
     CombatEvent,
     InventoryEvent,
     EventSummary,
+    QuestSummary,
+    FactionStanding,
 )
 
 OUTPUT = Path(__file__).parent.parent / "client" / "src" / "types" / "schema.generated.ts"
@@ -91,8 +93,43 @@ def main():
         CombatEvent,
         InventoryEvent,
         EventSummary,
+        QuestSummary,
+        FactionStanding,
         StateUpdate,
     ]
+
+    # Hand-authored sub-interfaces for RoomMap dict fields (not in Pydantic schema)
+    room_map_subtypes = """\
+export interface RoomMapNpc {
+  id?: string;
+  name?: string;
+  x?: number;
+  y?: number;
+  ch?: string;
+}
+
+export interface RoomMapItem {
+  id?: string;
+  name?: string;
+  x?: number;
+  y?: number;
+  ch?: string;
+}
+
+export interface RoomMapExit {
+  direction?: string;
+  target?: string;
+  target_id?: string;
+  x?: number;
+  y?: number;
+  ch?: string;
+}
+
+export interface RoomMapSpawn {
+  x?: number;
+  y?: number;
+}
+"""
 
     parts = [
         "// AUTO-GENERATED — do not edit manually.",
@@ -105,6 +142,9 @@ def main():
         schema = model.model_json_schema()
         parts.append(model_to_ts(model, schema))
         parts.append("")
+        # Insert hand-authored RoomMap sub-interfaces after RoomMapUpdate
+        if model is RoomMapUpdate:
+            parts.append(room_map_subtypes)
 
     parts.append(f"export const SCHEMA_VERSION = {StateUpdate.model_fields['schema_version'].default};")
     parts.append("")

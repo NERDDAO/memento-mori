@@ -51,7 +51,9 @@ function applyStateUpdate(state, update) {
         name: n.name || "",
         id: n.id || "",
         role: n.role || "",
-        ascii_art: existing?.ascii_art
+        ascii_art: existing?.ascii_art,
+        x: n.x,
+        y: n.y
       };
     });
   }
@@ -62,7 +64,9 @@ function applyStateUpdate(state, update) {
         name: i.name || "",
         id: i.id || "",
         role: i.role || "",
-        ascii_art: existing?.ascii_art
+        ascii_art: existing?.ascii_art,
+        x: i.x,
+        y: i.y
       };
     });
   }
@@ -99,7 +103,9 @@ function applyStateUpdate(state, update) {
           name: n.name || "",
           id: n.id || "",
           role: n.role || "",
-          ascii_art: existing?.ascii_art
+          ascii_art: existing?.ascii_art,
+          x: n.x,
+          y: n.y
         };
       });
     }
@@ -109,7 +115,9 @@ function applyStateUpdate(state, update) {
         return {
           name: i.name || "",
           id: i.id || "",
-          ascii_art: existing?.ascii_art
+          ascii_art: existing?.ascii_art,
+          x: i.x,
+          y: i.y
         };
       });
     }
@@ -6875,16 +6883,28 @@ function handleMessage(msg) {
       break;
     }
     case "position_update": {
-      if (gameState && gameState.roomMap && msg.entity_id) {
-        const npc = gameState.roomMap.npcs.find((n) => n.id === msg.entity_id);
-        if (npc) {
-          npc.x = msg.x;
-          npc.y = msg.y;
+      if (gameState && msg.entity_id) {
+        if (gameState.roomMap) {
+          const npc = gameState.roomMap.npcs.find((n) => n.id === msg.entity_id);
+          if (npc) {
+            npc.x = msg.x;
+            npc.y = msg.y;
+          }
+          const item = gameState.roomMap.items.find((i) => i.id === msg.entity_id);
+          if (item) {
+            item.x = msg.x;
+            item.y = msg.y;
+          }
         }
-        const item = gameState.roomMap.items.find((i) => i.id === msg.entity_id);
-        if (item) {
-          item.x = msg.x;
-          item.y = msg.y;
+        const locNpc = gameState.location.npcs.find((n) => n.id === msg.entity_id);
+        if (locNpc) {
+          locNpc.x = msg.x;
+          locNpc.y = msg.y;
+        }
+        const locItem = gameState.location.items.find((i) => i.id === msg.entity_id);
+        if (locItem) {
+          locItem.x = msg.x;
+          locItem.y = msg.y;
         }
         updateMap(gameState, handleAction);
       }

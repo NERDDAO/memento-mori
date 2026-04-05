@@ -187,9 +187,11 @@ export function createCodexModal(
       _selectedId = currentLoc?.id || (_allEntities.length ? _allEntities[0].id : null);
     }
     if (_selectedId && !_allEntities.find(e => e.id === _selectedId)) {
+      // Selected entity no longer exists — fall back to first
       _selectedId = _allEntities.length ? _allEntities[0].id : null;
-    } else {
-      _selectedId = null;
+    } else if (!_selectedId) {
+      // No selection — pick first entity
+      _selectedId = _allEntities.length ? _allEntities[0].id : null;
     }
 
     render();
