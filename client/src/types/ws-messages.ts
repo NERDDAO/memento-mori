@@ -51,6 +51,7 @@ export interface StatusMessage {
   type: 'status';
   tick?: number;
   chain?: boolean;
+  activity?: string;
 }
 
 export interface PlayerJoinedMessage {
@@ -107,6 +108,16 @@ export interface PositionUpdateMessage {
   y: number;
 }
 
+export interface EpisodeFeedMessage {
+  type: 'episode_feed';
+  episode_uuid: string;
+  agent_id: string;
+  name: string;
+  summary: string;
+  location: string;
+  timestamp: string;
+}
+
 export type WsMessage =
   | NarrativeMessage
   | DeathFeedMessage
@@ -123,4 +134,5 @@ export type WsMessage =
   | CodexRefreshMessage
   | NpcLeftMessage
   | NpcJoinedMessage
-  | PositionUpdateMessage;
+  | PositionUpdateMessage
+  | EpisodeFeedMessage;

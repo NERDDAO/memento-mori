@@ -336,6 +336,11 @@ function handleMessage(msg: WsMessage): void {
       if (invModal.active) invModal.refresh();
       break;
     }
+    case 'episode_feed': {
+      const label = msg.location ? `[Chronicle · ${msg.location}]` : '[Chronicle]';
+      eventsFeed.addBlock(`${label} ${msg.name}: ${msg.summary}`, 'event');
+      break;
+    }
     default:
       console.log('Unknown message:', msg);
   }
