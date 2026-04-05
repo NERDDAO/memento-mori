@@ -118,14 +118,6 @@ export function initPanels(
   document.body.appendChild(invModal.el);
   setManageInventoryCallback(() => invModal.open());
 
-  // 'i' key toggles inventory modal (when input not focused)
-  document.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'i' && document.activeElement?.tagName !== 'INPUT') {
-      if (invModal.active) invModal.close();
-      else invModal.open();
-    }
-  });
-
   // Narrative + Events feed
   const narrative = initNarrative(narrativeWin.body);
   const eventsFeed = initNarrative(eventsWin.body);
@@ -135,12 +127,6 @@ export function initPanels(
   document.body.appendChild(artViewer.el);
   const codex = createCodexModal(getGameState, () => getSession().playerId, artViewer.open);
   document.body.appendChild(codex.el);
-
-  // Entity clicks from canvas narrative panel
-  narrative.canvas.addEventListener('narrative-entity-click', (e: Event) => {
-    const { entityId } = (e as CustomEvent).detail;
-    codex.open(entityId || undefined);
-  });
 
   // Command input
   commandWin.body.innerHTML = `
@@ -158,21 +144,6 @@ export function initPanels(
   mapCanvasWrap.className = 'map-canvas-wrap';
   mapWin.body.appendChild(mapCanvasWrap);
   initMapPanel(mapCanvasWrap, handleAction);
-
-  // 'm' key toggles map (when input not focused)
-  document.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'm' && document.activeElement?.tagName !== 'INPUT') {
-      mapWin.toggle();
-    }
-  });
-
-  // 'k' key toggles codex modal (when input not focused)
-  document.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'k' && document.activeElement?.tagName !== 'INPUT') {
-      if (codex.active) codex.close();
-      else codex.open();
-    }
-  });
 
   return {
     header,

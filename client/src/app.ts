@@ -30,6 +30,7 @@ import { type OverlayManager } from './ui/overlay';
 import { startGame } from './flows/session-flow';
 import { initInventoryApi } from './state/inventory-api';
 import { initPanels } from './panel-setup';
+import { initHotkeys } from './hotkeys';
 
 let gameState: GameState;
 let narrative: NarrativeController;
@@ -274,6 +275,9 @@ document.addEventListener('DOMContentLoaded', () => {
     artViewer,
   } = panels);
 
+  // Hotkeys: m (map), i (inventory), k (codex), narrative-entity-click
+  initHotkeys({ mapWin, invModal, codex, narrative });
+
   // 9. Wire handlers
   const handleMessage = createMessageHandler({
     getGameState: () => gameState,
@@ -309,10 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
     overlays.dismiss('death');
     overlays.show('char-create');
     narrative = initNarrative(narrativeWin.body);
-    narrative.canvas.addEventListener('narrative-entity-click', (e: Event) => {
-      const { entityId } = (e as CustomEvent).detail;
-      codex.open(entityId || undefined);
-    });
+    initHotkeys({ mapWin, invModal, codex, narrative });
     (document.getElementById('char-name-input') as HTMLInputElement).focus();
   });
 
