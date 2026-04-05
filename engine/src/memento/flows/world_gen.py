@@ -13,6 +13,7 @@ from memento.flows.npc_gen import NPCGenerationFlow
 from memento.flows.item_gen import ItemGenerationFlow
 from memento.log import get_logger
 from memento.room_map import extract_room_map, generate_fallback_map
+from memento.room_manifest import get_room_manifest
 
 logger = get_logger(__name__)
 
@@ -102,6 +103,35 @@ class WorldGenFlow(Flow[WorldGenState]):
             item_flow = ItemGenerationFlow()
             item_flow.state.location_name = loc_info.name
             item_flow.kickoff()
+
+            # Back-fill UUIDs into room_map from the KG manifest
+            if loc_info.uuid and loc_info.room_map:
+                try:
+                    manifest = get_room_manifest(loc_info.uuid)
+                    for manifest_npc in manifest.get("npcs", []):
+                        npc_name = manifest_npc.get("name", "")
+                        npc_id = manifest_npc.get("id", "")
+                        if not npc_id:
+                            continue
+                        for rm_npc in loc_info.room_map.get("npcs", []):
+                            if rm_npc.get("name", "").lower() == npc_name.lower():
+                                rm_npc["id"] = npc_id
+                                break
+                    for manifest_item in manifest.get("items", []):
+                        item_name = manifest_item.get("name", "")
+                        item_id = manifest_item.get("id", "")
+                        if not item_id:
+                            continue
+                        for rm_item in loc_info.room_map.get("items", []):
+                            if rm_item.get("name", "").lower() == item_name.lower():
+                                rm_item["id"] = item_id
+                                break
+                except Exception:
+                    logger.warning(
+                        "Failed to back-fill UUIDs into room_map for %s",
+                        loc_info.name,
+                        exc_info=True,
+                    )
 
         return "populated"
 
