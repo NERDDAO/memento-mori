@@ -1,4 +1,8 @@
 // client/src/ui/header.ts
+import type { PanelResult } from '../canvas/types';
+import { coloredRow } from '../panels/panel-utils';
+import { theme } from '../renderer/theme';
+
 export interface WorldTime {
   moon_phase: string;
   moon_icon: string;
@@ -35,6 +39,29 @@ export function createHeader(): Header {
       dateEl.textContent = `${time.moon_phase}  \u00B7  ${ordinal(time.day_number)} of ${time.month}  \u00B7  ${time.time_of_day}`;
     },
   };
+}
+
+export function renderHeader(cols: number, state: { title: string; worldTime?: WorldTime }): PanelResult {
+  const titleText = state.title;
+  let timeText = '';
+  if (state.worldTime) {
+    const wt = state.worldTime;
+    timeText = `${wt.moon_icon} ${wt.moon_phase}  ·  ${ordinal(wt.day_number)} of ${wt.month}  ·  ${wt.time_of_day}`;
+  }
+
+  // Build: [title left] [spaces] [time right]
+  const spacerLen = Math.max(1, cols - titleText.length - timeText.length);
+  const spacer = ' '.repeat(spacerLen);
+
+  const segments: Array<{ text: string; fg: string }> = [
+    { text: titleText, fg: theme.colors.npc },
+    { text: spacer, fg: theme.colors.primary },
+  ];
+  if (timeText) {
+    segments.push({ text: timeText, fg: theme.colors.dim });
+  }
+
+  return { cells: [coloredRow(segments, cols)] };
 }
 
 function ordinal(n: number): string {

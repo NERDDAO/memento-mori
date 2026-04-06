@@ -4,6 +4,63 @@
  */
 
 import { onRoundStateChange, type RoundState } from '../state/round-state';
+import type { PanelResult } from '../canvas/types';
+import { coloredRow } from '../panels/panel-utils';
+import { theme } from '../renderer/theme';
+
+export interface StatusState {
+  phase: string;
+  tick: number;
+  chain: boolean;
+  activity: string;
+  location: string;
+}
+
+export function renderStatusBar(cols: number, state: StatusState): PanelResult {
+  // Left: phase + optional activity
+  let phaseText: string;
+  switch (state.phase) {
+    case 'ready':
+      phaseText = state.location ? `✓ Ready · ${state.location}` : '✓ Ready';
+      break;
+    case 'collecting':
+      phaseText = `⟳ Collecting · ${state.tick}s`;
+      break;
+    case 'resolving':
+      phaseText = '⟳ Resolving';
+      break;
+    case 'npc_response':
+      phaseText = '⟳ NPCs Responding';
+      break;
+    default:
+      phaseText = state.phase;
+  }
+  if (state.activity) {
+    phaseText += `  ✨ ${state.activity}`;
+  }
+
+  // Center: chain status
+  const chainText = state.chain ? '◆ Redstone: synced' : '◇ Redstone: offline';
+  const chainColor = state.chain ? theme.colors.heal : theme.colors.dim;
+
+  // Right: tick counter
+  const tickText = `☽ Tick ${state.tick}`;
+
+  // Layout: left | center padded | right
+  const innerSpace = cols - phaseText.length - chainText.length - tickText.length;
+  const leftPad = Math.max(1, Math.floor(innerSpace / 2));
+  const rightPad = Math.max(1, innerSpace - leftPad);
+
+  const segments: Array<{ text: string; fg: string }> = [
+    { text: phaseText, fg: theme.colors.system },
+    { text: ' '.repeat(leftPad), fg: theme.colors.primary },
+    { text: chainText, fg: chainColor },
+    { text: ' '.repeat(rightPad), fg: theme.colors.primary },
+    { text: tickText, fg: theme.colors.dim },
+  ];
+
+  return { cells: [coloredRow(segments, cols)] };
+}
 
 export interface StatusBar {
   el: HTMLElement;
