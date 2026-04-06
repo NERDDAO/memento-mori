@@ -9,14 +9,14 @@ import type { Region } from './types';
  *
  * Row allocation (inside frame, top→bottom):
  *   row 1          : Header
- *   row 2          : hDiv0  (header/status divider)
- *   row 3          : Status
- *   row 4          : hDiv1  (status/top-zone divider)
- *   rows 5..N      : Top zone  (2/3 of remaining content rows)
- *   row N+1        : hDiv2  (top/bottom zone divider)
+ *   row 2          : hDiv0  (header/top-zone divider)
+ *   rows 3..N      : Top zone  (2/3 of remaining content rows)
+ *   row N+1        : hDiv1  (top/bottom zone divider)
  *   rows N+2..M    : Bottom zone  (1/3)
- *   row M+1        : hDiv3  (bottom zone/input divider)
+ *   row M+1        : hDiv2  (bottom zone/input divider)
  *   row M+2        : Input
+ *   row M+3        : hDiv3  (input/status divider)
+ *   row M+4        : Status
  *
  * Column allocation (inside frame):
  *   col 1..presentCols          : Present panel
@@ -60,35 +60,35 @@ export function computeRegions(totalCols: number, totalRows: number): Map<string
   const colSidebar  = colVDiv1 + 1;                             // start of Sidebar
 
   // ── Row layout ───────────────────────────────────────────────────
-  // Fixed rows consumed before content zones:
+  // Fixed rows:
   //   row 0  : outer top border
   //   row 1  : Header
-  //   row 2  : hDiv0
-  //   row 3  : Status
-  //   row 4  : hDiv1
-  // Fixed rows after content zones:
-  //   hDiv3  : bottom zone / input divider
-  //   Input  : last content row
-  //   row (totalRows-1) : outer bottom border
-  // => content zone rows = totalRows - 2(frame) - 1(header) - 1(hDiv0) - 1(status) - 1(hDiv1)
-  //                                              - 1(hDiv3)  - 1(input)
-  //                       = totalRows - 8
-  const contentZoneRows = Math.max(totalRows - 8, 2);
+  //   row 2  : hDiv0 (header/top-zone)
+  //   ...    : Top zone
+  //   ...    : hDiv1 (top/bottom zone)
+  //   ...    : Bottom zone
+  //   ...    : hDiv2 (bottom zone/input)
+  //   ...    : Input
+  //   ...    : hDiv3 (input/status)
+  //   ...    : Status
+  //   last   : outer bottom border
+  // Fixed: 2(frame) + 1(header) + 4(hDivs) + 1(input) + 1(status) = 9
+  const contentZoneRows = Math.max(totalRows - 9, 2);
 
-  // Split content zone: top 2/3, bottom 1/3
+  // Split content zone: top 2/3, bottom 1/3 (minus 1 for hDiv1 between them)
   const topZoneRows    = Math.max(Math.floor(contentZoneRows * 2 / 3), 3);
-  const bottomZoneRows = Math.max(contentZoneRows - topZoneRows - 1, 1); // -1 for hDiv2
+  const bottomZoneRows = Math.max(contentZoneRows - topZoneRows, 1);
 
   // Absolute row positions
   const rowHeader   = 1;
   const rowHDiv0    = 2;
-  const rowStatus   = 3;
-  const rowHDiv1    = 4;
-  const rowTopStart = 5;                                          // first row of top zone
-  const rowHDiv2    = rowTopStart + topZoneRows;                  // divider between top/bottom
-  const rowBotStart = rowHDiv2 + 1;                               // first row of bottom zone
-  const rowHDiv3    = rowBotStart + bottomZoneRows;               // divider before input
-  const rowInput    = rowHDiv3 + 1;
+  const rowTopStart = 3;
+  const rowHDiv1    = rowTopStart + topZoneRows;                  // divider between top/bottom
+  const rowBotStart = rowHDiv1 + 1;
+  const rowHDiv2    = rowBotStart + bottomZoneRows;               // divider before input
+  const rowInput    = rowHDiv2 + 1;
+  const rowHDiv3    = rowInput + 1;                               // divider before status
+  const rowStatus   = rowHDiv3 + 1;
 
   // ── Sidebar internal row split ───────────────────────────────────
   // Sidebar panels only live in the top zone
@@ -118,9 +118,9 @@ export function computeRegions(totalCols: number, totalRows: number): Map<string
   });
 
   add({
-    name: 'status',
+    name: 'input',
     col: colPresent,
-    row: rowStatus,
+    row: rowInput,
     cols: innerCols,
     rows: 1,
     type: 'grid',
@@ -128,9 +128,9 @@ export function computeRegions(totalCols: number, totalRows: number): Map<string
   });
 
   add({
-    name: 'input',
+    name: 'status',
     col: colPresent,
-    row: rowInput,
+    row: rowStatus,
     cols: innerCols,
     rows: 1,
     type: 'grid',
