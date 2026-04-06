@@ -7220,10 +7220,6 @@ function renderAllPanels() {
   if (presentRegion) {
     uc.setRegionContent("present", renderPresentPanel(presentRegion.cols, presentRegion.rows, gameState));
   }
-  const vpRegion = r("viewport");
-  if (vpRegion) {
-    uc.setRegionContent("viewport", renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
-  }
   updateMap(gameState, handleAction);
   const mapCanvas = getMapCanvas();
   if (mapCanvas && mapCanvas.width > 0) {

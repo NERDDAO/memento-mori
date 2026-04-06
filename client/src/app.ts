@@ -126,11 +126,6 @@ function renderAllPanels(): void {
     uc.setRegionContent('present', renderPresentPanel(presentRegion.cols, presentRegion.rows, gameState));
   }
 
-  const vpRegion = r('viewport');
-  if (vpRegion) {
-    uc.setRegionContent('viewport', renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
-  }
-
   updateMap(gameState, handleAction);
 
   // Composite map canvas into viewport region
