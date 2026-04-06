@@ -9,37 +9,18 @@ import { getSession } from './state/session';
 import { updateRoundState, type PhaseMessage as RoundPhaseMessage } from './state/round-state';
 import type { WsMessage } from './types/ws-messages';
 import type { NarrativeController } from './panels/narrative';
-import { renderCharacterPanel } from './panels/character';
-import { renderInventoryPanel } from './panels/inventory';
-import { renderWorldMapPanel } from './panels/worldmap';
-import { renderPresentPanel } from './panels/present';
-import { renderQuestLogPanel } from './panels/questlog';
-import { renderFactionsPanel } from './panels/factions';
-import { updateMap } from './panels/map';
 import type { WorldTime } from './ui/header';
-import type { TerminalPanel } from './ui/terminal-panel';
-
-/** Minimal panel-bearing window interface — avoids importing full Window type. */
-interface PanelWindow {
-  panel?: TerminalPanel;
-  setTitle(title: string): void;
-}
 
 /** All shared state the message handler needs from app.ts. */
 export interface AppRefs {
   getGameState(): GameState | undefined;
   narrative: NarrativeController;
   eventsFeed: NarrativeController;
+  renderAllPanels(): void;
   header: { updateTime(t: WorldTime): void };
   statusBar: { setTick(t: number): void; setChain(c: boolean): void; setActivity(a: string): void };
   codex: { active: boolean; refreshEntityArt(entityId: string, lines: string[]): void };
   invModal: { active: boolean; refresh(): void };
-  characterWin: PanelWindow;
-  inventoryWin: PanelWindow;
-  exitsWin: PanelWindow;
-  presentWin: PanelWindow;
-  questWin: PanelWindow;
-  factionWin: PanelWindow;
   handleAction: (action: string) => Promise<void>;
   registerMapEntities: (map: import('./map/types').RoomMap | null) => void;
   fetchPlayerWorldMap: () => Promise<void>;
@@ -56,20 +37,6 @@ export function getLastNpcMessage(npcName: string): string {
 }
 
 export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
-
-  /** Re-render every side panel from current game state. */
-  function renderAllPanels(): void {
-    const gameState = refs.getGameState();
-    if (!gameState) return;
-    refs.characterWin.setTitle(gameState.player.name || 'Character');
-    renderCharacterPanel(refs.characterWin.panel!, gameState);
-    renderInventoryPanel(refs.inventoryWin.panel!, gameState);
-    renderWorldMapPanel(refs.exitsWin.panel!, gameState, refs.handleAction);
-    renderPresentPanel(refs.presentWin.panel!, gameState, refs.handleAction);
-    renderQuestLogPanel(refs.questWin.panel!, gameState.quests);
-    renderFactionsPanel(refs.factionWin.panel!, gameState.factions);
-    updateMap(gameState, refs.handleAction);
-  }
 
   return function handleMessage(msg: WsMessage): void {
     const gameState = refs.getGameState();
@@ -106,7 +73,7 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
             refs.statusBar.setTick(msg.state_update.world_time.tick || 0);
           }
 
-          renderAllPanels();
+          refs.renderAllPanels();
           refs.fetchPlayerWorldMap();
 
           // Display event notifications in the events feed
@@ -169,7 +136,6 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
       }
       case 'codex_refresh': {
         // Enrichment finished — no-op while codex is open (art updates come via entity_art).
-        // Data will be fresh next time codex is opened.
         break;
       }
       case 'npc_status': {
@@ -202,7 +168,7 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
           const exists = gameState.location.players.some(p => p.id === msg.player_id);
           if (!exists) {
             gameState.location.players.push({ name: msg.player_name, id: msg.player_id });
-            renderPresentPanel(refs.presentWin.panel!, gameState, refs.handleAction);
+            refs.renderAllPanels();
             refs.narrative.addBlock(`${msg.player_name} arrived.`, 'system');
           }
         }
@@ -211,7 +177,7 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
       case 'player_left': {
         if (gameState) {
           gameState.location.players = gameState.location.players.filter(p => p.id !== msg.player_id);
-          renderPresentPanel(refs.presentWin.panel!, gameState, refs.handleAction);
+          refs.renderAllPanels();
           refs.narrative.addBlock(`${msg.player_name} departed.`, 'system');
         }
         break;
@@ -219,7 +185,7 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
       case 'position_update': {
         if (gameState && msg.entity_id) {
           syncEntityField(gameState, msg.entity_id, { x: msg.x, y: msg.y });
-          updateMap(gameState, refs.handleAction);
+          refs.renderAllPanels();
         }
         break;
       }
@@ -229,7 +195,7 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
           gameState.location.npcs = gameState.location.npcs.filter(n =>
             n.name.toLowerCase() !== leftName && !n.name.toLowerCase().startsWith(leftName)
           );
-          renderPresentPanel(refs.presentWin.panel!, gameState, refs.handleAction);
+          refs.renderAllPanels();
         }
         break;
       }
@@ -241,7 +207,7 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
           );
           if (!exists) {
             gameState.location.npcs.push({ name: msg.npc_name, id: msg.npc_id || '', role: '' });
-            renderPresentPanel(refs.presentWin.panel!, gameState, refs.handleAction);
+            refs.renderAllPanels();
           }
         }
         break;
@@ -252,7 +218,7 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
             name: p.player_name,
             id: p.player_id,
           }));
-          renderPresentPanel(refs.presentWin.panel!, gameState, refs.handleAction);
+          refs.renderAllPanels();
         }
         break;
       }
@@ -260,15 +226,13 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
         // Standalone state_update (from inventory actions, not embedded in narrative)
         if (msg.state_update && gameState) {
           applyStateUpdate(gameState, msg.state_update);
-          renderAllPanels();
+          refs.renderAllPanels();
           refs.fetchPlayerWorldMap();
           if (refs.invModal.active) refs.invModal.refresh();
         }
         break;
       }
       case 'room_items_changed': {
-        // Ground items changed — refresh room manifest
-        // The next state_update will have the updated room_map
         if (refs.invModal.active) refs.invModal.refresh();
         break;
       }

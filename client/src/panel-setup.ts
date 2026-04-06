@@ -168,16 +168,25 @@ export function initPanels(
   const setViewportCard: ViewportSetter = (card) => {
     currentCard = card;
     currentScene = null; // card takes priority, clear scene
-    renderViewport(viewportWin.panel!, currentCard, currentScene);
+    if (viewportWin.panel) {
+      const { cols, rows } = viewportWin.panel;
+      renderViewport(cols, rows, currentCard, currentScene);
+    }
   };
 
   const setViewportScene = (lines: string[]) => {
     currentScene = lines;
     currentCard = null;
-    renderViewport(viewportWin.panel!, currentCard, currentScene);
+    if (viewportWin.panel) {
+      const { cols, rows } = viewportWin.panel;
+      renderViewport(cols, rows, currentCard, currentScene);
+    }
   };
 
-  renderViewport(viewportWin.panel!, null, null);
+  if (viewportWin.panel) {
+    const { cols, rows } = viewportWin.panel;
+    renderViewport(cols, rows, null, null);
+  }
 
   return {
     header,

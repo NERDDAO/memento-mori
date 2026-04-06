@@ -53,8 +53,9 @@
 
     /* TUI Shell — floating terminal with extreme depth */
     #app {
-      display: grid; grid-template-rows: auto 1fr auto auto auto;
-      height: calc(100vh - 64px); gap: 2px; padding: 6px;
+      position: relative;
+      display: flex; flex-direction: column;
+      height: calc(100vh - 64px);
       margin: 32px 48px;
       background: var(--bg-primary);
       border: 1px solid #2a2a3a;
@@ -78,48 +79,26 @@
         inset 0 0 60px rgba(0,0,0,0.4);
     }
 
-    /* Header */
-    .tui-header {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 4px 12px; color: var(--text-dim); font-size: 12px;
-      border: 1px solid var(--border); border-radius: 2px; background: var(--bg-primary);
-    }
-    .tui-header .header-title { color: var(--accent); letter-spacing: 2px; font-weight: bold; }
-    .tui-header .header-moon { margin-right: 6px; }
-
-    /* Main grid — ASCII art centered, narrative dominant */
+    /* Main canvas fills entire app area */
     #tui-main {
-      display: grid;
-      grid-template-columns: 160px 1fr 240px;
-      grid-template-rows: 2fr 1fr;
-      grid-template-areas:
-        "present  viewport  sidebar"
-        "narrative narrative events";
-      gap: 2px;
-      overflow: hidden; min-height: 0;
+      flex: 1; min-height: 0;
+      position: relative;
+      overflow: hidden;
     }
-    #present-mount { grid-area: present; min-height: 0; overflow-y: auto; }
-    #viewport-mount {
-      grid-area: viewport; min-height: 0; overflow: hidden;
-      display: flex; flex-direction: column;
+
+    /* Action input floats over the canvas input region */
+    #action-input {
+      position: absolute;
+      left: 0; bottom: 0;
+      background: none; border: none;
+      color: var(--text-primary);
+      font-family: 'Courier New', Consolas, monospace;
+      font-size: 13px;
+      outline: none;
+      padding: 0 4px;
+      z-index: 10;
     }
-    /* Map + ASCII viewer stacked in the center viewport */
-    #map-mount {
-      flex: 3; min-height: 0; overflow: hidden;
-      display: flex; align-items: center; justify-content: center;
-    }
-    #ascii-viewport-mount {
-      flex: 2; min-height: 80px; overflow: hidden;
-    }
-    #sidebar-col {
-      grid-area: sidebar;
-      display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto;
-    }
-    #sidebar-col > #inventory-mount { flex: 3; min-height: 0; }
-    #sidebar-col > #character-mount { flex: 2; min-height: 0; }
-    #sidebar-col > #quest-mount { flex: 2; min-height: 0; }
-    #narrative-mount { grid-area: narrative; min-height: 0; }
-    #events-mount { grid-area: events; min-height: 0; }
+    #action-input::placeholder { color: var(--text-dim); opacity: 0.5; }
 
     /* Window */
     .win {
@@ -468,23 +447,9 @@
 </head>
 <body>
   <div id="app">
-    <div id="tui-header"></div>
     <div id="tui-main">
-      <div id="present-mount"></div>
-      <div id="viewport-mount">
-        <div id="map-mount"></div>
-        <div id="ascii-viewport-mount"></div>
-      </div>
-      <div id="sidebar-col">
-        <div id="inventory-mount"></div>
-        <div id="character-mount"></div>
-        <div id="quest-mount"></div>
-      </div>
-      <div id="narrative-mount"></div>
-      <div id="events-mount"></div>
+      <input type="text" id="action-input" placeholder="What do you do?" autocomplete="off" spellcheck="false" />
     </div>
-    <div id="command-mount"></div>
-    <div id="status-mount"></div>
     <div id="dialog-mount"></div>
   </div>
   <div id="char-create-overlay">

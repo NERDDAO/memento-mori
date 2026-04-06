@@ -20,6 +20,7 @@ export interface NarrativeController {
   removeBlockById(id: string): void;
   showThinking(): void;
   removeThinking(): void;
+  scroll(deltaY: number): void;
   canvas: HTMLCanvasElement;
 }
 
@@ -584,6 +585,14 @@ export function initNarrative(container: HTMLElement): NarrativeController {
         clampScroll();
         scheduleRender();
       }
+    },
+
+    scroll(deltaY: number) {
+      scrollOffset += deltaY;
+      clampScroll();
+      const maxScroll = Math.max(0, store.totalHeight - canvasH);
+      userAtBottom = scrollOffset >= maxScroll - 30;
+      scheduleRender();
     },
 
     canvas,

@@ -1,57 +1,57 @@
 // src/app.ts
 /**
  * Memento Mori — MUD Client
- * Thin orchestrator: wires session, panels, and message handling together.
+ * Thin orchestrator: wires session, UnifiedCanvas, and message handling together.
  */
 
 import { type GameState } from './state/game-state';
 import { getSession, sendAction, setMessageHandler, setConnectionHandler, setErrorHandler, GATEWAY_URL } from './state/session';
 import { getRoundState } from './state/round-state';
 import { setKnownEntities } from './renderer/text-renderer';
-import { createMessageHandler } from './message-handler';
+import { createMessageHandler, getLastNpcMessage } from './message-handler';
 import { initNarrative, type NarrativeController } from './panels/narrative';
-import { updateMap, setViewportCallback } from './panels/map';
+import { updateMap, setViewportCallback, initMapPanel } from './panels/map';
 import { renderCharacterPanel } from './panels/character';
 import { renderInventoryPanel } from './panels/inventory';
 import { renderWorldMapPanel } from './panels/worldmap';
 import { renderPresentPanel } from './panels/present';
 import { renderQuestLogPanel } from './panels/questlog';
 import { renderFactionsPanel } from './panels/factions';
-import { createWindow } from './ui/window';
-import { createHeader } from './ui/header';
+import { renderViewport } from './panels/viewport';
+import { renderHeader, type WorldTime } from './ui/header';
+import { renderStatusBar, type StatusState } from './ui/status';
+import { UnifiedCanvas } from './canvas/unified-canvas';
 import { createDialog } from './ui/dialog';
 import { createInventoryModal } from './ui/inventory-modal';
 import { createCodexModal } from './ui/codex-modal';
 import { createArtViewer } from './ui/art-viewer';
-import { createStatusBar } from './ui/status';
-import { type OverlayManager } from './ui/overlay';
+import { type OverlayManager, createOverlayManager } from './ui/overlay';
 import { startGame } from './flows/session-flow';
 import { initInventoryApi } from './state/inventory-api';
-import { initPanels } from './panel-setup';
+import { initInput } from './panels/input';
+import { setManageInventoryCallback } from './panels/inventory';
 import { initHotkeys } from './hotkeys';
 import { initCharCreation } from './char-creation';
+import type { CardContent } from './map/card-renderer';
 
 let gameState: GameState;
 let narrative: NarrativeController;
 let eventsFeed: NarrativeController;
+let uc: UnifiedCanvas;
 
-let header: ReturnType<typeof createHeader>;
 let npcDialog: ReturnType<typeof createDialog>;
 let codex: ReturnType<typeof createCodexModal>;
 let artViewer: ReturnType<typeof createArtViewer>;
-let statusBar: ReturnType<typeof createStatusBar>;
-let narrativeWin: ReturnType<typeof createWindow>;
-let eventsWin: ReturnType<typeof createWindow>;
-let mapWin: ReturnType<typeof createWindow>;
-let characterWin: ReturnType<typeof createWindow>;
-let inventoryWin: ReturnType<typeof createWindow>;
-let exitsWin: ReturnType<typeof createWindow>;
-let presentWin: ReturnType<typeof createWindow>;
-let questWin: ReturnType<typeof createWindow>;
-let factionWin: ReturnType<typeof createWindow>;
-let commandWin: ReturnType<typeof createWindow>;
-let overlays: OverlayManager;
 let invModal: ReturnType<typeof createInventoryModal>;
+let overlays: OverlayManager;
+
+// --- Header / status state for CharCell renderers ---
+let headerState = { title: 'MEMENTO MORI', worldTime: undefined as WorldTime | undefined };
+let statusState: StatusState = { phase: 'ready', tick: 0, chain: false, activity: '', location: '' };
+
+// --- Viewport state ---
+let currentCard: CardContent | null = null;
+let currentScene: string[] | null = null;
 
 // --- Entity registration for narrative highlighting ---
 function registerMapEntities(map: import('./map/types').RoomMap | null): void {
@@ -72,7 +72,7 @@ async function fetchPlayerWorldMap(): Promise<void> {
     const resp = await fetch(`${GATEWAY_URL}/api/worldmap/${pid}`);
     if (resp.ok) {
       gameState.worldMap = await resp.json();
-      renderWorldMapPanel(exitsWin.panel!, gameState, handleAction);
+      renderAllPanels();
     }
   } catch {
     // Non-fatal
@@ -81,17 +81,46 @@ async function fetchPlayerWorldMap(): Promise<void> {
 
 // --- Panel rendering ---
 function renderAllPanels(): void {
-  if (!gameState) return;
-  characterWin.setTitle(gameState.player.name || 'Character');
-  renderCharacterPanel(characterWin.panel!, gameState);
-  renderInventoryPanel(inventoryWin.panel!, gameState);
-  renderWorldMapPanel(exitsWin.panel!, gameState, handleAction);
-  renderPresentPanel(presentWin.panel!, gameState, handleAction);
-  renderQuestLogPanel(questWin.panel!, gameState.quests);
-  renderFactionsPanel(factionWin.panel!, gameState.factions);
-  updateMap(gameState, handleAction);
+  if (!gameState || !uc) return;
 
-  // (codex is opened on demand via 'k' key, not auto-shown)
+  const r = (name: string) => uc.getRegion(name);
+
+  const charRegion = r('character');
+  if (charRegion) {
+    uc.setRegionContent('character', renderCharacterPanel(charRegion.cols, charRegion.rows, gameState));
+  }
+
+  const invRegion = r('inventory');
+  if (invRegion) {
+    uc.setRegionContent('inventory', renderInventoryPanel(invRegion.cols, invRegion.rows, gameState));
+  }
+
+  const questRegion = r('quests');
+  if (questRegion) {
+    uc.setRegionContent('quests', renderQuestLogPanel(questRegion.cols, questRegion.rows, gameState.quests));
+  }
+
+  const presentRegion = r('present');
+  if (presentRegion) {
+    uc.setRegionContent('present', renderPresentPanel(presentRegion.cols, presentRegion.rows, gameState));
+  }
+
+  const vpRegion = r('viewport');
+  if (vpRegion) {
+    uc.setRegionContent('viewport', renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
+  }
+
+  const headerRegion = r('header');
+  if (headerRegion) {
+    uc.setRegionContent('header', renderHeader(headerRegion.cols, headerState));
+  }
+
+  const statusRegion = r('status');
+  if (statusRegion) {
+    uc.setRegionContent('status', renderStatusBar(statusRegion.cols, statusState));
+  }
+
+  updateMap(gameState, handleAction);
 }
 
 // --- Action handling ---
@@ -117,6 +146,25 @@ function showDeathScreen(cause: string): void {
   ` : '';
 
   overlays.show('death');
+}
+
+// --- Viewport setters ---
+function setViewportCard(card: CardContent | null): void {
+  currentCard = card;
+  currentScene = null;
+  const vpRegion = uc?.getRegion('viewport');
+  if (vpRegion) {
+    uc.setRegionContent('viewport', renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
+  }
+}
+
+function setViewportScene(lines: string[]): void {
+  currentScene = lines;
+  currentCard = null;
+  const vpRegion = uc?.getRegion('viewport');
+  if (vpRegion) {
+    uc.setRegionContent('viewport', renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
+  }
 }
 
 // --- Enter game (new or returning) ---
@@ -149,58 +197,217 @@ function enterGame(config: { playerName: string; walletAddress: string; isReturn
   });
 }
 
+// --- Position action input over the canvas input region ---
+function positionActionInput(inputEl: HTMLInputElement): void {
+  const inputRegion = uc.getRegion('input');
+  if (!inputRegion) return;
+  const cs = uc.getCharSize();
+  const canvasRect = uc.canvas.getBoundingClientRect();
+  const appRect = uc.canvas.parentElement!.getBoundingClientRect();
+
+  // Position relative to #tui-main (the positioned parent)
+  const offsetX = canvasRect.left - appRect.left;
+  const offsetY = canvasRect.top - appRect.top;
+
+  // Leave 2 chars for the "> " prompt rendered by the canvas
+  const promptCols = 2;
+  inputEl.style.left = `${offsetX + (inputRegion.col + promptCols) * cs.width}px`;
+  inputEl.style.top = `${offsetY + inputRegion.row * cs.height}px`;
+  inputEl.style.width = `${(inputRegion.cols - promptCols) * cs.width}px`;
+  inputEl.style.height = `${cs.height}px`;
+  inputEl.style.fontSize = `${cs.height - 2}px`;
+}
+
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
-  // Initialize all panels
-  const panels = initPanels(() => gameState, handleAction);
-  ({
-    header,
-    narrative,
-    eventsFeed,
-    narrativeWin,
-    eventsWin,
-    mapWin,
-    characterWin,
-    inventoryWin,
-    exitsWin,
-    presentWin,
-    questWin,
-    factionWin,
-    commandWin,
-    statusBar,
-    overlays,
-    npcDialog,
-    invModal,
-    codex,
-    artViewer,
-  } = panels);
+  // Create UnifiedCanvas
+  const tuiMain = document.getElementById('tui-main')!;
+  uc = new UnifiedCanvas(tuiMain);
 
-  // Wire viewport to receive card content from map proximity
-  setViewportCallback(panels.setViewportCard);
+  // Create offscreen containers for narrative and events
+  const narrativeContainer = document.createElement('div');
+  narrativeContainer.style.position = 'absolute';
+  narrativeContainer.style.left = '-9999px';
+  document.body.appendChild(narrativeContainer);
 
-  // Hotkeys: m (map), i (inventory), k (codex), narrative-entity-click, npc-name-click
-  initHotkeys({ exitsWin, questWin, factionWin, invModal, codex, npcDialog, narrative });
+  const eventsContainer = document.createElement('div');
+  eventsContainer.style.position = 'absolute';
+  eventsContainer.style.left = '-9999px';
+  document.body.appendChild(eventsContainer);
 
-  // 9. Wire handlers
+  // Size offscreen containers to match regions
+  function sizeNarrativeContainers(): void {
+    const cs = uc.getCharSize();
+    const narRegion = uc.getRegion('narrative');
+    if (narRegion) {
+      narrativeContainer.style.width = `${narRegion.cols * cs.width}px`;
+      narrativeContainer.style.height = `${narRegion.rows * cs.height}px`;
+    }
+    const evtRegion = uc.getRegion('events');
+    if (evtRegion) {
+      eventsContainer.style.width = `${evtRegion.cols * cs.width}px`;
+      eventsContainer.style.height = `${evtRegion.rows * cs.height}px`;
+    }
+  }
+  sizeNarrativeContainers();
+
+  // Init narrative controllers on the offscreen containers
+  narrative = initNarrative(narrativeContainer);
+  eventsFeed = initNarrative(eventsContainer);
+
+  // Composite narrative canvases into the UC via pixel renderers
+  uc.setPixelRenderer('narrative', (ctx, region, charSize) => {
+    const px = region.col * charSize.width;
+    const py = region.row * charSize.height;
+    const pw = region.cols * charSize.width;
+    const ph = region.rows * charSize.height;
+    ctx.drawImage(narrative.canvas, 0, 0, narrative.canvas.width, narrative.canvas.height, px, py, pw, ph);
+  });
+
+  uc.setPixelRenderer('events', (ctx, region, charSize) => {
+    const px = region.col * charSize.width;
+    const py = region.row * charSize.height;
+    const pw = region.cols * charSize.width;
+    const ph = region.rows * charSize.height;
+    ctx.drawImage(eventsFeed.canvas, 0, 0, eventsFeed.canvas.width, eventsFeed.canvas.height, px, py, pw, ph);
+  });
+
+  // Forward wheel events to narrative/events
+  uc.onWheel((region, deltaY) => {
+    if (region === 'narrative') {
+      narrative.scroll(deltaY);
+      uc.markDirty('narrative');
+    }
+    if (region === 'events') {
+      eventsFeed.scroll(deltaY);
+      uc.markDirty('events');
+    }
+  });
+
+  // Wire click handler for interactive panels
+  uc.onClick((region, data) => {
+    if (data.action) handleAction(data.action as string);
+    if (data.questName) {
+      const quest = gameState?.quests.find((q: any) => q.name === data.questName);
+      if (quest) npcDialog.showQuest(quest);
+    }
+    if (data.entityId) codex.open(data.entityId as string);
+    if (data.npcName) {
+      const lastMsg = getLastNpcMessage(data.npcName as string);
+      if (lastMsg) npcDialog.show(data.npcName as string, '', lastMsg);
+    }
+  });
+
+  // Wire viewport callback from map proximity
+  setViewportCallback(setViewportCard);
+
+  // Init map into a hidden container (it renders its own canvas)
+  const mapContainer = document.createElement('div');
+  mapContainer.style.position = 'absolute';
+  mapContainer.style.left = '-9999px';
+  mapContainer.style.width = '400px';
+  mapContainer.style.height = '300px';
+  document.body.appendChild(mapContainer);
+  initMapPanel(mapContainer, handleAction);
+
+  // Action input positioning and wiring
+  const actionInput = document.getElementById('action-input') as HTMLInputElement;
+  initInput(actionInput, handleAction, () => ({
+    npcs: gameState?.location?.npcs || [],
+    players: gameState?.location?.players || [],
+  }));
+  positionActionInput(actionInput);
+
+  // Reposition input on resize
+  const resizeObserver = new ResizeObserver(() => {
+    sizeNarrativeContainers();
+    positionActionInput(actionInput);
+  });
+  resizeObserver.observe(tuiMain);
+
+  // Render input prompt into the grid
+  function renderInputPrompt(): void {
+    const inputRegion = uc.getRegion('input');
+    if (!inputRegion) return;
+    const cells = [[
+      { char: '>', fg: '#6a6a78' },
+      { char: ' ', fg: '#6a6a78' },
+    ]];
+    // Pad to region width
+    while (cells[0].length < inputRegion.cols) {
+      cells[0].push({ char: ' ', fg: '#6a6a78' });
+    }
+    uc.setRegionContent('input', { cells });
+  }
+  renderInputPrompt();
+
+  // Periodically repaint narrative/events (they have their own rAF loops)
+  setInterval(() => {
+    uc.markDirty('narrative');
+    uc.markDirty('events');
+  }, 100);
+
+  // Overlay manager
+  overlays = createOverlayManager(['char-create', 'death', 'loading', 'intro']);
+
+  // Dialog
+  npcDialog = createDialog();
+  const dialogMount = document.getElementById('dialog-mount')!;
+  dialogMount.parentElement!.replaceChild(npcDialog.el, dialogMount);
+
+  // Inventory modal
+  invModal = createInventoryModal(() => gameState);
+  document.body.appendChild(invModal.el);
+  setManageInventoryCallback(() => invModal.open());
+
+  // Art viewer + Codex modal
+  artViewer = createArtViewer();
+  document.body.appendChild(artViewer.el);
+  codex = createCodexModal(() => gameState, () => getSession().playerId, artViewer.open);
+  document.body.appendChild(codex.el);
+
+  // Hotkeys
+  initHotkeys({ invModal, codex, npcDialog });
+
+  // Wire message handler
   const handleMessage = createMessageHandler({
     getGameState: () => gameState,
     narrative,
     eventsFeed,
-    header,
-    statusBar,
+    renderAllPanels,
+    header: {
+      updateTime(t: WorldTime) {
+        headerState.worldTime = t;
+        const headerRegion = uc.getRegion('header');
+        if (headerRegion) {
+          uc.setRegionContent('header', renderHeader(headerRegion.cols, headerState));
+        }
+      },
+    },
+    statusBar: {
+      setTick(t: number) {
+        statusState.tick = t;
+        const region = uc.getRegion('status');
+        if (region) uc.setRegionContent('status', renderStatusBar(region.cols, statusState));
+      },
+      setChain(c: boolean) {
+        statusState.chain = c;
+        const region = uc.getRegion('status');
+        if (region) uc.setRegionContent('status', renderStatusBar(region.cols, statusState));
+      },
+      setActivity(a: string) {
+        statusState.activity = a;
+        const region = uc.getRegion('status');
+        if (region) uc.setRegionContent('status', renderStatusBar(region.cols, statusState));
+      },
+    },
     codex,
     invModal,
-    characterWin,
-    inventoryWin,
-    exitsWin,
-    presentWin,
-    questWin,
-    factionWin,
     handleAction,
     registerMapEntities,
     fetchPlayerWorldMap,
     showDeathScreen,
-    setViewportScene: panels.setViewportScene,
+    setViewportScene,
   });
   setMessageHandler(handleMessage);
 
@@ -214,15 +421,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setErrorHandler((msg) => eventsFeed.addBlock(msg, 'error'));
 
-  // 10. Death screen — new character button
+  // Death screen — new character button
   document.getElementById('death-restart-btn')!.addEventListener('click', () => {
     overlays.dismiss('death');
     overlays.show('char-create');
-    narrative = initNarrative(narrativeWin.body);
-    initHotkeys({ exitsWin, questWin, factionWin, invModal, codex, npcDialog, narrative });
+    // Re-init narrative
+    narrativeContainer.innerHTML = '';
+    narrative = initNarrative(narrativeContainer);
+    // Re-register pixel renderer with new narrative
+    uc.setPixelRenderer('narrative', (ctx, region, charSize) => {
+      const px = region.col * charSize.width;
+      const py = region.row * charSize.height;
+      const pw = region.cols * charSize.width;
+      const ph = region.rows * charSize.height;
+      ctx.drawImage(narrative.canvas, 0, 0, narrative.canvas.width, narrative.canvas.height, px, py, pw, ph);
+    });
+    initHotkeys({ invModal, codex, npcDialog });
     (document.getElementById('char-name-input') as HTMLInputElement).focus();
   });
 
   // Character creation flow (wallet connect, archetype, name input)
   initCharCreation(enterGame, overlays);
+
+  // Initial panel render
+  renderAllPanels();
 });
