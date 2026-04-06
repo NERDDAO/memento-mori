@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run --hot src/app.ts",
-    "build": "bun build src/app.ts --outdir dist"
+    "build": "bun build src/app.ts --outfile app.js"
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.3"

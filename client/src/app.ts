@@ -10,7 +10,7 @@ import { getRoundState } from './state/round-state';
 import { setKnownEntities } from './renderer/text-renderer';
 import { createMessageHandler, getLastNpcMessage } from './message-handler';
 import { initNarrative, type NarrativeController } from './panels/narrative';
-import { updateMap, setViewportCallback, initMapPanel } from './panels/map';
+import { updateMap, setViewportCallback, initMapPanel, getMapCanvas } from './panels/map';
 import { renderCharacterPanel } from './panels/character';
 import { renderInventoryPanel } from './panels/inventory';
 import { renderWorldMapPanel } from './panels/worldmap';
@@ -81,9 +81,23 @@ async function fetchPlayerWorldMap(): Promise<void> {
 
 // --- Panel rendering ---
 function renderAllPanels(): void {
-  if (!gameState || !uc) return;
+  if (!uc) return;
 
   const r = (name: string) => uc.getRegion(name);
+
+  // Header and status always render (even before login)
+  const headerRegion = r('header');
+  if (headerRegion) {
+    uc.setRegionContent('header', renderHeader(headerRegion.cols, headerState));
+  }
+
+  const statusRegion = r('status');
+  if (statusRegion) {
+    uc.setRegionContent('status', renderStatusBar(statusRegion.cols, statusState));
+  }
+
+  // Game panels only render when gameState exists
+  if (!gameState) return;
 
   const charRegion = r('character');
   if (charRegion) {
@@ -110,17 +124,13 @@ function renderAllPanels(): void {
     uc.setRegionContent('viewport', renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
   }
 
-  const headerRegion = r('header');
-  if (headerRegion) {
-    uc.setRegionContent('header', renderHeader(headerRegion.cols, headerState));
-  }
-
-  const statusRegion = r('status');
-  if (statusRegion) {
-    uc.setRegionContent('status', renderStatusBar(statusRegion.cols, statusState));
-  }
-
   updateMap(gameState, handleAction);
+
+  // Composite map canvas into viewport region
+  const mapCanvas = getMapCanvas();
+  if (mapCanvas && mapCanvas.width > 0) {
+    uc.setOffscreen('viewport', mapCanvas);
+  }
 }
 
 // --- Action handling ---

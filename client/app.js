@@ -1,147 +1,3 @@
-// src/types/schema.generated.ts
-var SCHEMA_VERSION = 1;
-
-// src/state/game-state.ts
-function createInitialState(playerName) {
-  return {
-    player: {
-      name: playerName,
-      archetype: "",
-      level: 1,
-      health: 100,
-      maxHealth: 100,
-      xp: 0,
-      xpThreshold: 100,
-      skills: {}
-    },
-    location: {
-      name: "Unknown",
-      description: "",
-      exits: [],
-      npcs: [],
-      items: [],
-      players: []
-    },
-    inventory: [],
-    quests: [],
-    factions: [],
-    roomMap: null,
-    worldMap: null
-  };
-}
-function applyStateUpdate(state, update) {
-  if (update.schema_version && update.schema_version > SCHEMA_VERSION) {
-    console.warn(`Server schema version ${update.schema_version} > client ${SCHEMA_VERSION}. Please refresh.`);
-  }
-  if (update.location)
-    state.location.name = update.location;
-  if (update.health != null)
-    state.player.health = update.health;
-  if (update.max_health != null)
-    state.player.maxHealth = update.max_health;
-  if (update.level != null)
-    state.player.level = update.level;
-  if (update.xp != null)
-    state.player.xp = update.xp;
-  if (update.exits)
-    state.location.exits = update.exits;
-  if (update.npcs) {
-    state.location.npcs = update.npcs.map((n) => {
-      const existing = state.location.npcs.find((e) => e.id === n.id);
-      return {
-        name: n.name || "",
-        id: n.id || "",
-        role: n.role || "",
-        ascii_art: existing?.ascii_art,
-        x: n.x,
-        y: n.y
-      };
-    });
-  }
-  if (update.items) {
-    state.location.items = update.items.map((i) => {
-      const existing = state.location.items.find((e) => e.id === i.id);
-      return {
-        name: i.name || "",
-        id: i.id || "",
-        role: i.role || "",
-        ascii_art: existing?.ascii_art,
-        x: i.x,
-        y: i.y
-      };
-    });
-  }
-  if (update.inventory) {
-    state.inventory = update.inventory.map((i) => ({
-      id: i.id || "",
-      name: i.name || "?",
-      rarity: i.rarity || "common",
-      slot_type: i.slot_type || "",
-      equipped: i.equipped || false,
-      is_consumable: i.is_consumable || false,
-      is_quest_item: i.is_quest_item || false,
-      effects: i.effects || [],
-      quantity: i.quantity || 1
-    }));
-  }
-  if (update.skills)
-    state.player.skills = update.skills;
-  if (update.room_map) {
-    state.roomMap = update.room_map;
-    const rm = update.room_map;
-    if (rm.name)
-      state.location.name = rm.name;
-    if (rm.exits) {
-      state.location.exits = rm.exits.map((e) => ({
-        direction: e.direction || "",
-        name: e.target || e.name || ""
-      }));
-    }
-    if (rm.npcs) {
-      state.location.npcs = rm.npcs.map((n) => {
-        const existing = state.location.npcs.find((e) => e.id === n.id);
-        return {
-          name: n.name || "",
-          id: n.id || "",
-          role: n.role || "",
-          ascii_art: existing?.ascii_art,
-          x: n.x,
-          y: n.y
-        };
-      });
-    }
-    if (rm.items) {
-      state.location.items = rm.items.map((i) => {
-        const existing = state.location.items.find((e) => e.id === i.id);
-        return {
-          name: i.name || "",
-          id: i.id || "",
-          ascii_art: existing?.ascii_art,
-          x: i.x,
-          y: i.y
-        };
-      });
-    }
-  }
-  if (update.active_quests) {
-    state.quests = update.active_quests.map((q) => ({
-      name: q.name || "",
-      description: q.description || "",
-      currentStage: q.current_stage || 0,
-      totalStages: q.total_stages || 0,
-      giver: q.giver || "",
-      completed: q.completed || false
-    }));
-  }
-  if (update.factions) {
-    state.factions = update.factions.map((f) => ({
-      name: f.name || "",
-      reputation: f.reputation || 0,
-      disposition: f.disposition || "neutral"
-    }));
-  }
-}
-
 // src/state/session.ts
 var GATEWAY_PORT = window.location.port || "8081";
 var GATEWAY_URL = `${window.location.protocol}//${window.location.hostname}:${GATEWAY_PORT}`;
@@ -158,6 +14,10 @@ var session = {
 var ws = null;
 var onMessage = null;
 var onConnectionChange = null;
+var errorHandler = null;
+function setErrorHandler(handler) {
+  errorHandler = handler;
+}
 function setConnectionHandler(handler) {
   onConnectionChange = handler;
 }
@@ -225,15 +85,25 @@ function connectWebSocket() {
   };
 }
 async function sendAction(action) {
-  await fetch(`${GATEWAY_URL}/api/action`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      player_id: session.playerId,
-      action,
-      location: session.currentLocation
-    })
-  });
+  try {
+    const resp = await fetch(`${GATEWAY_URL}/api/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        player_id: session.playerId,
+        action,
+        location: session.currentLocation
+      })
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "Unknown error");
+      if (errorHandler)
+        errorHandler(`Action failed: ${text}`);
+    }
+  } catch (e) {
+    if (errorHandler)
+      errorHandler("Connection lost — action not sent.");
+  }
 }
 
 // src/state/round-state.ts
@@ -401,6 +271,358 @@ function highlightEntities(text) {
     segments.push({ text: text.slice(lastIdx), style: "normal" });
   }
   return segments.length ? segments : [{ text, style: "normal" }];
+}
+
+// src/types/schema.generated.ts
+var SCHEMA_VERSION = 1;
+
+// src/state/game-state.ts
+function createInitialState(playerName) {
+  return {
+    player: {
+      name: playerName,
+      archetype: "",
+      level: 1,
+      health: 100,
+      maxHealth: 100,
+      xp: 0,
+      xpThreshold: 100,
+      skills: {}
+    },
+    location: {
+      name: "Unknown",
+      description: "",
+      exits: [],
+      npcs: [],
+      items: [],
+      players: []
+    },
+    inventory: [],
+    quests: [],
+    factions: [],
+    roomMap: null,
+    worldMap: null
+  };
+}
+function applyStateUpdate(state2, update) {
+  if (update.schema_version && update.schema_version > SCHEMA_VERSION) {
+    console.warn(`Server schema version ${update.schema_version} > client ${SCHEMA_VERSION}. Please refresh.`);
+  }
+  if (update.location)
+    state2.location.name = update.location;
+  if (update.health != null)
+    state2.player.health = update.health;
+  if (update.max_health != null)
+    state2.player.maxHealth = update.max_health;
+  if (update.level != null)
+    state2.player.level = update.level;
+  if (update.xp != null)
+    state2.player.xp = update.xp;
+  if (update.exits)
+    state2.location.exits = update.exits;
+  if (update.npcs) {
+    state2.location.npcs = update.npcs.map((n) => {
+      const existing = state2.location.npcs.find((e) => e.id === n.id);
+      return {
+        name: n.name || "",
+        id: n.id || "",
+        role: n.role || "",
+        ascii_art: existing?.ascii_art,
+        x: n.x,
+        y: n.y
+      };
+    });
+  }
+  if (update.items) {
+    state2.location.items = update.items.map((i) => {
+      const existing = state2.location.items.find((e) => e.id === i.id);
+      return {
+        name: i.name || "",
+        id: i.id || "",
+        role: i.role || "",
+        ascii_art: existing?.ascii_art,
+        x: i.x,
+        y: i.y
+      };
+    });
+  }
+  if (update.inventory) {
+    state2.inventory = update.inventory.map((i) => ({
+      id: i.id || "",
+      name: i.name || "?",
+      rarity: i.rarity || "common",
+      slot_type: i.slot_type || "",
+      equipped: i.equipped || false,
+      is_consumable: i.is_consumable || false,
+      is_quest_item: i.is_quest_item || false,
+      effects: i.effects || [],
+      quantity: i.quantity || 1
+    }));
+  }
+  if (update.skills)
+    state2.player.skills = update.skills;
+  if (update.room_map) {
+    state2.roomMap = update.room_map;
+    const rm = update.room_map;
+    if (rm.name)
+      state2.location.name = rm.name;
+    if (rm.exits) {
+      state2.location.exits = rm.exits.map((e) => ({
+        direction: e.direction || "",
+        name: e.target || e.name || ""
+      }));
+    }
+    if (rm.npcs) {
+      state2.location.npcs = rm.npcs.map((n) => {
+        const existing = state2.location.npcs.find((e) => e.id === n.id);
+        return {
+          name: n.name || "",
+          id: n.id || "",
+          role: n.role || "",
+          ascii_art: existing?.ascii_art,
+          x: n.x,
+          y: n.y
+        };
+      });
+    }
+    if (rm.items) {
+      state2.location.items = rm.items.map((i) => {
+        const existing = state2.location.items.find((e) => e.id === i.id);
+        return {
+          name: i.name || "",
+          id: i.id || "",
+          ascii_art: existing?.ascii_art,
+          x: i.x,
+          y: i.y
+        };
+      });
+    }
+  }
+  if (update.active_quests) {
+    state2.quests = update.active_quests.map((q) => ({
+      name: q.name || "",
+      description: q.description || "",
+      currentStage: q.current_stage || 0,
+      totalStages: q.total_stages || 0,
+      giver: q.giver || "",
+      completed: q.completed || false
+    }));
+  }
+  if (update.factions) {
+    state2.factions = update.factions.map((f) => ({
+      name: f.name || "",
+      reputation: f.reputation || 0,
+      disposition: f.disposition || "neutral"
+    }));
+  }
+}
+function syncEntityField(gs, entityId, updates) {
+  const locEntity = gs.location.npcs.find((n) => n.id === entityId) || gs.location.items.find((i) => i.id === entityId);
+  if (locEntity)
+    Object.assign(locEntity, updates);
+  if (gs.roomMap) {
+    const rmEntity = gs.roomMap.npcs.find((n) => n.id === entityId) || gs.roomMap.items.find((i) => i.id === entityId);
+    if (rmEntity)
+      Object.assign(rmEntity, updates);
+  }
+}
+
+// src/message-handler.ts
+var lastNpcMessages = new Map;
+function getLastNpcMessage(npcName) {
+  return lastNpcMessages.get(npcName) || "";
+}
+function createMessageHandler(refs) {
+  return function handleMessage(msg) {
+    const gameState = refs.getGameState();
+    switch (msg.type) {
+      case "narrative": {
+        refs.narrative.removeThinking();
+        const channel = msg.channel || "narrative";
+        if (channel === "events") {
+          refs.eventsFeed.addBlock(msg.text || "", "event");
+        } else if (channel === "ooc") {
+          refs.eventsFeed.addBlock(msg.text || "", "ooc");
+        } else if (msg.npc) {
+          lastNpcMessages.set(msg.npc, msg.text || "");
+          const npcKey = msg.npc_username || msg.npc.toLowerCase().replace(/\s+/g, "-");
+          refs.narrative.removeBlockById(`npc-status-${npcKey}`);
+          refs.narrative.addBlock(`${msg.npc}`, "npc-name");
+          refs.narrative.addBlock(msg.text || "", "npc-dialogue");
+        } else {
+          refs.narrative.addBlock(msg.text || "", "narrative");
+        }
+        if (msg.state_update && gameState) {
+          applyStateUpdate(gameState, msg.state_update);
+          const session2 = getSession();
+          session2.currentLocation = gameState.location.name;
+          if (gameState.roomMap)
+            refs.registerMapEntities(gameState.roomMap);
+          if (msg.state_update.world_time) {
+            refs.header.updateTime(msg.state_update.world_time);
+            refs.statusBar.setTick(msg.state_update.world_time.tick || 0);
+          }
+          refs.renderAllPanels();
+          refs.fetchPlayerWorldMap();
+          if (msg.state_update.events) {
+            const events = msg.state_update.events;
+            if (events.combat) {
+              const c = events.combat;
+              if (c.damage_dealt != null) {
+                refs.eventsFeed.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ""}`, "event-combat");
+              }
+              if (c.xp_gained) {
+                refs.eventsFeed.addBlock(`[+${c.xp_gained} XP]`, "event-xp");
+              }
+              if (c.target_dead) {
+                refs.eventsFeed.addBlock(`${c.target_name || "Target"} has been slain.`, "event-death");
+              }
+            }
+            if (events.inventory_changes) {
+              for (const inv of events.inventory_changes) {
+                const prefix = inv.event_type === "DROP" ? "-" : "+";
+                refs.eventsFeed.addBlock(`[${prefix}${inv.item_name}]`, "event-item");
+              }
+            }
+          }
+        }
+        if (msg.state_update?.status === "dead" || msg.state_update?.events?.combat?.target_dead || msg.text && msg.text.toLowerCase().includes("you have died")) {
+          refs.showDeathScreen(msg.state_update?.cause || "");
+        }
+        break;
+      }
+      case "death_feed": {
+        const skull = "☠";
+        const deathMsg = `${skull} ${msg.player_name || "Unknown"} (Level ${msg.level || "?"}) fell at ${msg.location || "unknown"}. ${msg.cause || ""}`;
+        refs.narrative.addBlock(deathMsg, "death-feed");
+        break;
+      }
+      case "scene_art": {
+        const artLines = msg.lines || [];
+        if (artLines.length > 0) {
+          refs.setViewportScene?.(artLines);
+        }
+        break;
+      }
+      case "entity_art": {
+        const artLines = msg.lines || [];
+        if (msg.entity_id && gameState) {
+          syncEntityField(gameState, msg.entity_id, { ascii_art: artLines.join(`
+`) });
+        }
+        if (msg.entity_id && refs.codex?.active) {
+          refs.codex.refreshEntityArt(msg.entity_id, artLines);
+        }
+        break;
+      }
+      case "codex_refresh": {
+        break;
+      }
+      case "npc_status": {
+        const npcKey = msg.npc_username || msg.npc || "unknown";
+        refs.narrative.replaceBlock(`npc-status-${npcKey}`, `${msg.npc}: ${msg.text}`, "npc-status");
+        break;
+      }
+      case "phase": {
+        updateRoundState(msg);
+        const phase = msg.phase || "";
+        const crew = msg.crew || "";
+        if (phase === "resolving" && crew) {
+          refs.eventsFeed.replaceBlock("phase-progress", `[${crew}]`, "event");
+        } else if (phase === "npc_response") {
+          refs.eventsFeed.replaceBlock("phase-progress", "[waiting for NPCs]", "event");
+        } else if (phase === "ready") {
+          refs.eventsFeed.removeBlockById("phase-progress");
+        }
+        break;
+      }
+      case "status":
+        if (msg.tick != null)
+          refs.statusBar.setTick(msg.tick);
+        if (msg.chain != null)
+          refs.statusBar.setChain(msg.chain);
+        if (msg.activity)
+          refs.statusBar.setActivity(msg.activity);
+        break;
+      case "player_joined": {
+        if (gameState) {
+          const exists = gameState.location.players.some((p) => p.id === msg.player_id);
+          if (!exists) {
+            gameState.location.players.push({ name: msg.player_name, id: msg.player_id });
+            refs.renderAllPanels();
+            refs.narrative.addBlock(`${msg.player_name} arrived.`, "system");
+          }
+        }
+        break;
+      }
+      case "player_left": {
+        if (gameState) {
+          gameState.location.players = gameState.location.players.filter((p) => p.id !== msg.player_id);
+          refs.renderAllPanels();
+          refs.narrative.addBlock(`${msg.player_name} departed.`, "system");
+        }
+        break;
+      }
+      case "position_update": {
+        if (gameState && msg.entity_id) {
+          syncEntityField(gameState, msg.entity_id, { x: msg.x, y: msg.y });
+          refs.renderAllPanels();
+        }
+        break;
+      }
+      case "npc_left": {
+        if (gameState) {
+          const leftName = msg.npc_name.toLowerCase();
+          gameState.location.npcs = gameState.location.npcs.filter((n) => n.name.toLowerCase() !== leftName && !n.name.toLowerCase().startsWith(leftName));
+          refs.renderAllPanels();
+        }
+        break;
+      }
+      case "npc_joined": {
+        if (gameState && msg.npc_name) {
+          const joinName = msg.npc_name.toLowerCase();
+          const exists = gameState.location.npcs.some((n) => n.name.toLowerCase() === joinName || n.name.toLowerCase().startsWith(joinName));
+          if (!exists) {
+            gameState.location.npcs.push({ name: msg.npc_name, id: msg.npc_id || "", role: "" });
+            refs.renderAllPanels();
+          }
+        }
+        break;
+      }
+      case "presence": {
+        if (gameState) {
+          gameState.location.players = (msg.players || []).map((p) => ({
+            name: p.player_name,
+            id: p.player_id
+          }));
+          refs.renderAllPanels();
+        }
+        break;
+      }
+      case "state_update": {
+        if (msg.state_update && gameState) {
+          applyStateUpdate(gameState, msg.state_update);
+          refs.renderAllPanels();
+          refs.fetchPlayerWorldMap();
+          if (refs.invModal.active)
+            refs.invModal.refresh();
+        }
+        break;
+      }
+      case "room_items_changed": {
+        if (refs.invModal.active)
+          refs.invModal.refresh();
+        break;
+      }
+      case "episode_feed": {
+        const label = msg.location ? `[Chronicle · ${msg.location}]` : "[Chronicle]";
+        refs.eventsFeed.addBlock(`${label} ${msg.name}: ${msg.summary}`, "event");
+        break;
+      }
+      default:
+        console.log("Unknown message:", msg);
+    }
+  };
 }
 
 // node_modules/@chenglou/pretext/dist/bidi.js
@@ -2035,41 +2257,6 @@ function fitSoftHyphenBreak(graphemeWidths, initialWidth, maxWidth, lineFitEpsil
   }
   return { fitCount, fittedWidth };
 }
-function findChunkIndexForStart(prepared, segmentIndex) {
-  for (let i = 0;i < prepared.chunks.length; i++) {
-    const chunk = prepared.chunks[i];
-    if (segmentIndex < chunk.consumedEndSegmentIndex)
-      return i;
-  }
-  return -1;
-}
-function normalizeLineStart(prepared, start) {
-  let segmentIndex = start.segmentIndex;
-  const graphemeIndex = start.graphemeIndex;
-  if (segmentIndex >= prepared.widths.length)
-    return null;
-  if (graphemeIndex > 0)
-    return start;
-  const chunkIndex = findChunkIndexForStart(prepared, segmentIndex);
-  if (chunkIndex < 0)
-    return null;
-  const chunk = prepared.chunks[chunkIndex];
-  if (chunk.startSegmentIndex === chunk.endSegmentIndex && segmentIndex === chunk.startSegmentIndex) {
-    return { segmentIndex, graphemeIndex: 0 };
-  }
-  if (segmentIndex < chunk.startSegmentIndex)
-    segmentIndex = chunk.startSegmentIndex;
-  while (segmentIndex < chunk.endSegmentIndex) {
-    const kind = prepared.kinds[segmentIndex];
-    if (kind !== "space" && kind !== "zero-width-break" && kind !== "soft-hyphen") {
-      return { segmentIndex, graphemeIndex: 0 };
-    }
-    segmentIndex++;
-  }
-  if (chunk.consumedEndSegmentIndex >= prepared.widths.length)
-    return null;
-  return { segmentIndex: chunk.consumedEndSegmentIndex, graphemeIndex: 0 };
-}
 function countPreparedLines(prepared, maxWidth) {
   if (prepared.simpleLineWalkFastPath) {
     return countPreparedLinesSimple(prepared, maxWidth);
@@ -2478,313 +2665,6 @@ function walkPreparedLines(prepared, maxWidth, onLine) {
   }
   return lineCount;
 }
-function layoutNextLineRange(prepared, start, maxWidth) {
-  const normalizedStart = normalizeLineStart(prepared, start);
-  if (normalizedStart === null)
-    return null;
-  if (prepared.simpleLineWalkFastPath) {
-    return layoutNextLineRangeSimple(prepared, normalizedStart, maxWidth);
-  }
-  const chunkIndex = findChunkIndexForStart(prepared, normalizedStart.segmentIndex);
-  if (chunkIndex < 0)
-    return null;
-  const chunk = prepared.chunks[chunkIndex];
-  if (chunk.startSegmentIndex === chunk.endSegmentIndex) {
-    return {
-      startSegmentIndex: chunk.startSegmentIndex,
-      startGraphemeIndex: 0,
-      endSegmentIndex: chunk.consumedEndSegmentIndex,
-      endGraphemeIndex: 0,
-      width: 0
-    };
-  }
-  const { widths, lineEndFitAdvances, lineEndPaintAdvances, kinds, breakableWidths, breakablePrefixWidths, discretionaryHyphenWidth, tabStopAdvance } = prepared;
-  const engineProfile = getEngineProfile();
-  const lineFitEpsilon = engineProfile.lineFitEpsilon;
-  let lineW = 0;
-  let hasContent = false;
-  const lineStartSegmentIndex = normalizedStart.segmentIndex;
-  const lineStartGraphemeIndex = normalizedStart.graphemeIndex;
-  let lineEndSegmentIndex = lineStartSegmentIndex;
-  let lineEndGraphemeIndex = lineStartGraphemeIndex;
-  let pendingBreakSegmentIndex = -1;
-  let pendingBreakFitWidth = 0;
-  let pendingBreakPaintWidth = 0;
-  let pendingBreakKind = null;
-  function clearPendingBreak() {
-    pendingBreakSegmentIndex = -1;
-    pendingBreakFitWidth = 0;
-    pendingBreakPaintWidth = 0;
-    pendingBreakKind = null;
-  }
-  function finishLine(endSegmentIndex = lineEndSegmentIndex, endGraphemeIndex = lineEndGraphemeIndex, width = lineW) {
-    if (!hasContent)
-      return null;
-    return {
-      startSegmentIndex: lineStartSegmentIndex,
-      startGraphemeIndex: lineStartGraphemeIndex,
-      endSegmentIndex,
-      endGraphemeIndex,
-      width
-    };
-  }
-  function startLineAtSegment(segmentIndex, width) {
-    hasContent = true;
-    lineEndSegmentIndex = segmentIndex + 1;
-    lineEndGraphemeIndex = 0;
-    lineW = width;
-  }
-  function startLineAtGrapheme(segmentIndex, graphemeIndex, width) {
-    hasContent = true;
-    lineEndSegmentIndex = segmentIndex;
-    lineEndGraphemeIndex = graphemeIndex + 1;
-    lineW = width;
-  }
-  function appendWholeSegment(segmentIndex, width) {
-    if (!hasContent) {
-      startLineAtSegment(segmentIndex, width);
-      return;
-    }
-    lineW += width;
-    lineEndSegmentIndex = segmentIndex + 1;
-    lineEndGraphemeIndex = 0;
-  }
-  function updatePendingBreakForWholeSegment(segmentIndex, segmentWidth) {
-    if (!canBreakAfter(kinds[segmentIndex]))
-      return;
-    const fitAdvance = kinds[segmentIndex] === "tab" ? 0 : lineEndFitAdvances[segmentIndex];
-    const paintAdvance = kinds[segmentIndex] === "tab" ? segmentWidth : lineEndPaintAdvances[segmentIndex];
-    pendingBreakSegmentIndex = segmentIndex + 1;
-    pendingBreakFitWidth = lineW - segmentWidth + fitAdvance;
-    pendingBreakPaintWidth = lineW - segmentWidth + paintAdvance;
-    pendingBreakKind = kinds[segmentIndex];
-  }
-  function appendBreakableSegmentFrom(segmentIndex, startGraphemeIndex) {
-    const gWidths = breakableWidths[segmentIndex];
-    const gPrefixWidths = breakablePrefixWidths[segmentIndex] ?? null;
-    for (let g = startGraphemeIndex;g < gWidths.length; g++) {
-      const gw = getBreakableAdvance(gWidths, gPrefixWidths, g, engineProfile.preferPrefixWidthsForBreakableRuns);
-      if (!hasContent) {
-        startLineAtGrapheme(segmentIndex, g, gw);
-        continue;
-      }
-      if (lineW + gw > maxWidth + lineFitEpsilon) {
-        return finishLine();
-      }
-      lineW += gw;
-      lineEndSegmentIndex = segmentIndex;
-      lineEndGraphemeIndex = g + 1;
-    }
-    if (hasContent && lineEndSegmentIndex === segmentIndex && lineEndGraphemeIndex === gWidths.length) {
-      lineEndSegmentIndex = segmentIndex + 1;
-      lineEndGraphemeIndex = 0;
-    }
-    return null;
-  }
-  function maybeFinishAtSoftHyphen(segmentIndex) {
-    if (pendingBreakKind !== "soft-hyphen" || pendingBreakSegmentIndex < 0)
-      return null;
-    const gWidths = breakableWidths[segmentIndex] ?? null;
-    if (gWidths !== null) {
-      const fitWidths = engineProfile.preferPrefixWidthsForBreakableRuns ? breakablePrefixWidths[segmentIndex] ?? gWidths : gWidths;
-      const usesPrefixWidths = fitWidths !== gWidths;
-      const { fitCount, fittedWidth } = fitSoftHyphenBreak(fitWidths, lineW, maxWidth, lineFitEpsilon, discretionaryHyphenWidth, usesPrefixWidths);
-      if (fitCount === gWidths.length) {
-        lineW = fittedWidth;
-        lineEndSegmentIndex = segmentIndex + 1;
-        lineEndGraphemeIndex = 0;
-        clearPendingBreak();
-        return null;
-      }
-      if (fitCount > 0) {
-        return finishLine(segmentIndex, fitCount, fittedWidth + discretionaryHyphenWidth);
-      }
-    }
-    if (pendingBreakFitWidth <= maxWidth + lineFitEpsilon) {
-      return finishLine(pendingBreakSegmentIndex, 0, pendingBreakPaintWidth);
-    }
-    return null;
-  }
-  for (let i = normalizedStart.segmentIndex;i < chunk.endSegmentIndex; i++) {
-    const kind = kinds[i];
-    const startGraphemeIndex = i === normalizedStart.segmentIndex ? normalizedStart.graphemeIndex : 0;
-    const w = kind === "tab" ? getTabAdvance(lineW, tabStopAdvance) : widths[i];
-    if (kind === "soft-hyphen" && startGraphemeIndex === 0) {
-      if (hasContent) {
-        lineEndSegmentIndex = i + 1;
-        lineEndGraphemeIndex = 0;
-        pendingBreakSegmentIndex = i + 1;
-        pendingBreakFitWidth = lineW + discretionaryHyphenWidth;
-        pendingBreakPaintWidth = lineW + discretionaryHyphenWidth;
-        pendingBreakKind = kind;
-      }
-      continue;
-    }
-    if (!hasContent) {
-      if (startGraphemeIndex > 0) {
-        const line = appendBreakableSegmentFrom(i, startGraphemeIndex);
-        if (line !== null)
-          return line;
-      } else if (w > maxWidth && breakableWidths[i] !== null) {
-        const line = appendBreakableSegmentFrom(i, 0);
-        if (line !== null)
-          return line;
-      } else {
-        startLineAtSegment(i, w);
-      }
-      updatePendingBreakForWholeSegment(i, w);
-      continue;
-    }
-    const newW = lineW + w;
-    if (newW > maxWidth + lineFitEpsilon) {
-      const currentBreakFitWidth = lineW + (kind === "tab" ? 0 : lineEndFitAdvances[i]);
-      const currentBreakPaintWidth = lineW + (kind === "tab" ? w : lineEndPaintAdvances[i]);
-      if (pendingBreakKind === "soft-hyphen" && engineProfile.preferEarlySoftHyphenBreak && pendingBreakFitWidth <= maxWidth + lineFitEpsilon) {
-        return finishLine(pendingBreakSegmentIndex, 0, pendingBreakPaintWidth);
-      }
-      const softBreakLine = maybeFinishAtSoftHyphen(i);
-      if (softBreakLine !== null)
-        return softBreakLine;
-      if (canBreakAfter(kind) && currentBreakFitWidth <= maxWidth + lineFitEpsilon) {
-        appendWholeSegment(i, w);
-        return finishLine(i + 1, 0, currentBreakPaintWidth);
-      }
-      if (pendingBreakSegmentIndex >= 0 && pendingBreakFitWidth <= maxWidth + lineFitEpsilon) {
-        return finishLine(pendingBreakSegmentIndex, 0, pendingBreakPaintWidth);
-      }
-      if (w > maxWidth && breakableWidths[i] !== null) {
-        const currentLine = finishLine();
-        if (currentLine !== null)
-          return currentLine;
-        const line = appendBreakableSegmentFrom(i, 0);
-        if (line !== null)
-          return line;
-      }
-      return finishLine();
-    }
-    appendWholeSegment(i, w);
-    updatePendingBreakForWholeSegment(i, w);
-  }
-  if (pendingBreakSegmentIndex === chunk.consumedEndSegmentIndex && lineEndGraphemeIndex === 0) {
-    return finishLine(chunk.consumedEndSegmentIndex, 0, pendingBreakPaintWidth);
-  }
-  return finishLine(chunk.consumedEndSegmentIndex, 0, lineW);
-}
-function layoutNextLineRangeSimple(prepared, normalizedStart, maxWidth) {
-  const { widths, kinds, breakableWidths, breakablePrefixWidths } = prepared;
-  const engineProfile = getEngineProfile();
-  const lineFitEpsilon = engineProfile.lineFitEpsilon;
-  let lineW = 0;
-  let hasContent = false;
-  const lineStartSegmentIndex = normalizedStart.segmentIndex;
-  const lineStartGraphemeIndex = normalizedStart.graphemeIndex;
-  let lineEndSegmentIndex = lineStartSegmentIndex;
-  let lineEndGraphemeIndex = lineStartGraphemeIndex;
-  let pendingBreakSegmentIndex = -1;
-  let pendingBreakPaintWidth = 0;
-  function finishLine(endSegmentIndex = lineEndSegmentIndex, endGraphemeIndex = lineEndGraphemeIndex, width = lineW) {
-    if (!hasContent)
-      return null;
-    return {
-      startSegmentIndex: lineStartSegmentIndex,
-      startGraphemeIndex: lineStartGraphemeIndex,
-      endSegmentIndex,
-      endGraphemeIndex,
-      width
-    };
-  }
-  function startLineAtSegment(segmentIndex, width) {
-    hasContent = true;
-    lineEndSegmentIndex = segmentIndex + 1;
-    lineEndGraphemeIndex = 0;
-    lineW = width;
-  }
-  function startLineAtGrapheme(segmentIndex, graphemeIndex, width) {
-    hasContent = true;
-    lineEndSegmentIndex = segmentIndex;
-    lineEndGraphemeIndex = graphemeIndex + 1;
-    lineW = width;
-  }
-  function appendWholeSegment(segmentIndex, width) {
-    if (!hasContent) {
-      startLineAtSegment(segmentIndex, width);
-      return;
-    }
-    lineW += width;
-    lineEndSegmentIndex = segmentIndex + 1;
-    lineEndGraphemeIndex = 0;
-  }
-  function updatePendingBreak(segmentIndex, segmentWidth) {
-    if (!canBreakAfter(kinds[segmentIndex]))
-      return;
-    pendingBreakSegmentIndex = segmentIndex + 1;
-    pendingBreakPaintWidth = lineW - segmentWidth;
-  }
-  function appendBreakableSegmentFrom(segmentIndex, startGraphemeIndex) {
-    const gWidths = breakableWidths[segmentIndex];
-    const gPrefixWidths = breakablePrefixWidths[segmentIndex] ?? null;
-    for (let g = startGraphemeIndex;g < gWidths.length; g++) {
-      const gw = getBreakableAdvance(gWidths, gPrefixWidths, g, engineProfile.preferPrefixWidthsForBreakableRuns);
-      if (!hasContent) {
-        startLineAtGrapheme(segmentIndex, g, gw);
-        continue;
-      }
-      if (lineW + gw > maxWidth + lineFitEpsilon) {
-        return finishLine();
-      }
-      lineW += gw;
-      lineEndSegmentIndex = segmentIndex;
-      lineEndGraphemeIndex = g + 1;
-    }
-    if (hasContent && lineEndSegmentIndex === segmentIndex && lineEndGraphemeIndex === gWidths.length) {
-      lineEndSegmentIndex = segmentIndex + 1;
-      lineEndGraphemeIndex = 0;
-    }
-    return null;
-  }
-  for (let i = normalizedStart.segmentIndex;i < widths.length; i++) {
-    const w = widths[i];
-    const kind = kinds[i];
-    const startGraphemeIndex = i === normalizedStart.segmentIndex ? normalizedStart.graphemeIndex : 0;
-    if (!hasContent) {
-      if (startGraphemeIndex > 0) {
-        const line = appendBreakableSegmentFrom(i, startGraphemeIndex);
-        if (line !== null)
-          return line;
-      } else if (w > maxWidth && breakableWidths[i] !== null) {
-        const line = appendBreakableSegmentFrom(i, 0);
-        if (line !== null)
-          return line;
-      } else {
-        startLineAtSegment(i, w);
-      }
-      updatePendingBreak(i, w);
-      continue;
-    }
-    const newW = lineW + w;
-    if (newW > maxWidth + lineFitEpsilon) {
-      if (canBreakAfter(kind)) {
-        appendWholeSegment(i, w);
-        return finishLine(i + 1, 0, lineW - w);
-      }
-      if (pendingBreakSegmentIndex >= 0) {
-        return finishLine(pendingBreakSegmentIndex, 0, pendingBreakPaintWidth);
-      }
-      if (w > maxWidth && breakableWidths[i] !== null) {
-        const currentLine = finishLine();
-        if (currentLine !== null)
-          return currentLine;
-        const line = appendBreakableSegmentFrom(i, 0);
-        if (line !== null)
-          return line;
-      }
-      return finishLine();
-    }
-    appendWholeSegment(i, w);
-    updatePendingBreak(i, w);
-  }
-  return finishLine();
-}
 
 // node_modules/@chenglou/pretext/dist/layout.js
 var sharedGraphemeSegmenter2 = null;
@@ -2976,101 +2856,12 @@ function prepareInternal(text, font, includeSegments, options) {
 function prepare(text, font, options) {
   return prepareInternal(text, font, false, options);
 }
-function prepareWithSegments(text, font, options) {
-  return prepareInternal(text, font, true, options);
-}
 function getInternalPrepared(prepared) {
   return prepared;
 }
 function layout(prepared, maxWidth, lineHeight) {
   const lineCount = countPreparedLines(getInternalPrepared(prepared), maxWidth);
   return { lineCount, height: lineCount * lineHeight };
-}
-function getSegmentGraphemes(segmentIndex, segments, cache) {
-  let graphemes = cache.get(segmentIndex);
-  if (graphemes !== undefined)
-    return graphemes;
-  graphemes = [];
-  const graphemeSegmenter = getSharedGraphemeSegmenter2();
-  for (const gs of graphemeSegmenter.segment(segments[segmentIndex])) {
-    graphemes.push(gs.segment);
-  }
-  cache.set(segmentIndex, graphemes);
-  return graphemes;
-}
-function getLineTextCache(prepared) {
-  let cache = sharedLineTextCaches.get(prepared);
-  if (cache !== undefined)
-    return cache;
-  cache = new Map;
-  sharedLineTextCaches.set(prepared, cache);
-  return cache;
-}
-function lineHasDiscretionaryHyphen(kinds, startSegmentIndex, startGraphemeIndex, endSegmentIndex) {
-  return endSegmentIndex > 0 && kinds[endSegmentIndex - 1] === "soft-hyphen" && !(startSegmentIndex === endSegmentIndex && startGraphemeIndex > 0);
-}
-function buildLineTextFromRange(segments, kinds, cache, startSegmentIndex, startGraphemeIndex, endSegmentIndex, endGraphemeIndex) {
-  let text = "";
-  const endsWithDiscretionaryHyphen = lineHasDiscretionaryHyphen(kinds, startSegmentIndex, startGraphemeIndex, endSegmentIndex);
-  for (let i = startSegmentIndex;i < endSegmentIndex; i++) {
-    if (kinds[i] === "soft-hyphen" || kinds[i] === "hard-break")
-      continue;
-    if (i === startSegmentIndex && startGraphemeIndex > 0) {
-      text += getSegmentGraphemes(i, segments, cache).slice(startGraphemeIndex).join("");
-    } else {
-      text += segments[i];
-    }
-  }
-  if (endGraphemeIndex > 0) {
-    if (endsWithDiscretionaryHyphen)
-      text += "-";
-    text += getSegmentGraphemes(endSegmentIndex, segments, cache).slice(startSegmentIndex === endSegmentIndex ? startGraphemeIndex : 0, endGraphemeIndex).join("");
-  } else if (endsWithDiscretionaryHyphen) {
-    text += "-";
-  }
-  return text;
-}
-function createLayoutLine(prepared, cache, width, startSegmentIndex, startGraphemeIndex, endSegmentIndex, endGraphemeIndex) {
-  return {
-    text: buildLineTextFromRange(prepared.segments, prepared.kinds, cache, startSegmentIndex, startGraphemeIndex, endSegmentIndex, endGraphemeIndex),
-    width,
-    start: {
-      segmentIndex: startSegmentIndex,
-      graphemeIndex: startGraphemeIndex
-    },
-    end: {
-      segmentIndex: endSegmentIndex,
-      graphemeIndex: endGraphemeIndex
-    }
-  };
-}
-function toLayoutLineRange(line) {
-  return {
-    width: line.width,
-    start: {
-      segmentIndex: line.startSegmentIndex,
-      graphemeIndex: line.startGraphemeIndex
-    },
-    end: {
-      segmentIndex: line.endSegmentIndex,
-      graphemeIndex: line.endGraphemeIndex
-    }
-  };
-}
-function stepLineRange(prepared, start, maxWidth) {
-  const line = layoutNextLineRange(prepared, start, maxWidth);
-  if (line === null)
-    return null;
-  return toLayoutLineRange(line);
-}
-function materializeLine(prepared, line) {
-  return createLayoutLine(prepared, getLineTextCache(prepared), line.width, line.start.segmentIndex, line.start.graphemeIndex, line.end.segmentIndex, line.end.graphemeIndex);
-}
-function layoutNextLine(prepared, start, maxWidth) {
-  const line = stepLineRange(prepared, start, maxWidth);
-  if (line === null)
-    return null;
-  return materializeLine(prepared, line);
 }
 
 // src/renderer/theme.ts
@@ -3391,7 +3182,7 @@ function initNarrative(container) {
       return [{ text: rule, col: padding, row: 0, fg: theme.colors.dim }];
     }
     if (blockType === "npc-name") {
-      return [{ text: `◆ ${blockText}`, col: padding, row: 0, fg: theme.colors.npc, attrs: 1 }];
+      return [{ text: `◆ ${blockText}`, col: padding, row: 0, fg: theme.colors.npc, attrs: ATTR_BOLD | ATTR_UNDERLINE, npcName: blockText }];
     }
     if (blockType === "npc-dialogue") {
       const dialogPadding = padding + 2;
@@ -3519,6 +3310,15 @@ function initNarrative(container) {
             entityName: seg.entityName || seg.text
           });
         }
+        if (seg.npcName) {
+          hitRegions.push({
+            x: seg.col * charSize.width,
+            y: segPixelY,
+            w: seg.text.length * charSize.width,
+            h: charSize.height,
+            npcName: seg.npcName
+          });
+        }
       }
     }
   }
@@ -3549,10 +3349,17 @@ function initNarrative(container) {
     const my = e.clientY - rect.top;
     for (const region of hitRegions) {
       if (mx >= region.x && mx < region.x + region.w && my >= region.y && my < region.y + region.h) {
-        canvas.dispatchEvent(new CustomEvent("narrative-entity-click", {
-          detail: { entityId: region.entityId, entityName: region.entityName },
-          bubbles: true
-        }));
+        if (region.npcName) {
+          canvas.dispatchEvent(new CustomEvent("npc-name-click", {
+            detail: { npcName: region.npcName },
+            bubbles: true
+          }));
+        } else {
+          canvas.dispatchEvent(new CustomEvent("narrative-entity-click", {
+            detail: { entityId: region.entityId, entityName: region.entityName },
+            bubbles: true
+          }));
+        }
         return;
       }
     }
@@ -3652,219 +3459,15 @@ function initNarrative(container) {
         scheduleRender();
       }
     },
+    scroll(deltaY) {
+      scrollOffset += deltaY;
+      clampScroll();
+      const maxScroll = Math.max(0, store.totalHeight - canvasH);
+      userAtBottom = scrollOffset >= maxScroll - 30;
+      scheduleRender();
+    },
     canvas
   };
-}
-
-// src/ui/mention-dropdown.ts
-function createMentionDropdown() {
-  const el = document.createElement("div");
-  el.className = "mention-dropdown";
-  el.style.display = "none";
-  document.body.appendChild(el);
-  let items = [];
-  let filtered = [];
-  let selectedIndex = 0;
-  let selectCallback = null;
-  function render() {
-    el.innerHTML = filtered.map((s, i) => {
-      const icon = s.type === "npc" ? "◆" : "@";
-      const cls = i === selectedIndex ? "mention-item selected" : "mention-item";
-      const typeCls = s.type === "npc" ? "mention-npc" : "mention-player";
-      return `<div class="${cls} ${typeCls}" data-index="${i}"><span class="mention-icon">${icon}</span>${s.name}</div>`;
-    }).join("");
-    el.querySelectorAll(".mention-item").forEach((row) => {
-      row.addEventListener("click", () => {
-        const idx = parseInt(row.dataset.index || "0", 10);
-        if (filtered[idx] && selectCallback)
-          selectCallback(filtered[idx].name);
-        dropdown.hide();
-      });
-    });
-  }
-  const dropdown = {
-    el,
-    onSelect: null,
-    show(suggestions, anchor) {
-      items = suggestions;
-      filtered = [...items];
-      selectedIndex = 0;
-      selectCallback = this.onSelect;
-      const rect = anchor.getBoundingClientRect();
-      el.style.position = "fixed";
-      el.style.bottom = `${window.innerHeight - rect.top + 4}px`;
-      el.style.left = `${rect.left}px`;
-      el.style.display = "";
-      render();
-    },
-    hide() {
-      el.style.display = "none";
-      items = [];
-      filtered = [];
-    },
-    isVisible() {
-      return el.style.display !== "none";
-    },
-    filter(query) {
-      const q = query.toLowerCase();
-      filtered = q ? items.filter((s) => s.name.toLowerCase().startsWith(q)) : [...items];
-      selectedIndex = 0;
-      render();
-      el.style.display = filtered.length > 0 ? "" : "none";
-    },
-    handleKey(e) {
-      if (!this.isVisible())
-        return false;
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        selectedIndex = Math.max(0, selectedIndex - 1);
-        render();
-        return true;
-      }
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        selectedIndex = Math.min(filtered.length - 1, selectedIndex + 1);
-        render();
-        return true;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        if (filtered[selectedIndex] && selectCallback) {
-          e.preventDefault();
-          selectCallback(filtered[selectedIndex].name);
-          this.hide();
-          return true;
-        }
-      }
-      if (e.key === "Escape") {
-        this.hide();
-        return true;
-      }
-      return false;
-    }
-  };
-  return dropdown;
-}
-
-// src/panels/input.ts
-function initInput(inputEl, onSubmit, getContext) {
-  const history = [];
-  let historyIndex = -1;
-  let locked = false;
-  const defaultPlaceholder = inputEl.placeholder || "What do you do?";
-  function setLocked(isLocked) {
-    locked = isLocked;
-    inputEl.disabled = isLocked;
-    inputEl.classList.toggle("input-locked", isLocked);
-  }
-  onRoundStateChange((rs) => {
-    switch (rs.phase) {
-      case "ready":
-        setLocked(false);
-        inputEl.placeholder = defaultPlaceholder;
-        break;
-      case "collecting": {
-        setLocked(false);
-        const timer = rs.secondsLeft != null ? `${rs.secondsLeft}s left to act...` : "Round open...";
-        inputEl.placeholder = timer;
-        break;
-      }
-      case "resolving":
-        setLocked(true);
-        inputEl.placeholder = "Resolving...";
-        break;
-      case "npc_response":
-        setLocked(true);
-        inputEl.placeholder = "NPCs responding...";
-        break;
-    }
-  });
-  const dropdown = createMentionDropdown();
-  let mentionActive = false;
-  let mentionStart = -1;
-  function getMentionSuggestions() {
-    if (!getContext)
-      return [];
-    const ctx = getContext();
-    const suggestions = [];
-    for (const npc of ctx.npcs) {
-      const name = typeof npc === "string" ? npc : npc.name;
-      suggestions.push({ name, type: "npc" });
-    }
-    for (const p of ctx.players) {
-      const name = typeof p === "string" ? p : p.name;
-      suggestions.push({ name, type: "player" });
-    }
-    return suggestions;
-  }
-  dropdown.onSelect = (name) => {
-    const before = inputEl.value.slice(0, mentionStart);
-    const after = inputEl.value.slice(inputEl.selectionStart || inputEl.value.length);
-    inputEl.value = `${before}@${name} ${after}`;
-    inputEl.focus();
-    mentionActive = false;
-    mentionStart = -1;
-  };
-  inputEl.addEventListener("keydown", (e) => {
-    if (locked)
-      return;
-    if (mentionActive && dropdown.handleKey(e))
-      return;
-    if (e.key === "Enter") {
-      if (mentionActive) {
-        dropdown.hide();
-        mentionActive = false;
-      }
-      const action = inputEl.value.trim();
-      if (action) {
-        history.unshift(action);
-        historyIndex = -1;
-        onSubmit(action);
-        inputEl.value = "";
-      }
-    } else if (e.key === "ArrowUp" && !mentionActive) {
-      e.preventDefault();
-      if (historyIndex < history.length - 1) {
-        historyIndex++;
-        inputEl.value = history[historyIndex];
-      }
-    } else if (e.key === "ArrowDown" && !mentionActive) {
-      e.preventDefault();
-      if (historyIndex > 0) {
-        historyIndex--;
-        inputEl.value = history[historyIndex];
-      } else {
-        historyIndex = -1;
-        inputEl.value = "";
-      }
-    } else if (e.key === "Escape" && mentionActive) {
-      dropdown.hide();
-      mentionActive = false;
-    }
-  });
-  inputEl.addEventListener("input", () => {
-    const val = inputEl.value;
-    const cursor = inputEl.selectionStart || val.length;
-    if (!mentionActive) {
-      if (cursor > 0 && val[cursor - 1] === "@") {
-        const charBefore = cursor > 1 ? val[cursor - 2] : " ";
-        if (charBefore === " " || charBefore === undefined || cursor === 1) {
-          mentionActive = true;
-          mentionStart = cursor - 1;
-          const suggestions = getMentionSuggestions();
-          dropdown.show(suggestions, inputEl);
-          dropdown.filter("");
-        }
-      }
-    } else {
-      const query = val.slice(mentionStart + 1, cursor);
-      if (query.includes(" ") || cursor <= mentionStart) {
-        dropdown.hide();
-        mentionActive = false;
-      } else {
-        dropdown.filter(query);
-      }
-    }
-  });
 }
 
 // src/map/colors.ts
@@ -4273,6 +3876,10 @@ var renderer = null;
 var controller = null;
 var cleanupInput = null;
 var mapRef = { current: null };
+var viewportCallback = null;
+function setViewportCallback(cb) {
+  viewportCallback = cb;
+}
 var entityCache = new Map;
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function fetchEntityData(id, name) {
@@ -4301,6 +3908,9 @@ async function fetchEntityData(id, name) {
   entityCache.set(id, fallback);
   return fallback;
 }
+function getMapCanvas() {
+  return renderer?.element ?? null;
+}
 function initMapPanel(mapContainer, _onAction) {
   renderer = new MapRenderer(mapContainer);
 }
@@ -4311,12 +3921,21 @@ function updateMap(state2, onAction) {
   mapRef.current = map;
   if (!controller) {
     controller = new PlayerController(map, (type, entity) => {
-      if (type === "npc")
-        onAction(`talk to ${entity.name}`);
-      else if (type === "item")
-        onAction(`examine ${entity.name}`);
-      else if (type === "exit")
+      if (type === "npc") {
+        const npc = entity;
+        document.dispatchEvent(new CustomEvent("narrative-entity-click", {
+          detail: { entityId: npc.id, entityName: npc.name },
+          bubbles: true
+        }));
+      } else if (type === "item") {
+        const item = entity;
+        document.dispatchEvent(new CustomEvent("narrative-entity-click", {
+          detail: { entityId: item.id, entityName: item.name },
+          bubbles: true
+        }));
+      } else if (type === "exit") {
         onAction(`go ${entity.direction}`);
+      }
     }, (type, entity) => {
       if (!renderer)
         return;
@@ -4342,6 +3961,7 @@ function updateMap(state2, onAction) {
             hint: hints[type] || "[Enter] Interact"
           };
           renderer.setCard(card);
+          viewportCallback?.(card);
           if (mapRef.current && controller) {
             renderer.render(mapRef.current, controller.x, controller.y);
           }
@@ -4373,6 +3993,7 @@ function showPlayerCard(state2) {
     xpThreshold: state2.player.xpThreshold
   };
   renderer.setCard(card);
+  viewportCallback?.(card);
 }
 
 // src/panels/panel-utils.ts
@@ -4413,9 +4034,8 @@ function barRow(label, value, max, barLen, fullColor, emptyColor, cols) {
   ];
   return coloredRow(segments, cols);
 }
-function renderCharacterPanel(panel, state2) {
+function renderCharacterPanel(cols, _rows, state2) {
   const p = state2.player;
-  const cols = panel.cols;
   const cells = [];
   if (p.archetype) {
     cells.push(textRow(p.archetype, theme.colors.accent, cols));
@@ -4439,7 +4059,7 @@ function renderCharacterPanel(panel, state2) {
       ], cols));
     }
   }
-  panel.paint(cells);
+  return { cells };
 }
 
 // src/panels/inventory.ts
@@ -4461,8 +4081,7 @@ var onManageInventory = null;
 function setManageInventoryCallback(fn) {
   onManageInventory = fn;
 }
-function renderInventoryPanel(panel, state2) {
-  const cols = panel.cols;
+function renderInventoryPanel(cols, _rows, state2) {
   const cells = [];
   cells.push(coloredRow([{ text: "EQUIPPED", fg: theme.colors.dim }], cols));
   for (const slot of SLOT_ORDER) {
@@ -4507,153 +4126,19 @@ function renderInventoryPanel(panel, state2) {
   cells.push(coloredRow([
     { text: "  [manage inventory]", fg: theme.colors.accent }
   ], cols));
-  panel.paint(cells);
-}
-
-// src/panels/worldmap.ts
-var COLOR_CURRENT = theme.colors.accent;
-var COLOR_VISITED = theme.colors.location;
-var COLOR_UNVISITED = "#3a3a48";
-var COLOR_LINE = theme.colors.dim;
-var COLOR_BRACKET = theme.colors.primary;
-function segmentRow(segments, cols, startCol = 0) {
-  const row = Array.from({ length: cols }, () => ({
-    char: " ",
-    fg: theme.colors.primary
-  }));
-  let col = startCol;
-  for (const seg of segments) {
-    for (const ch of seg.text) {
-      if (col >= cols)
-        break;
-      row[col] = { char: ch, fg: seg.fg };
-      col++;
-    }
-  }
-  return row;
-}
-function renderWorldMapPanel(panel, state2, onAction) {
-  const cols = panel.cols;
-  const cells = [];
-  panel.clearHitRegions();
-  const wm = state2.worldMap;
-  if (!wm) {
-    cells.push(textRow("No map data", COLOR_UNVISITED, cols));
-    panel.paint(cells);
-    return;
-  }
-  const currentId = wm.current_id || "";
-  const currentRoom = currentId ? wm.rooms.find((r) => r.id === currentId) : wm.rooms.find((r) => r.name === wm.current);
-  const currentName = currentRoom?.name || wm.current || state2.location?.name || "Unknown";
-  const byDir = {};
-  for (const room of wm.rooms) {
-    if (room === currentRoom)
-      continue;
-    if (room.direction) {
-      byDir[room.direction.toLowerCase()] = room;
-    }
-  }
-  const label = `[${currentName}]`;
-  const westRoom = byDir["west"];
-  const eastRoom = byDir["east"];
-  const northRoom = byDir["north"];
-  const southRoom = byDir["south"];
-  const westText = westRoom ? westRoom.visited ? westRoom.name : "?" : null;
-  const eastText = eastRoom ? eastRoom.visited ? eastRoom.name : "?" : null;
-  const northText = northRoom ? northRoom.visited ? northRoom.name : "?" : null;
-  const southText = southRoom ? southRoom.visited ? southRoom.name : "?" : null;
-  const HORIZ = " --- ";
-  const westPart = westText ? westText + HORIZ : "";
-  const eastPart = eastText ? HORIZ + eastText : "";
-  const mainLine = westPart + label + eastPart;
-  const mainStart = Math.max(0, Math.floor((cols - mainLine.length) / 2));
-  const labelStartCol = mainStart + westPart.length;
-  const labelMidCol = labelStartCol + Math.floor(label.length / 2);
-  if (northText !== null) {
-    const fg = northRoom.visited ? COLOR_VISITED : COLOR_UNVISITED;
-    const nameStart = Math.max(0, labelMidCol - Math.floor(northText.length / 2));
-    cells.push(segmentRow([{ text: northText, fg }], cols, nameStart));
-    cells.push(segmentRow([{ text: "|", fg: COLOR_LINE }], cols, labelMidCol));
-  }
-  {
-    const segments = [];
-    if (westText !== null) {
-      const fg = westRoom.visited ? COLOR_VISITED : COLOR_UNVISITED;
-      segments.push({ text: westText, fg });
-      segments.push({ text: HORIZ, fg: COLOR_LINE });
-    }
-    segments.push({ text: "[", fg: COLOR_BRACKET });
-    segments.push({ text: currentName, fg: COLOR_CURRENT });
-    segments.push({ text: "]", fg: COLOR_BRACKET });
-    if (eastText !== null) {
-      const fg = eastRoom.visited ? COLOR_VISITED : COLOR_UNVISITED;
-      segments.push({ text: HORIZ, fg: COLOR_LINE });
-      segments.push({ text: eastText, fg });
-    }
-    const mainRowIdx = cells.length;
-    cells.push(segmentRow(segments, cols, mainStart));
-    if (westText !== null) {
-      const westStart = mainStart;
-      const westWidth = westText.length;
-      panel.registerHitRegion({
-        col: westStart,
-        row: mainRowIdx,
-        width: westWidth,
-        height: 1,
-        data: { action: "go west" }
-      });
-    }
-    if (eastText !== null) {
-      const eastStart = mainStart + westPart.length + label.length + HORIZ.length;
-      const eastWidth = eastText.length;
-      panel.registerHitRegion({
-        col: eastStart,
-        row: mainRowIdx,
-        width: eastWidth,
-        height: 1,
-        data: { action: "go east" }
-      });
-    }
-  }
-  if (southText !== null) {
-    cells.push(segmentRow([{ text: "|", fg: COLOR_LINE }], cols, labelMidCol));
-    const fg = southRoom.visited ? COLOR_VISITED : COLOR_UNVISITED;
-    const nameStart = Math.max(0, labelMidCol - Math.floor(southText.length / 2));
-    const southRowIdx = cells.length;
-    cells.push(segmentRow([{ text: southText, fg }], cols, nameStart));
-    panel.registerHitRegion({
-      col: nameStart,
-      row: southRowIdx,
-      width: southText.length,
-      height: 1,
-      data: { action: "go south" }
-    });
-  }
-  if (northText !== null) {
-    const nameStart = Math.max(0, labelMidCol - Math.floor(northText.length / 2));
-    panel.registerHitRegion({
-      col: nameStart,
-      row: 0,
-      width: northText.length,
-      height: 1,
-      data: { action: "go north" }
-    });
-  }
-  panel.paint(cells);
+  return { cells };
 }
 
 // src/panels/present.ts
-function renderPresentPanel(panel, state2, onAction) {
-  const cols = panel.cols;
+function renderPresentPanel(cols, _rows, state2) {
   const cells = [];
+  const hitRegions = [];
   const npcs = state2.location.npcs || [];
   const items = state2.location.items || [];
   const players = state2.location.players || [];
-  panel.clearHitRegions();
   if (npcs.length === 0 && items.length === 0 && players.length === 0) {
     cells.push(textRow("Nothing here", theme.colors.dim, cols));
-    panel.paint(cells);
-    return;
+    return { cells };
   }
   const rs = getRoundState();
   const isThinking = rs.phase === "npc_response";
@@ -4661,29 +4146,39 @@ function renderPresentPanel(panel, state2, onAction) {
   for (const npc of npcs) {
     const name = typeof npc === "string" ? npc : npc.name;
     const role = typeof npc === "string" ? "" : npc.role || "";
-    const segments = [
+    const startRow = cells.length;
+    cells.push(coloredRow([
       { text: "◆ ", fg: npcColor },
-      { text: name, fg: npcColor }
-    ];
+      { text: name, fg: npcColor, attrs: ATTR_BOLD }
+    ], cols));
     if (role) {
-      segments.push({ text: " — " + role, fg: theme.colors.dim });
+      cells.push(coloredRow([
+        { text: "  ", fg: theme.colors.dim },
+        { text: role, fg: theme.colors.dim }
+      ], cols));
     }
-    const rowIdx = cells.length;
-    cells.push(coloredRow(segments, cols));
-    panel.registerHitRegion({
+    const sep = [];
+    for (let i = 0;i < cols; i++) {
+      sep.push({ char: i < cols - 1 ? "─" : " ", fg: "#1a1a25" });
+    }
+    cells.push(sep);
+    hitRegions.push({
       col: 0,
-      row: rowIdx,
+      row: startRow,
       width: cols,
-      height: 1,
+      height: cells.length - startRow,
       data: { action: `talk to ${name}` }
     });
   }
-  for (const p of players) {
-    const name = typeof p === "string" ? p : p.name;
-    cells.push(coloredRow([
-      { text: "@ ", fg: theme.colors.heal },
-      { text: name, fg: theme.colors.primary }
-    ], cols));
+  if (players.length > 0) {
+    for (const p of players) {
+      const name = typeof p === "string" ? p : p.name;
+      cells.push(coloredRow([
+        { text: "@ ", fg: theme.colors.heal },
+        { text: name, fg: theme.colors.primary }
+      ], cols));
+    }
+    cells.push(emptyRow(cols));
   }
   for (const item of items) {
     const name = typeof item === "string" ? item : item.name;
@@ -4692,7 +4187,7 @@ function renderPresentPanel(panel, state2, onAction) {
       { text: "· ", fg: theme.colors.dim },
       { text: name, fg: theme.colors.primary }
     ], cols));
-    panel.registerHitRegion({
+    hitRegions.push({
       col: 0,
       row: rowIdx,
       width: cols,
@@ -4700,18 +4195,16 @@ function renderPresentPanel(panel, state2, onAction) {
       data: { action: `examine ${name}` }
     });
   }
-  panel.paint(cells);
+  return { cells, hitRegions };
 }
 
 // src/panels/questlog.ts
-function renderQuestLogPanel(panel, quests) {
-  const cols = panel.cols;
+function renderQuestLogPanel(cols, _rows, quests) {
   const cells = [];
-  panel.clearHitRegions();
+  const hitRegions = [];
   if (!quests || quests.length === 0) {
     cells.push(textRow("No active quests", theme.colors.dim, cols));
-    panel.paint(cells);
-    return;
+    return { cells };
   }
   for (let i = 0;i < quests.length; i++) {
     const q = quests[i];
@@ -4745,7 +4238,7 @@ function renderQuestLogPanel(panel, quests) {
       cells.push(textRow(desc, theme.colors.dim, cols));
     }
     const questEndRow = cells.length;
-    panel.registerHitRegion({
+    hitRegions.push({
       col: 0,
       row: questStartRow,
       width: cols,
@@ -4753,205 +4246,127 @@ function renderQuestLogPanel(panel, quests) {
       data: { questName: q.name }
     });
   }
-  panel.paint(cells);
+  return { cells, hitRegions };
 }
 
-// src/panels/factions.ts
-function dispositionColor(disposition) {
-  switch (disposition) {
-    case "hostile":
-      return theme.colors.damage;
-    case "unfriendly":
-      return theme.colors.damage;
-    case "friendly":
-      return theme.colors.heal;
-    case "allied":
-      return theme.colors.heal;
-    default:
-      return theme.colors.primary;
-  }
-}
-function renderFactionsPanel(panel, factions) {
-  const cols = panel.cols;
+// src/panels/viewport.ts
+var BAR_FULL = "█";
+var BAR_EMPTY = "░";
+var BAR_WIDTH = 12;
+function renderViewport(cols, _rows, card, sceneArt) {
   const cells = [];
-  if (!factions || factions.length === 0) {
-    cells.push(textRow("No known factions", theme.colors.dim, cols));
-    panel.paint(cells);
-    return;
-  }
-  for (let i = 0;i < factions.length; i++) {
-    const f = factions[i];
-    if (i > 0)
-      cells.push(emptyRow(cols));
-    cells.push(textRow(f.name, theme.colors.primary, cols));
-    const normalized = Math.round((f.reputation + 1) * 5);
-    const clamped = Math.max(0, Math.min(10, normalized));
-    const barColor = dispositionColor(f.disposition);
-    cells.push(coloredRow([
-      { text: "█".repeat(clamped), fg: barColor },
-      { text: "░".repeat(10 - clamped), fg: theme.colors.dim },
-      { text: " " + f.disposition, fg: barColor }
-    ], cols));
-  }
-  panel.paint(cells);
-}
-
-// src/ui/terminal-panel.ts
-class TerminalPanel {
-  canvas;
-  ctx;
-  charSize;
-  cols = 0;
-  rows = 0;
-  font;
-  prevCells = [];
-  lastCells = [];
-  hitRegions = [];
-  resizeObserver;
-  boundClick;
-  constructor(opts) {
-    this.font = opts.font ?? MONO_FONT;
-    this.canvas = document.createElement("canvas");
-    this.canvas.style.display = "block";
-    this.canvas.style.width = "100%";
-    this.canvas.style.height = "100%";
-    opts.container.appendChild(this.canvas);
-    const ctx = this.canvas.getContext("2d");
-    if (!ctx)
-      throw new Error("TerminalPanel: failed to get 2d context");
-    this.ctx = ctx;
-    this.charSize = measureChar(this.ctx, this.font);
-    this.resize();
-    this.resizeObserver = new ResizeObserver(() => this.resize());
-    this.resizeObserver.observe(opts.container);
-    this.boundClick = (e) => this.handleClick(e);
-    this.canvas.addEventListener("click", this.boundClick);
-  }
-  resize() {
-    const rect = this.canvas.parentElement?.getBoundingClientRect();
-    if (!rect)
-      return;
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = rect.width;
-    const cssH = rect.height;
-    this.canvas.width = Math.floor(cssW * dpr);
-    this.canvas.height = Math.floor(cssH * dpr);
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.cols = Math.floor(cssW / this.charSize.width);
-    this.rows = Math.floor(cssH / this.charSize.height);
-    this.prevCells = [];
-    if (this.lastCells.length > 0) {
-      this.paint(this.lastCells);
-    }
-  }
-  paint(cells) {
-    const rows = Math.min(cells.length, this.rows);
-    for (let r = 0;r < rows; r++) {
-      const row = cells[r];
-      const prevRow = this.prevCells[r];
-      const cols = Math.min(row?.length ?? 0, this.cols);
+  if (cols < 10)
+    return { cells };
+  if (sceneArt && sceneArt.length > 0) {
+    const artColor = theme.colors.dim;
+    for (const line of sceneArt) {
+      const row = [];
       for (let c = 0;c < cols; c++) {
-        const cell = row[c];
-        const prev = prevRow?.[c];
-        if (prev && prev.char === cell.char && prev.fg === cell.fg && prev.bg === cell.bg && prev.attrs === cell.attrs) {
-          continue;
-        }
-        const px = c * this.charSize.width;
-        const py = r * this.charSize.height;
-        this.ctx.clearRect(px, py, this.charSize.width, this.charSize.height);
-        fillCell(this.ctx, c, r, cell, this.charSize);
+        row.push({ char: line[c] || " ", fg: artColor });
       }
+      cells.push(row);
     }
-    this.prevCells = cells.map((row) => row.map((cell) => ({ ...cell })));
-    this.lastCells = cells;
-  }
-  registerHitRegion(region) {
-    this.hitRegions.push(region);
-  }
-  clearHitRegions() {
-    this.hitRegions = [];
-  }
-  handleClick(e) {
-    const rect = this.canvas.getBoundingClientRect();
-    const col = Math.floor((e.clientX - rect.left) / this.charSize.width);
-    const row = Math.floor((e.clientY - rect.top) / this.charSize.height);
-    for (const region of this.hitRegions) {
-      if (col >= region.col && col < region.col + region.width && row >= region.row && row < region.row + region.height) {
-        this.canvas.dispatchEvent(new CustomEvent("panel-click", {
-          detail: region.data,
-          bubbles: true
-        }));
-        return;
-      }
+  } else if (card) {
+    renderCard(cells, cols, card);
+  } else {
+    const msg = "~ nothing in focus ~";
+    const row = [];
+    const pad = Math.max(0, Math.floor((cols - msg.length) / 2));
+    for (let c = 0;c < cols; c++) {
+      const ch = c >= pad && c < pad + msg.length ? msg[c - pad] : " ";
+      row.push({ char: ch, fg: theme.colors.dim });
     }
+    cells.push(row);
   }
-  destroy() {
-    this.resizeObserver.disconnect();
-    this.canvas.removeEventListener("click", this.boundClick);
+  return { cells };
+}
+function renderCard(cells, cols, card) {
+  const { colors } = theme;
+  const nameRow = [];
+  const nameColor = card.type === "player" ? colors.accent : colors.npc;
+  writeText(nameRow, cols, `◆ ${card.name}`, nameColor, ATTR_BOLD);
+  cells.push(nameRow);
+  if (card.labels.length > 0) {
+    const labelRow = [];
+    const labelText = card.labels.map((l) => `[${l}]`).join(" ");
+    writeText(labelRow, cols, `  ${labelText}`, colors.dim);
+    cells.push(labelRow);
+  }
+  if (card.summary) {
+    const maxLen = cols - 2;
+    const summary = card.summary.length > maxLen ? card.summary.slice(0, maxLen - 3) + "..." : card.summary;
+    const summaryRow = [];
+    writeText(summaryRow, cols, `  ${summary}`, colors.primary);
+    cells.push(summaryRow);
+  }
+  if (card.health !== undefined && card.maxHealth !== undefined) {
+    const hpRow = [];
+    const hpPct = Math.max(0, Math.min(1, card.health / card.maxHealth));
+    const hpColor = hpPct > 0.3 ? colors.heal : colors.damage;
+    const filled = Math.round(hpPct * BAR_WIDTH);
+    const barStr = BAR_FULL.repeat(filled) + BAR_EMPTY.repeat(BAR_WIDTH - filled);
+    writeText(hpRow, cols, `  HP `, colors.dim);
+    appendText(hpRow, barStr, hpColor);
+    appendText(hpRow, ` ${card.health}/${card.maxHealth}`, colors.primary);
+    padRow(hpRow, cols);
+    cells.push(hpRow);
+  }
+  if (card.xp !== undefined && card.xpThreshold !== undefined) {
+    const xpRow = [];
+    const xpPct = Math.max(0, Math.min(1, card.xp / card.xpThreshold));
+    const filled = Math.round(xpPct * BAR_WIDTH);
+    const barStr = BAR_FULL.repeat(filled) + BAR_EMPTY.repeat(BAR_WIDTH - filled);
+    writeText(xpRow, cols, `  XP `, colors.dim);
+    appendText(xpRow, barStr, colors.accent);
+    appendText(xpRow, ` ${card.xp}/${card.xpThreshold}`, colors.primary);
+    padRow(xpRow, cols);
+    cells.push(xpRow);
+  }
+  if (card.level !== undefined) {
+    const lvRow = [];
+    writeText(lvRow, cols, `  Lv ${card.level}`, colors.dim);
+    cells.push(lvRow);
+  }
+  if (card.hint) {
+    const hintRow = [];
+    writeText(hintRow, cols, `  ${card.hint}`, colors.dim);
+    cells.push(hintRow);
   }
 }
-
-// src/ui/window.ts
-function createWindow(opts) {
-  const el = document.createElement("div");
-  el.className = `win${opts.className ? ` ${opts.className}` : ""}`;
-  if (opts.id)
-    el.id = opts.id;
-  const titleBar = document.createElement("div");
-  titleBar.className = "win-title";
-  titleBar.textContent = `─ ${opts.title} ─`;
-  const body = document.createElement("div");
-  body.className = "win-body";
-  if (opts.scrollable)
-    body.style.overflowY = "auto";
-  el.appendChild(titleBar);
-  el.appendChild(body);
-  let panel;
-  if (opts.canvas) {
-    panel = new TerminalPanel({ container: body });
+function writeText(row, cols, text, fg, attrs) {
+  for (let i = 0;i < cols; i++) {
+    row.push({ char: text[i] || " ", fg, attrs });
   }
-  return {
-    el,
-    body,
-    panel,
-    setTitle(title) {
-      titleBar.textContent = `─ ${title} ─`;
-    },
-    show() {
-      el.style.display = "";
-    },
-    hide() {
-      el.style.display = "none";
-    },
-    toggle() {
-      el.style.display = el.style.display === "none" ? "" : "none";
-    },
-    get visible() {
-      return el.style.display !== "none";
-    }
-  };
+}
+function appendText(row, text, fg, attrs) {
+  for (const ch of text) {
+    row.push({ char: ch, fg, attrs });
+  }
+}
+function padRow(row, cols) {
+  while (row.length < cols) {
+    row.push({ char: " ", fg: "#0a0a0f" });
+  }
 }
 
 // src/ui/header.ts
-function createHeader() {
-  const el = document.createElement("div");
-  el.className = "tui-header";
-  el.innerHTML = `
-    <span class="header-time">
-      <span class="header-moon">☽</span>
-      <span class="header-date">—</span>
-    </span>
-    <span class="header-title">MEMENTO MORI</span>
-  `;
-  const moonEl = el.querySelector(".header-moon");
-  const dateEl = el.querySelector(".header-date");
-  return {
-    el,
-    updateTime(time) {
-      moonEl.textContent = time.moon_icon;
-      dateEl.textContent = `${time.moon_phase}  ·  ${ordinal(time.day_number)} of ${time.month}  ·  ${time.time_of_day}`;
-    }
-  };
+function renderHeader(cols, state2) {
+  const titleText = state2.title;
+  let timeText = "";
+  if (state2.worldTime) {
+    const wt = state2.worldTime;
+    timeText = `${wt.moon_icon} ${wt.moon_phase}  ·  ${ordinal(wt.day_number)} of ${wt.month}  ·  ${wt.time_of_day}`;
+  }
+  const spacerLen = Math.max(1, cols - titleText.length - timeText.length);
+  const spacer = " ".repeat(spacerLen);
+  const segments = [
+    { text: titleText, fg: theme.colors.npc },
+    { text: spacer, fg: theme.colors.primary }
+  ];
+  if (timeText) {
+    segments.push({ text: timeText, fg: theme.colors.dim });
+  }
+  return { cells: [coloredRow(segments, cols)] };
 }
 function ordinal(n) {
   const s = ["th", "st", "nd", "rd"];
@@ -4959,215 +4374,1044 @@ function ordinal(n) {
   return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
 }
 
-// src/ui/typewriter.ts
-function createTypewriter(opts) {
-  const {
-    text,
-    font,
-    maxWidth,
-    container,
-    charDelay = 25,
-    lineClass = "tw-line",
-    cursorClass = "tw-cursor"
-  } = opts;
-  let completeCb = null;
-  let timer = null;
-  let cancelled = false;
-  let started = false;
-  const prepared = prepareWithSegments(text, font);
-  const lines = [];
-  let cursor = { segmentIndex: 0, graphemeIndex: 0 };
-  while (true) {
-    const line = layoutNextLine(prepared, cursor, maxWidth);
-    if (!line)
+// src/ui/status.ts
+function renderStatusBar(cols, state2) {
+  let phaseText;
+  switch (state2.phase) {
+    case "ready":
+      phaseText = state2.location ? `✓ Ready · ${state2.location}` : "✓ Ready";
       break;
-    lines.push(line.text);
-    cursor = line.end;
+    case "collecting":
+      phaseText = `⟳ Collecting · ${state2.tick}s`;
+      break;
+    case "resolving":
+      phaseText = "⟳ Resolving";
+      break;
+    case "npc_response":
+      phaseText = "⟳ NPCs Responding";
+      break;
+    default:
+      phaseText = state2.phase;
   }
-  let lineIdx = 0;
-  let charIdx = 0;
-  let currentLineEl = null;
-  let cursorEl = null;
-  function ensureCursor() {
-    if (!cursorEl) {
-      cursorEl = document.createElement("span");
-      cursorEl.className = cursorClass;
-      cursorEl.textContent = "█";
-    }
-    return cursorEl;
+  if (state2.activity) {
+    phaseText += `  ✨ ${state2.activity}`;
   }
-  function tick() {
-    if (cancelled || lineIdx >= lines.length) {
-      finish();
-      return;
-    }
-    if (!currentLineEl) {
-      currentLineEl = document.createElement("div");
-      currentLineEl.className = lineClass;
-      container.appendChild(currentLineEl);
-    }
-    const line = lines[lineIdx];
-    if (charIdx < line.length) {
-      ensureCursor().remove();
-      currentLineEl.textContent = line.slice(0, charIdx + 1);
-      currentLineEl.appendChild(ensureCursor());
-      charIdx++;
-      timer = setTimeout(tick, charDelay);
-    } else {
-      ensureCursor().remove();
-      lineIdx++;
-      charIdx = 0;
-      currentLineEl = null;
-      timer = setTimeout(tick, charDelay);
-    }
-  }
-  function finish() {
-    if (cursorEl)
-      cursorEl.remove();
-    cursorEl = null;
-    if (completeCb)
-      completeCb();
-  }
-  function showAll() {
-    if (timer)
-      clearTimeout(timer);
-    container.innerHTML = "";
-    for (const line of lines) {
-      const div = document.createElement("div");
-      div.className = lineClass;
-      div.textContent = line;
-      container.appendChild(div);
-    }
-    finish();
-  }
-  return {
-    start() {
-      if (started)
-        return;
-      started = true;
-      container.innerHTML = "";
-      tick();
-    },
-    skip() {
-      if (cancelled)
-        return;
-      showAll();
-    },
-    cancel() {
-      cancelled = true;
-      if (timer)
-        clearTimeout(timer);
-      if (cursorEl)
-        cursorEl.remove();
-    },
-    onComplete(cb) {
-      completeCb = cb;
-    }
-  };
+  const chainText = state2.chain ? "◆ Redstone: synced" : "◇ Redstone: offline";
+  const chainColor = state2.chain ? theme.colors.heal : theme.colors.dim;
+  const tickText = `☽ Tick ${state2.tick}`;
+  const innerSpace = cols - phaseText.length - chainText.length - tickText.length;
+  const leftPad = Math.max(1, Math.floor(innerSpace / 2));
+  const rightPad = Math.max(1, innerSpace - leftPad);
+  const segments = [
+    { text: phaseText, fg: theme.colors.system },
+    { text: " ".repeat(leftPad), fg: theme.colors.primary },
+    { text: chainText, fg: chainColor },
+    { text: " ".repeat(rightPad), fg: theme.colors.primary },
+    { text: tickText, fg: theme.colors.dim }
+  ];
+  return { cells: [coloredRow(segments, cols)] };
 }
 
-// src/ui/dialog.ts
-var DIALOG_FONT = '15px Georgia, "Times New Roman", serif';
-var DIALOG_MAX_WIDTH = 440;
-function createDialog() {
-  const backdrop = document.createElement("div");
-  backdrop.className = "dialog-backdrop";
-  backdrop.style.display = "none";
-  const win = document.createElement("div");
-  win.className = "dialog-win";
-  const titleBar = document.createElement("div");
-  titleBar.className = "win-title dialog-title";
-  const body = document.createElement("div");
-  body.className = "win-body dialog-body";
-  win.appendChild(titleBar);
-  win.appendChild(body);
-  backdrop.appendChild(win);
-  let currentTw = null;
-  function dismiss() {
-    if (currentTw) {
-      currentTw.cancel();
-      currentTw = null;
-    }
-    backdrop.style.display = "none";
-    body.innerHTML = "";
+// src/canvas/region-manager.ts
+var PRESENT_COLS = 20;
+var SIDEBAR_COLS = 32;
+function computeRegions(totalCols, totalRows) {
+  const regions = new Map;
+  const innerCols = totalCols - 2;
+  const presentCols = Math.min(PRESENT_COLS, Math.floor(innerCols * 0.2));
+  const sidebarCols = Math.min(SIDEBAR_COLS, Math.floor(innerCols * 0.25));
+  const viewportCols = innerCols - presentCols - sidebarCols - 2;
+  const colPresent = 1;
+  const colVDiv0 = colPresent + presentCols;
+  const colViewport = colVDiv0 + 1;
+  const colVDiv1 = colViewport + viewportCols;
+  const colSidebar = colVDiv1 + 1;
+  const contentZoneRows = Math.max(totalRows - 9, 2);
+  const topZoneRows = Math.max(Math.floor(contentZoneRows * 2 / 3), 3);
+  const bottomZoneRows = Math.max(contentZoneRows - topZoneRows, 1);
+  const rowHeader = 1;
+  const rowHDiv0 = 2;
+  const rowTopStart = 3;
+  const rowHDiv1 = rowTopStart + topZoneRows;
+  const rowBotStart = rowHDiv1 + 1;
+  const rowHDiv2 = rowBotStart + bottomZoneRows;
+  const rowInput = rowHDiv2 + 1;
+  const rowHDiv3 = rowInput + 1;
+  const rowStatus = rowHDiv3 + 1;
+  const sidebarContentRows = topZoneRows - 2;
+  const charRows = Math.max(Math.floor(sidebarContentRows * 2 / 7), 1);
+  const questRows = Math.max(Math.floor(sidebarContentRows * 2 / 7), 1);
+  const inventoryRows = Math.max(sidebarContentRows - charRows - questRows, 1);
+  const rowSDiv0 = rowTopStart + charRows;
+  const rowSDiv1 = rowSDiv0 + 1 + inventoryRows;
+  function add(r) {
+    regions.set(r.name, r);
   }
-  document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape" || backdrop.style.display === "none")
-      return;
-    if (currentTw) {
-      currentTw.skip();
-      currentTw = null;
+  add({
+    name: "header",
+    col: colPresent,
+    row: rowHeader,
+    cols: innerCols,
+    rows: 1,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "input",
+    col: colPresent,
+    row: rowInput,
+    cols: innerCols,
+    rows: 1,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "status",
+    col: colPresent,
+    row: rowStatus,
+    cols: innerCols,
+    rows: 1,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "present",
+    col: colPresent,
+    row: rowTopStart,
+    cols: presentCols,
+    rows: topZoneRows,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "viewport",
+    col: colViewport,
+    row: rowTopStart,
+    cols: viewportCols,
+    rows: topZoneRows,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "character",
+    col: colSidebar,
+    row: rowTopStart,
+    cols: sidebarCols,
+    rows: charRows,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "inventory",
+    col: colSidebar,
+    row: rowSDiv0 + 1,
+    cols: sidebarCols,
+    rows: inventoryRows,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "quests",
+    col: colSidebar,
+    row: rowSDiv1 + 1,
+    cols: sidebarCols,
+    rows: questRows,
+    type: "grid",
+    scrollOffset: 0
+  });
+  const narrativeCols = presentCols + 1 + viewportCols;
+  add({
+    name: "narrative",
+    col: colPresent,
+    row: rowBotStart,
+    cols: narrativeCols,
+    rows: bottomZoneRows,
+    type: "pixel",
+    scrollOffset: 0
+  });
+  add({
+    name: "events",
+    col: colSidebar,
+    row: rowBotStart,
+    cols: sidebarCols,
+    rows: bottomZoneRows,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "_hDiv0",
+    col: colPresent,
+    row: rowHDiv0,
+    cols: innerCols,
+    rows: 1,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "_hDiv1",
+    col: colPresent,
+    row: rowHDiv1,
+    cols: innerCols,
+    rows: 1,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "_hDiv2",
+    col: colPresent,
+    row: rowHDiv2,
+    cols: innerCols,
+    rows: 1,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "_hDiv3",
+    col: colPresent,
+    row: rowHDiv3,
+    cols: innerCols,
+    rows: 1,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "_vDiv0",
+    col: colVDiv0,
+    row: rowTopStart,
+    cols: 1,
+    rows: topZoneRows,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "_vDiv1",
+    col: colVDiv1,
+    row: rowTopStart,
+    cols: 1,
+    rows: topZoneRows + 1 + bottomZoneRows,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "_sDiv0",
+    col: colSidebar,
+    row: rowSDiv0,
+    cols: sidebarCols,
+    rows: 1,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "_sDiv1",
+    col: colSidebar,
+    row: rowSDiv1,
+    cols: sidebarCols,
+    rows: 1,
+    type: "grid",
+    scrollOffset: 0
+  });
+  return regions;
+}
+
+// src/canvas/border-renderer.ts
+var D_TL = "╔";
+var D_TR = "╗";
+var D_BL = "╚";
+var D_BR = "╝";
+var D_H = "═";
+var D_V = "║";
+var D_ML = "╠";
+var D_MR = "╣";
+var D_MT = "╦";
+var S_H = "─";
+var S_V = "│";
+var S_ML = "├";
+var M_SH_DV_R = "╡";
+function setCell(grid, row, col, char, fg) {
+  if (row < 0 || col < 0 || row >= grid.length || col >= (grid[0]?.length ?? 0))
+    return;
+  grid[row][col] = { char, fg };
+}
+function hLine(grid, row, colStart, colEnd, char, fg) {
+  for (let c = colStart;c <= colEnd; c++)
+    setCell(grid, row, c, char, fg);
+}
+function vLine(grid, col, rowStart, rowEnd, char, fg) {
+  for (let r = rowStart;r <= rowEnd; r++)
+    setCell(grid, r, col, char, fg);
+}
+function drawBorders(grid, regions, totalCols, totalRows) {
+  const fg = theme.colors.dim;
+  const hDiv0 = regions.get("_hDiv0");
+  const hDiv1 = regions.get("_hDiv1");
+  const hDiv2 = regions.get("_hDiv2");
+  const hDiv3 = regions.get("_hDiv3");
+  const vDiv0 = regions.get("_vDiv0");
+  const vDiv1 = regions.get("_vDiv1");
+  const sDiv0 = regions.get("_sDiv0");
+  const sDiv1 = regions.get("_sDiv1");
+  if (!hDiv0 || !hDiv1 || !hDiv2 || !hDiv3 || !vDiv0 || !vDiv1 || !sDiv0 || !sDiv1) {
+    console.warn("[border-renderer] Missing divider metadata regions — skipping border draw");
+    return;
+  }
+  const vd0 = vDiv0;
+  const vd1 = vDiv1;
+  const lastCol = totalCols - 1;
+  const lastRow = totalRows - 1;
+  const innerColStart = 1;
+  const innerColEnd = lastCol - 1;
+  setCell(grid, 0, 0, D_TL, fg);
+  setCell(grid, 0, lastCol, D_TR, fg);
+  setCell(grid, lastRow, 0, D_BL, fg);
+  setCell(grid, lastRow, lastCol, D_BR, fg);
+  hLine(grid, 0, 1, lastCol - 1, D_H, fg);
+  hLine(grid, lastRow, 1, lastCol - 1, D_H, fg);
+  vLine(grid, 0, 1, lastRow - 1, D_V, fg);
+  vLine(grid, lastCol, 1, lastRow - 1, D_V, fg);
+  function drawHDiv(row) {
+    setCell(grid, row, 0, D_ML, fg);
+    setCell(grid, row, lastCol, D_MR, fg);
+    hLine(grid, row, innerColStart, innerColEnd, D_H, fg);
+    if (row >= vd0.row && row < vd0.row + vd0.rows) {
+      setCell(grid, row, vd0.col, D_MT, fg);
+    }
+    if (row >= vd1.row && row < vd1.row + vd1.rows) {
+      setCell(grid, row, vd1.col, D_MT, fg);
+    }
+  }
+  drawHDiv(hDiv0.row);
+  drawHDiv(hDiv1.row);
+  drawHDiv(hDiv2.row);
+  drawHDiv(hDiv3.row);
+  setCell(grid, hDiv2.row, vDiv0.col, "╧", fg);
+  setCell(grid, hDiv2.row, vDiv1.col, "╪", fg);
+  vLine(grid, vDiv0.col, vDiv0.row, vDiv0.row + vDiv0.rows - 1, S_V, fg);
+  vLine(grid, vDiv1.col, vDiv1.row, vDiv1.row + vDiv1.rows - 1, S_V, fg);
+  const vDivCols = [vDiv0.col, vDiv1.col];
+  const hDivRows = [hDiv0.row, hDiv1.row, hDiv3.row];
+  for (const vc of vDivCols) {
+    for (const hr of hDivRows) {
+      const vr = vc === vDiv0.col ? vDiv0 : vDiv1;
+      if (hr >= vr.row && hr < vr.row + vr.rows) {
+        setCell(grid, hr, vc, "╪", fg);
+      }
+    }
+  }
+  const sCol = sDiv0.col;
+  const sEnd = sDiv0.col + sDiv0.cols - 1;
+  setCell(grid, sDiv0.row, vDiv1.col, S_ML, fg);
+  hLine(grid, sDiv0.row, sCol, sEnd, S_H, fg);
+  setCell(grid, sDiv0.row, lastCol, M_SH_DV_R, fg);
+  setCell(grid, sDiv1.row, vDiv1.col, S_ML, fg);
+  hLine(grid, sDiv1.row, sCol, sEnd, S_H, fg);
+  setCell(grid, sDiv1.row, lastCol, M_SH_DV_R, fg);
+  setCell(grid, hDiv3.row, vDiv1.col, "╧", fg);
+}
+
+// src/canvas/hit-registry.ts
+class HitRegistry {
+  entries = [];
+  clear(z) {
+    if (z === undefined) {
+      this.entries = [];
     } else {
-      dismiss();
+      this.entries = this.entries.filter((e) => e.z !== z);
     }
-  });
-  backdrop.addEventListener("click", (e) => {
-    if (e.target === backdrop)
-      dismiss();
-  });
-  body.addEventListener("click", () => {
-    if (currentTw) {
-      currentTw.skip();
-      currentTw = null;
+  }
+  clearRegion(regionName, z) {
+    this.entries = this.entries.filter((e) => !(e.region === regionName && e.z === z));
+  }
+  registerPanel(regionName, region, localRegions, z = 0) {
+    for (const local of localRegions) {
+      this.entries.push({
+        region: regionName,
+        col: region.col + local.col,
+        row: region.row + local.row,
+        width: local.width,
+        height: local.height,
+        z,
+        data: local.data
+      });
     }
-  });
+  }
+  register(entry) {
+    this.entries.push(entry);
+  }
+  hitTest(col, row) {
+    let best = null;
+    for (const e of this.entries) {
+      if (col >= e.col && col < e.col + e.width && row >= e.row && row < e.row + e.height) {
+        if (best === null || e.z > best.z) {
+          best = e;
+        }
+      }
+    }
+    if (best === null)
+      return null;
+    return { region: best.region, data: best.data };
+  }
+  hasModalLayer() {
+    return this.entries.some((e) => e.z > 0);
+  }
+}
+
+// src/canvas/modal-manager.ts
+class ModalManager {
+  stack = [];
+  uc;
+  constructor(uc) {
+    this.uc = uc;
+  }
+  open(name, widthPct, heightPct) {
+    this.close(name);
+    const totalCols = this.uc.totalCols;
+    const totalRows = this.uc.totalRows;
+    const innerCols = Math.floor((totalCols - 2) * widthPct);
+    const innerRows = Math.floor((totalRows - 2) * heightPct);
+    const cols = innerCols + 2;
+    const rows = innerRows + 2;
+    const col = Math.floor((totalCols - cols) / 2);
+    const row = Math.floor((totalRows - rows) / 2);
+    const z = this.stack.length + 1;
+    const state2 = {
+      name,
+      region: { name: `modal_${name}`, col, row, cols, rows, type: "grid", scrollOffset: 0 },
+      z,
+      cells: [],
+      hitRegions: [],
+      scrollOffset: 0,
+      totalContentRows: 0
+    };
+    this.stack.push(state2);
+    this.uc.markAllDirty();
+    return state2;
+  }
+  setContent(name, result) {
+    const modal = this.stack.find((m) => m.name === name);
+    if (!modal)
+      return;
+    modal.cells = result.cells;
+    modal.hitRegions = result.hitRegions || [];
+    modal.totalContentRows = result.cells.length;
+    this.uc.hitRegistry.clear(modal.z);
+    if (modal.hitRegions.length > 0) {
+      const contentRegion = {
+        ...modal.region,
+        name: `modal_${name}_content`,
+        col: modal.region.col + 1,
+        row: modal.region.row + 1,
+        cols: modal.region.cols - 2,
+        rows: modal.region.rows - 2
+      };
+      this.uc.hitRegistry.registerPanel(`modal_${name}`, contentRegion, modal.hitRegions, modal.z);
+    }
+    this.uc.markAllDirty();
+  }
+  close(name) {
+    const idx = this.stack.findIndex((m) => m.name === name);
+    if (idx === -1)
+      return;
+    const modal = this.stack[idx];
+    this.uc.hitRegistry.clear(modal.z);
+    this.stack.splice(idx, 1);
+    this.uc.markAllDirty();
+  }
+  closeTopmost() {
+    if (this.stack.length === 0)
+      return null;
+    const top = this.stack.pop();
+    this.uc.hitRegistry.clear(top.z);
+    this.uc.markAllDirty();
+    return top.name;
+  }
+  get active() {
+    return this.stack.length > 0;
+  }
+  get topmost() {
+    return this.stack[this.stack.length - 1] || null;
+  }
+  getStack() {
+    return this.stack;
+  }
+  isOpen(name) {
+    return this.stack.some((m) => m.name === name);
+  }
+  renderInto(grid, totalCols, totalRows) {
+    for (const modal of this.stack) {
+      const { region, cells, scrollOffset } = modal;
+      for (let r = 0;r < totalRows; r++) {
+        for (let c = 0;c < totalCols; c++) {
+          if (r >= region.row && r < region.row + region.rows && c >= region.col && c < region.col + region.cols)
+            continue;
+          if (grid[r] && grid[r][c]) {
+            grid[r][c] = { ...grid[r][c], fg: theme.colors.dim, bg: undefined };
+          }
+        }
+      }
+      const D = {
+        H: "═",
+        V: "║",
+        TL: "╔",
+        TR: "╗",
+        BL: "╚",
+        BR: "╝"
+      };
+      const borderFg = theme.colors.accent;
+      const bg = theme.colors.bg;
+      if (region.row < totalRows && region.col + region.cols <= totalCols) {
+        grid[region.row][region.col] = { char: D.TL, fg: borderFg, bg };
+        for (let c = 1;c < region.cols - 1; c++) {
+          grid[region.row][region.col + c] = { char: D.H, fg: borderFg, bg };
+        }
+        grid[region.row][region.col + region.cols - 1] = { char: D.TR, fg: borderFg, bg };
+      }
+      const botRow = region.row + region.rows - 1;
+      if (botRow < totalRows && region.col + region.cols <= totalCols) {
+        grid[botRow][region.col] = { char: D.BL, fg: borderFg, bg };
+        for (let c = 1;c < region.cols - 1; c++) {
+          grid[botRow][region.col + c] = { char: D.H, fg: borderFg, bg };
+        }
+        grid[botRow][region.col + region.cols - 1] = { char: D.BR, fg: borderFg, bg };
+      }
+      for (let r = 1;r < region.rows - 1; r++) {
+        const gr = region.row + r;
+        if (gr >= totalRows)
+          break;
+        grid[gr][region.col] = { char: D.V, fg: borderFg, bg };
+        grid[gr][region.col + region.cols - 1] = { char: D.V, fg: borderFg, bg };
+        for (let c = 1;c < region.cols - 1; c++) {
+          grid[gr][region.col + c] = { char: " ", fg: theme.colors.primary, bg };
+        }
+      }
+      const contentCol = region.col + 1;
+      const contentRow = region.row + 1;
+      const contentCols = region.cols - 2;
+      const contentRows = region.rows - 2;
+      for (let r = 0;r < contentRows; r++) {
+        const srcRow = r + scrollOffset;
+        if (srcRow >= cells.length)
+          break;
+        const srcRowCells = cells[srcRow];
+        if (!srcRowCells)
+          continue;
+        for (let c = 0;c < Math.min(srcRowCells.length, contentCols); c++) {
+          const gr = contentRow + r;
+          const gc = contentCol + c;
+          if (gr < totalRows && gc < totalCols) {
+            grid[gr][gc] = { ...srcRowCells[c], bg };
+          }
+        }
+      }
+    }
+  }
+  scroll(deltaRows) {
+    const modal = this.topmost;
+    if (!modal)
+      return;
+    const maxScroll = Math.max(0, modal.totalContentRows - (modal.region.rows - 2));
+    modal.scrollOffset = Math.max(0, Math.min(modal.scrollOffset + deltaRows, maxScroll));
+    this.uc.markAllDirty();
+  }
+}
+
+// src/canvas/unified-canvas.ts
+class UnifiedCanvas {
+  canvas;
+  regions;
+  hitRegistry;
+  modalManager;
+  totalCols;
+  totalRows;
+  ctx;
+  charSize;
+  grid;
+  borderGrid;
+  dirtySet = new Set;
+  allDirty = true;
+  renderScheduled = false;
+  clickHandlers = [];
+  wheelHandlers = [];
+  pixelRenderers = [];
+  offscreenSlots = [];
+  observer;
+  constructor(container) {
+    this.canvas = document.createElement("canvas");
+    this.canvas.style.display = "block";
+    this.canvas.style.width = "100%";
+    this.canvas.style.height = "100%";
+    container.appendChild(this.canvas);
+    const ctx = this.canvas.getContext("2d");
+    if (!ctx)
+      throw new Error("UnifiedCanvas: failed to get 2d context");
+    this.ctx = ctx;
+    this.charSize = measureChar(this.ctx, MONO_FONT);
+    this.totalCols = 1;
+    this.totalRows = 1;
+    this.grid = [[{ char: " ", fg: theme.colors.primary }]];
+    this.borderGrid = [[{ char: " ", fg: theme.colors.primary }]];
+    this.regions = new Map;
+    this.hitRegistry = new HitRegistry;
+    this.modalManager = new ModalManager(this);
+    this.canvas.addEventListener("click", this._onClick.bind(this));
+    this.canvas.addEventListener("mousemove", this._onMouseMove.bind(this));
+    this.canvas.addEventListener("mouseleave", this._onMouseLeave.bind(this));
+    this.canvas.addEventListener("wheel", this._onWheel.bind(this), { passive: false });
+    this.observer = new ResizeObserver(() => this._resize());
+    this.observer.observe(container);
+    this._resize();
+  }
+  _resize() {
+    const rect = this.canvas.parentElement.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0)
+      return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.canvas.width = Math.floor(rect.width * dpr);
+    this.canvas.height = Math.floor(rect.height * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.charSize = measureChar(this.ctx, MONO_FONT);
+    const { width: cw, height: ch } = this.charSize;
+    this.totalCols = Math.max(Math.floor(rect.width / cw), 10);
+    this.totalRows = Math.max(Math.floor(rect.height / ch), 5);
+    this.grid = this._allocGrid(this.totalRows, this.totalCols);
+    this.borderGrid = this._allocGrid(this.totalRows, this.totalCols);
+    this.regions = computeRegions(this.totalCols, this.totalRows);
+    drawBorders(this.borderGrid, this.regions, this.totalCols, this.totalRows);
+    this.markAllDirty();
+  }
+  _allocGrid(rows, cols) {
+    const empty = { char: " ", fg: theme.colors.primary };
+    return Array.from({ length: rows }, () => Array.from({ length: cols }, () => ({ ...empty })));
+  }
+  setRegionContent(name, result) {
+    const region = this.regions.get(name);
+    if (!region)
+      return;
+    const { cells, hitRegions } = result;
+    for (let r = 0;r < cells.length && r < region.rows; r++) {
+      const row = cells[r];
+      for (let c = 0;c < row.length && c < region.cols; c++) {
+        const gr = region.row + r;
+        const gc = region.col + c;
+        if (gr < this.totalRows && gc < this.totalCols) {
+          this.grid[gr][gc] = row[c];
+        }
+      }
+    }
+    this.hitRegistry.clearRegion(name, 0);
+    if (hitRegions && hitRegions.length > 0) {
+      this.hitRegistry.registerPanel(name, region, hitRegions, 0);
+    }
+    this.markDirty(name);
+  }
+  setOffscreen(regionName, offscreenCanvas) {
+    const existing = this.offscreenSlots.findIndex((s) => s.regionName === regionName);
+    if (existing >= 0) {
+      this.offscreenSlots[existing] = { regionName, canvas: offscreenCanvas };
+    } else {
+      this.offscreenSlots.push({ regionName, canvas: offscreenCanvas });
+    }
+    this.markDirty(regionName);
+  }
+  setPixelRenderer(regionName, renderer2) {
+    const existing = this.pixelRenderers.findIndex((p) => p.regionName === regionName);
+    if (existing >= 0) {
+      this.pixelRenderers[existing] = { regionName, renderer: renderer2 };
+    } else {
+      this.pixelRenderers.push({ regionName, renderer: renderer2 });
+    }
+    this.markDirty(regionName);
+  }
+  onClick(handler) {
+    this.clickHandlers.push(handler);
+  }
+  onWheel(handler) {
+    this.wheelHandlers.push(handler);
+  }
+  markDirty(name) {
+    this.dirtySet.add(name);
+    this._scheduleRender();
+  }
+  markAllDirty() {
+    this.allDirty = true;
+    this._scheduleRender();
+  }
+  _scheduleRender() {
+    if (this.renderScheduled)
+      return;
+    this.renderScheduled = true;
+    requestAnimationFrame(() => {
+      this.renderScheduled = false;
+      this._paint();
+    });
+  }
+  getRegion(name) {
+    return this.regions.get(name);
+  }
+  getCharSize() {
+    return this.charSize;
+  }
+  _paint() {
+    const ctx = this.ctx;
+    const cs = this.charSize;
+    if (this.allDirty) {
+      ctx.fillStyle = theme.colors.bg;
+      ctx.fillRect(0, 0, this.totalCols * cs.width, this.totalRows * cs.height);
+      for (let r = 0;r < this.totalRows; r++) {
+        for (let c = 0;c < this.totalCols; c++) {
+          const cell = this.borderGrid[r][c];
+          if (cell.char !== " ")
+            fillCell(ctx, c, r, cell, cs);
+        }
+      }
+      for (const region of this.regions.values()) {
+        if (region.name.startsWith("_") || region.type !== "grid")
+          continue;
+        this._paintGridRegion(region);
+      }
+      for (const entry of this.pixelRenderers) {
+        const region = this.regions.get(entry.regionName);
+        if (!region)
+          continue;
+        this._paintPixelRegion(region, entry.renderer);
+      }
+      for (const slot of this.offscreenSlots) {
+        const region = this.regions.get(slot.regionName);
+        if (!region)
+          continue;
+        this._blitOffscreen(region, slot.canvas);
+      }
+      if (this.modalManager.active) {
+        this.modalManager.renderInto(this.grid, this.totalCols, this.totalRows);
+        for (let r = 0;r < this.totalRows; r++) {
+          for (let c = 0;c < this.totalCols; c++) {
+            const cell = this.grid[r][c];
+            const px = c * cs.width;
+            const py = r * cs.height;
+            ctx.fillStyle = cell.bg || theme.colors.bg;
+            ctx.fillRect(px, py, cs.width, cs.height);
+            if (cell.char !== " " || cell.bg) {
+              fillCell(ctx, c, r, cell, cs);
+            }
+          }
+        }
+      }
+      this.allDirty = false;
+      this.dirtySet.clear();
+    } else if (this.modalManager.active) {
+      this.allDirty = true;
+      this.dirtySet.clear();
+      this._paint();
+      return;
+    } else {
+      for (const name of this.dirtySet) {
+        const region = this.regions.get(name);
+        if (!region || region.name.startsWith("_"))
+          continue;
+        const px = region.col * cs.width;
+        const py = region.row * cs.height;
+        const pw = region.cols * cs.width;
+        const ph = region.rows * cs.height;
+        ctx.fillStyle = theme.colors.bg;
+        ctx.fillRect(px, py, pw, ph);
+        for (let r = region.row;r < region.row + region.rows && r < this.totalRows; r++) {
+          for (let c = region.col;c < region.col + region.cols && c < this.totalCols; c++) {
+            const cell = this.borderGrid[r][c];
+            if (cell.char !== " ")
+              fillCell(ctx, c, r, cell, cs);
+          }
+        }
+        if (region.type === "grid") {
+          this._paintGridRegion(region);
+        }
+        const pixEntry = this.pixelRenderers.find((p) => p.regionName === name);
+        if (pixEntry)
+          this._paintPixelRegion(region, pixEntry.renderer);
+        const offEntry = this.offscreenSlots.find((s) => s.regionName === name);
+        if (offEntry)
+          this._blitOffscreen(region, offEntry.canvas);
+      }
+      this.dirtySet.clear();
+    }
+  }
+  _paintGridRegion(region) {
+    const ctx = this.ctx;
+    const cs = this.charSize;
+    for (let r = 0;r < region.rows; r++) {
+      for (let c = 0;c < region.cols; c++) {
+        const gr = region.row + r;
+        const gc = region.col + c;
+        if (gr >= this.totalRows || gc >= this.totalCols)
+          continue;
+        const cell = this.grid[gr][gc];
+        if (cell.char !== " " || cell.bg) {
+          fillCell(ctx, gc, gr, cell, cs);
+        }
+      }
+    }
+  }
+  _paintPixelRegion(region, renderer2) {
+    const ctx = this.ctx;
+    const cs = this.charSize;
+    const px = region.col * cs.width;
+    const py = region.row * cs.height;
+    const pw = region.cols * cs.width;
+    const ph = region.rows * cs.height;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(px, py, pw, ph);
+    ctx.clip();
+    renderer2(ctx, region, cs);
+    ctx.restore();
+  }
+  _blitOffscreen(region, offscreen) {
+    const ctx = this.ctx;
+    const cs = this.charSize;
+    const px = region.col * cs.width;
+    const py = region.row * cs.height;
+    const pw = region.cols * cs.width;
+    const ph = region.rows * cs.height;
+    ctx.drawImage(offscreen, px, py, pw, ph);
+  }
+  _pixelToGrid(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    return {
+      col: Math.floor(x / this.charSize.width),
+      row: Math.floor(y / this.charSize.height)
+    };
+  }
+  _pointToRegion(col, row) {
+    for (const region of this.regions.values()) {
+      if (region.name.startsWith("_"))
+        continue;
+      if (col >= region.col && col < region.col + region.cols && row >= region.row && row < region.row + region.rows) {
+        return region.name;
+      }
+    }
+    return null;
+  }
+  _onClick(e) {
+    const { col, row } = this._pixelToGrid(e.clientX, e.clientY);
+    const hit = this.hitRegistry.hitTest(col, row);
+    if (hit) {
+      for (const h of this.clickHandlers)
+        h(hit.region, hit.data);
+    }
+  }
+  _onMouseMove(e) {
+    const { col, row } = this._pixelToGrid(e.clientX, e.clientY);
+    const hit = this.hitRegistry.hitTest(col, row);
+    this.canvas.style.cursor = hit ? "pointer" : "default";
+  }
+  _onMouseLeave(_e) {
+    this.canvas.style.cursor = "default";
+  }
+  _onWheel(e) {
+    e.preventDefault();
+    if (this.modalManager.active) {
+      const delta = e.deltaY > 0 ? 3 : -3;
+      this.modalManager.scroll(delta);
+      return;
+    }
+    const { col, row } = this._pixelToGrid(e.clientX, e.clientY);
+    const regionName = this._pointToRegion(col, row);
+    if (regionName) {
+      for (const h of this.wheelHandlers)
+        h(regionName, e.deltaY);
+    }
+  }
+}
+
+// src/ui/dialog-renderer.ts
+var MODAL_NAME = "dialog";
+var CHAR_DELAY = 25;
+var QUEST_CHAR_DELAY = 15;
+function wordWrap(text, cols) {
+  const lines = [];
+  for (const paragraph of text.split(`
+`)) {
+    if (paragraph.length === 0) {
+      lines.push("");
+      continue;
+    }
+    const words = paragraph.split(/\s+/);
+    let current = "";
+    for (const word of words) {
+      if (current.length === 0) {
+        current = word;
+      } else if (current.length + 1 + word.length <= cols) {
+        current += " " + word;
+      } else {
+        lines.push(current);
+        current = word;
+      }
+    }
+    if (current.length > 0)
+      lines.push(current);
+  }
+  return lines;
+}
+function renderDialogContent(cols, npcName, npcRole, wrappedLines, visibleChars) {
+  const cells = [];
+  const titleText = npcRole ? `${npcName} — ${npcRole}` : npcName;
+  cells.push(coloredRow([{ text: titleText, fg: theme.colors.npc, attrs: ATTR_BOLD }], cols));
+  const sepLen = Math.min(titleText.length + 2, cols);
+  cells.push(coloredRow([{ text: "─".repeat(sepLen), fg: theme.colors.dim }], cols));
+  cells.push(emptyRow(cols));
+  let charsShown = 0;
+  const totalVisible = visibleChars ?? Infinity;
+  for (const line of wrappedLines) {
+    if (charsShown >= totalVisible && visibleChars !== undefined)
+      break;
+    const row = [];
+    for (let i = 0;i < line.length; i++) {
+      if (charsShown < totalVisible) {
+        row.push({ char: line[i], fg: theme.colors.primary });
+        charsShown++;
+      }
+    }
+    while (row.length < cols) {
+      row.push({ char: " ", fg: theme.colors.primary });
+    }
+    cells.push(row);
+  }
+  if (visibleChars !== undefined && charsShown < totalCharsInLines(wrappedLines)) {
+    for (let r = cells.length - 1;r >= 3; r--) {
+      const lastCharIdx = cells[r].findIndex((c, i) => i > 0 && cells[r][i - 1].char !== " " && c.char === " ");
+      if (lastCharIdx > 0) {
+        cells[r][lastCharIdx] = { char: "█", fg: theme.colors.accent };
+        break;
+      } else if (cells[r].some((c) => c.char !== " ")) {
+        const len = cells[r].filter((c) => c.char !== " ").length;
+        if (len < cols) {
+          cells[r][len] = { char: "█", fg: theme.colors.accent };
+        }
+        break;
+      }
+    }
+  }
+  cells.push(emptyRow(cols));
+  cells.push(coloredRow([{ text: "[Esc] dismiss  [click] skip", fg: theme.colors.dim }], cols));
+  return { cells };
+}
+function totalCharsInLines(lines) {
+  let total = 0;
+  for (const line of lines)
+    total += line.length;
+  return total;
+}
+function renderQuestContent(cols, quest, wrappedLines, visibleChars) {
+  const cells = [];
+  const status = quest.completed ? " [COMPLETE]" : "";
+  const titleText = `${quest.name}${status}`;
+  cells.push(coloredRow([{ text: titleText, fg: theme.colors.accent, attrs: ATTR_BOLD }], cols));
+  const sepLen = Math.min(titleText.length + 2, cols);
+  cells.push(coloredRow([{ text: "─".repeat(sepLen), fg: theme.colors.dim }], cols));
+  cells.push(emptyRow(cols));
+  let charsShown = 0;
+  const totalVisible = visibleChars ?? Infinity;
+  for (const line of wrappedLines) {
+    if (charsShown >= totalVisible && visibleChars !== undefined)
+      break;
+    const row = [];
+    for (let i = 0;i < line.length; i++) {
+      if (charsShown < totalVisible) {
+        const isBarChar = line[i] === "█" || line[i] === "░";
+        const fg = isBarChar ? line[i] === "█" ? theme.colors.heal : theme.colors.dim : theme.colors.primary;
+        row.push({ char: line[i], fg });
+        charsShown++;
+      }
+    }
+    while (row.length < cols) {
+      row.push({ char: " ", fg: theme.colors.primary });
+    }
+    cells.push(row);
+  }
+  cells.push(emptyRow(cols));
+  cells.push(coloredRow([{ text: "[Esc] dismiss", fg: theme.colors.dim }], cols));
+  return { cells };
+}
+function createDialogController(mm) {
+  let _timer = null;
+  let _visibleChars = 0;
+  let _totalChars = 0;
+  let _animating = false;
+  function stopAnimation() {
+    if (_timer) {
+      clearInterval(_timer);
+      _timer = null;
+    }
+    _animating = false;
+  }
+  function skipAnimation() {
+    if (!_animating)
+      return;
+    stopAnimation();
+    _visibleChars = _totalChars;
+    const modal = mm.getStack().find((m) => m.name === MODAL_NAME);
+    if (modal?.renderFn) {
+      mm.setContent(MODAL_NAME, modal.renderFn());
+    }
+  }
+  function dismiss() {
+    stopAnimation();
+    mm.close(MODAL_NAME);
+  }
+  function show(npcName, npcRole, text) {
+    stopAnimation();
+    const state2 = mm.open(MODAL_NAME, 0.5, 0.4);
+    const contentCols = state2.region.cols - 2;
+    const wrappedLines = wordWrap(text, contentCols);
+    _totalChars = totalCharsInLines(wrappedLines);
+    _visibleChars = 0;
+    _animating = true;
+    const renderFn = () => renderDialogContent(contentCols, npcName, npcRole, wrappedLines, _animating ? _visibleChars : undefined);
+    state2.renderFn = renderFn;
+    mm.setContent(MODAL_NAME, renderFn());
+    _timer = setInterval(() => {
+      _visibleChars++;
+      if (_visibleChars >= _totalChars) {
+        stopAnimation();
+      }
+      mm.setContent(MODAL_NAME, renderFn());
+    }, CHAR_DELAY);
+  }
+  function showQuest(quest) {
+    stopAnimation();
+    const state2 = mm.open(MODAL_NAME, 0.5, 0.4);
+    const contentCols = state2.region.cols - 2;
+    const lines = [];
+    if (quest.giver)
+      lines.push(`Quest giver: ${quest.giver}`);
+    lines.push("");
+    lines.push(quest.description);
+    lines.push("");
+    const filled = quest.totalStages > 0 ? Math.round(quest.currentStage / quest.totalStages * 10) : 0;
+    const bar = "█".repeat(Math.min(10, filled)) + "░".repeat(10 - Math.min(10, filled));
+    lines.push(`Progress: ${bar} ${quest.currentStage}/${quest.totalStages}`);
+    const wrappedLines = wordWrap(lines.join(`
+`), contentCols);
+    _totalChars = totalCharsInLines(wrappedLines);
+    _visibleChars = 0;
+    _animating = true;
+    const renderFn = () => renderQuestContent(contentCols, quest, wrappedLines, _animating ? _visibleChars : undefined);
+    state2.renderFn = renderFn;
+    mm.setContent(MODAL_NAME, renderFn());
+    _timer = setInterval(() => {
+      _visibleChars++;
+      if (_visibleChars >= _totalChars) {
+        stopAnimation();
+      }
+      mm.setContent(MODAL_NAME, renderFn());
+    }, QUEST_CHAR_DELAY);
+  }
   return {
-    el: backdrop,
-    show(npcName, npcRole, text) {
-      if (currentTw)
-        currentTw.cancel();
-      titleBar.textContent = `─ ${npcName}${npcRole ? ` — ${npcRole}` : ""} ─`;
-      body.innerHTML = "";
-      backdrop.style.display = "";
-      currentTw = createTypewriter({
-        text,
-        font: DIALOG_FONT,
-        maxWidth: DIALOG_MAX_WIDTH,
-        container: body,
-        charDelay: 25,
-        lineClass: "tw-line",
-        cursorClass: "tw-cursor"
-      });
-      currentTw.onComplete(() => {
-        currentTw = null;
-      });
-      currentTw.start();
-    },
-    showQuest(quest) {
-      if (currentTw)
-        currentTw.cancel();
-      const status = quest.completed ? " [COMPLETE]" : "";
-      titleBar.textContent = `─ ${quest.name}${status} ─`;
-      body.innerHTML = "";
-      backdrop.style.display = "";
-      const lines = [];
-      if (quest.giver)
-        lines.push(`Quest giver: ${quest.giver}`);
-      lines.push("");
-      lines.push(quest.description);
-      lines.push("");
-      const filled = quest.totalStages > 0 ? Math.round(quest.currentStage / quest.totalStages * 10) : 0;
-      const bar = "█".repeat(Math.min(10, filled)) + "░".repeat(10 - Math.min(10, filled));
-      lines.push(`Progress: ${bar} ${quest.currentStage}/${quest.totalStages}`);
-      const text = lines.join(`
-`);
-      currentTw = createTypewriter({
-        text,
-        font: DIALOG_FONT,
-        maxWidth: DIALOG_MAX_WIDTH,
-        container: body,
-        charDelay: 15,
-        lineClass: "tw-line",
-        cursorClass: "tw-cursor"
-      });
-      currentTw.onComplete(() => {
-        currentTw = null;
-      });
-      currentTw.start();
-    },
+    show,
+    showQuest,
     dismiss,
     get active() {
-      return backdrop.style.display !== "none";
+      return mm.isOpen(MODAL_NAME);
     }
   };
 }
@@ -5332,7 +5576,8 @@ async function pickupItem(itemId) {
   return null;
 }
 
-// src/ui/inventory-modal.ts
+// src/ui/inventory-renderer.ts
+var MODAL_NAME2 = "inventory";
 var RARITY_COLORS2 = {
   common: "#808080",
   uncommon: "#1eff00",
@@ -5340,256 +5585,238 @@ var RARITY_COLORS2 = {
   epic: "#a335ee",
   legendary: "#ff8000"
 };
+var SLOT_ORDER2 = ["weapon", "armor", "accessory", "ring"];
 var SLOT_LABELS = {
   weapon: "WPN",
   armor: "ARM",
   accessory: "ACC",
   ring: "RNG"
 };
-var SLOT_ORDER2 = ["weapon", "armor", "accessory", "ring"];
-function createInventoryModal(getState) {
-  const backdrop = document.createElement("div");
-  backdrop.className = "dialog-backdrop";
-  backdrop.style.display = "none";
-  const win = document.createElement("div");
-  win.className = "dialog-win";
-  win.style.maxWidth = "600px";
-  win.style.width = "90vw";
-  backdrop.appendChild(win);
-  backdrop.addEventListener("click", (e) => {
-    if (e.target === backdrop)
-      close();
+function itemColor(item) {
+  return RARITY_COLORS2[item.rarity] || "#808080";
+}
+function renderInventoryContent(cols, rows, state2) {
+  const cells = [];
+  const hitRegions = [];
+  const total = state2.inventory.length;
+  const weight = total * 5;
+  cells.push(coloredRow([
+    { text: "INVENTORY", fg: theme.colors.accent, attrs: ATTR_BOLD },
+    { text: `  ${weight}/50 wt · ${total} items`, fg: theme.colors.dim },
+    { text: "  ", fg: theme.colors.dim },
+    { text: "[×]", fg: theme.colors.damage }
+  ], cols));
+  const closeStart = "INVENTORY".length + `  ${weight}/50 wt · ${total} items`.length + 2;
+  hitRegions.push({
+    col: closeStart,
+    row: 0,
+    width: 3,
+    height: 1,
+    data: { modalAction: "close", modal: MODAL_NAME2 }
   });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && backdrop.style.display !== "none")
-      close();
-  });
-  function close() {
-    backdrop.style.display = "none";
+  cells.push(coloredRow([{ text: "─".repeat(cols), fg: theme.colors.dim }], cols));
+  const leftCols = Math.floor(cols / 2) - 1;
+  const rightCols = cols - leftCols - 1;
+  const leftRows = [];
+  const rightRows = [];
+  const leftHits = [];
+  const rightHits = [];
+  leftRows.push(coloredRow([{ text: "EQUIPMENT SLOTS", fg: theme.colors.dim }], leftCols));
+  leftRows.push(emptyRow(leftCols));
+  for (const slot of SLOT_ORDER2) {
+    const label = SLOT_LABELS[slot];
+    const item = state2.inventory.find((i) => i.equipped && i.slot_type === slot);
+    if (item) {
+      const color = itemColor(item);
+      leftRows.push(coloredRow([
+        { text: `${label} `, fg: theme.colors.dim },
+        { text: item.name, fg: color }
+      ], leftCols));
+      const detailParts = [];
+      if (item.effects.length) {
+        detailParts.push({ text: item.effects[0], fg: theme.colors.dim });
+        detailParts.push({ text: " · ", fg: theme.colors.dim });
+      }
+      detailParts.push({ text: item.rarity, fg: theme.colors.dim });
+      detailParts.push({ text: " · ", fg: theme.colors.dim });
+      detailParts.push({ text: "unequip", fg: theme.colors.damage });
+      const detailRow = coloredRow(detailParts, leftCols);
+      const unequipCol = detailRow.findIndex((c, i) => c.char === "u" && detailRow[i + 1]?.char === "n" && detailRow[i + 2]?.char === "e");
+      if (unequipCol >= 0) {
+        leftHits.push({
+          col: unequipCol,
+          row: leftRows.length,
+          width: 7,
+          height: 1,
+          data: { inventoryAction: "unequip", slot }
+        });
+      }
+      leftRows.push(detailRow);
+    } else {
+      leftRows.push(coloredRow([
+        { text: `${label} `, fg: theme.colors.dim },
+        { text: "— empty —", fg: "#3a3a48" }
+      ], leftCols));
+    }
+    leftRows.push(emptyRow(leftCols));
+  }
+  const backpack = state2.inventory.filter((i) => !i.equipped);
+  rightRows.push(coloredRow([{ text: `BACKPACK (${backpack.length}/10)`, fg: theme.colors.dim }], rightCols));
+  rightRows.push(emptyRow(rightCols));
+  if (backpack.length === 0) {
+    rightRows.push(coloredRow([{ text: "Empty", fg: "#3a3a48" }], rightCols));
+  } else {
+    for (const item of backpack) {
+      const color = itemColor(item);
+      const nameParts = [
+        { text: item.name, fg: color }
+      ];
+      if (item.quantity > 1) {
+        nameParts.push({ text: ` ×${item.quantity}`, fg: theme.colors.heal });
+      }
+      if (item.slot_type) {
+        nameParts.push({ text: ` ${item.slot_type}`, fg: theme.colors.dim });
+      }
+      rightRows.push(coloredRow(nameParts, rightCols));
+      const actionParts = [];
+      if (item.effects.length) {
+        actionParts.push({ text: item.effects[0], fg: theme.colors.dim });
+        actionParts.push({ text: " · ", fg: theme.colors.dim });
+      }
+      const actionRow = [...actionParts];
+      if (item.slot_type) {
+        actionRow.push({ text: "equip", fg: theme.colors.accent, action: "equip" });
+        actionRow.push({ text: " · ", fg: theme.colors.dim });
+      }
+      if (item.is_consumable) {
+        actionRow.push({ text: "use", fg: theme.colors.heal, action: "use" });
+        actionRow.push({ text: " · ", fg: theme.colors.dim });
+      }
+      if (!item.is_quest_item) {
+        actionRow.push({ text: "drop", fg: theme.colors.damage, action: "drop" });
+      }
+      const rowCells = coloredRow(actionRow.map((a) => ({ text: a.text, fg: a.fg })), rightCols);
+      rightRows.push(rowCells);
+      let offset = 0;
+      for (const part of actionRow) {
+        if ("action" in part && part.action) {
+          rightHits.push({
+            col: offset + leftCols + 1,
+            row: rightRows.length - 1,
+            width: part.text.length,
+            height: 1,
+            data: { inventoryAction: part.action, itemId: item.id, slot: item.slot_type }
+          });
+        }
+        offset += part.text.length;
+      }
+      rightRows.push(emptyRow(rightCols));
+    }
+  }
+  const groundItems = state2.location.items;
+  if (groundItems.length > 0) {
+    rightRows.push(coloredRow([{ text: "─".repeat(rightCols), fg: theme.colors.dim }], rightCols));
+    rightRows.push(coloredRow([{ text: "GROUND (this room)", fg: theme.colors.dim }], rightCols));
+    rightRows.push(emptyRow(rightCols));
+    for (const gi of groundItems) {
+      const row = coloredRow([
+        { text: gi.name, fg: "#808080" },
+        { text: " ", fg: theme.colors.dim },
+        { text: "pickup", fg: theme.colors.heal }
+      ], rightCols);
+      rightRows.push(row);
+      const pickupCol = gi.name.length + 1;
+      rightHits.push({
+        col: pickupCol + leftCols + 1,
+        row: rightRows.length - 1,
+        width: 6,
+        height: 1,
+        data: { inventoryAction: "pickup", itemId: gi.id }
+      });
+    }
+  }
+  const maxRows = Math.max(leftRows.length, rightRows.length);
+  const dividerChar = { char: "│", fg: theme.colors.dim };
+  for (let r = 0;r < maxRows; r++) {
+    const left = leftRows[r] || emptyRow(leftCols);
+    const right = rightRows[r] || emptyRow(rightCols);
+    const combinedRow = [
+      ...left.slice(0, leftCols),
+      dividerChar,
+      ...right.slice(0, rightCols)
+    ];
+    while (combinedRow.length < cols) {
+      combinedRow.push({ char: " ", fg: theme.colors.primary });
+    }
+    cells.push(combinedRow);
+  }
+  const headerRowCount = 2;
+  for (const h of leftHits) {
+    h.row += headerRowCount;
+  }
+  for (const h of rightHits) {
+    h.row += headerRowCount;
+  }
+  hitRegions.push(...leftHits, ...rightHits);
+  return { cells, hitRegions };
+}
+function createInventoryController(mm, getState, renderAllPanels, addEvent) {
+  function refresh() {
+    if (!mm.isOpen(MODAL_NAME2))
+      return;
+    const state2 = getState();
+    const modal = mm.getStack().find((m) => m.name === MODAL_NAME2);
+    if (!modal)
+      return;
+    const contentCols = modal.region.cols - 2;
+    const contentRows = modal.region.rows - 2;
+    mm.setContent(MODAL_NAME2, renderInventoryContent(contentCols, contentRows, state2));
   }
   function open() {
-    backdrop.style.display = "";
+    mm.open(MODAL_NAME2, 0.6, 0.6);
     refresh();
   }
-  function refresh() {
-    const state2 = getState();
-    win.innerHTML = "";
-    const header = document.createElement("div");
-    header.className = "win-title dialog-title";
-    header.style.display = "flex";
-    header.style.justifyContent = "space-between";
-    header.style.alignItems = "center";
-    const title = document.createElement("span");
-    title.style.color = "#8b5cf6";
-    title.textContent = "INVENTORY";
-    const meta = document.createElement("span");
-    meta.style.color = "#6a6a78";
-    meta.style.fontSize = "12px";
-    const total = state2.inventory.length;
-    const weight = total * 5;
-    meta.textContent = `${weight}/50 wt · ${total} items`;
-    const closeBtn = document.createElement("span");
-    closeBtn.textContent = "[×]";
-    closeBtn.style.color = "#e05050";
-    closeBtn.style.cursor = "pointer";
-    closeBtn.onclick = close;
-    header.appendChild(title);
-    const rightSpan = document.createElement("span");
-    rightSpan.appendChild(meta);
-    rightSpan.appendChild(document.createTextNode(" "));
-    rightSpan.appendChild(closeBtn);
-    header.appendChild(rightSpan);
-    win.appendChild(header);
-    const body = document.createElement("div");
-    body.className = "win-body";
-    body.style.display = "flex";
-    body.style.gap = "16px";
-    body.style.fontFamily = "'Fira Code', monospace";
-    body.style.fontSize = "12px";
-    body.style.lineHeight = "1.6";
-    const slotsCol = document.createElement("div");
-    slotsCol.style.flex = "1";
-    slotsCol.style.minWidth = "0";
-    const slotsLabel = document.createElement("div");
-    slotsLabel.style.color = "#6a6a78";
-    slotsLabel.style.fontSize = "11px";
-    slotsLabel.style.marginBottom = "6px";
-    slotsLabel.textContent = "EQUIPMENT SLOTS";
-    slotsCol.appendChild(slotsLabel);
-    for (const slot of SLOT_ORDER2) {
-      const label = SLOT_LABELS[slot];
-      const item = state2.inventory.find((i) => i.equipped && i.slot_type === slot);
-      const card = createSlotCard(label, slot, item);
-      slotsCol.appendChild(card);
-    }
-    const packCol = document.createElement("div");
-    packCol.style.flex = "1";
-    packCol.style.minWidth = "0";
-    const backpack = state2.inventory.filter((i) => !i.equipped);
-    const packLabel = document.createElement("div");
-    packLabel.style.color = "#6a6a78";
-    packLabel.style.fontSize = "11px";
-    packLabel.style.marginBottom = "6px";
-    packLabel.textContent = `BACKPACK (${backpack.length}/10)`;
-    packCol.appendChild(packLabel);
-    if (backpack.length === 0) {
-      const empty = document.createElement("div");
-      empty.style.color = "#3a3a48";
-      empty.style.padding = "8px";
-      empty.textContent = "Empty";
-      packCol.appendChild(empty);
-    } else {
-      for (const item of backpack) {
-        packCol.appendChild(createBackpackCard(item));
-      }
-    }
-    const groundItems = state2.location.items;
-    if (groundItems.length > 0) {
-      const divider = document.createElement("div");
-      divider.style.borderTop = "1px solid #1a1a24";
-      divider.style.marginTop = "8px";
-      divider.style.paddingTop = "8px";
-      packCol.appendChild(divider);
-      const groundLabel = document.createElement("div");
-      groundLabel.style.color = "#6a6a78";
-      groundLabel.style.fontSize = "10px";
-      groundLabel.textContent = "GROUND (this room)";
-      packCol.appendChild(groundLabel);
-      for (const gi of groundItems) {
-        const row = document.createElement("div");
-        row.style.marginTop = "4px";
-        const name = document.createElement("span");
-        name.style.color = "#808080";
-        name.textContent = gi.name;
-        row.appendChild(name);
-        const pickup = createActionLink("pickup", "#50c878", async () => {
-          const err = await pickupItem(gi.id);
-          if (err)
-            console.warn("Pickup failed:", err);
-          else
-            refresh();
-        });
-        row.appendChild(document.createTextNode(" "));
-        row.appendChild(pickup);
-        packCol.appendChild(row);
-      }
-    }
-    body.appendChild(slotsCol);
-    body.appendChild(packCol);
-    win.appendChild(body);
-  }
-  function createSlotCard(label, slot, item) {
-    const card = document.createElement("div");
-    card.style.border = "1px solid #1a1a24";
-    card.style.padding = "8px";
-    card.style.marginBottom = "6px";
-    card.style.borderRadius = "3px";
-    card.style.background = item ? "#12121a" : "#0a0a0f";
-    if (item) {
-      const color = RARITY_COLORS2[item.rarity] || "#808080";
-      const top = document.createElement("div");
-      top.innerHTML = `<span style="color:#6a6a78">${label}</span> <span style="color:${color}">${item.name}</span>`;
-      card.appendChild(top);
-      const details = document.createElement("div");
-      details.style.color = "#6a6a78";
-      details.style.fontSize = "10px";
-      details.style.marginTop = "2px";
-      const parts = [];
-      if (item.effects.length)
-        parts.push(item.effects[0]);
-      parts.push(item.rarity);
-      const unequipLink = createActionLink("unequip", "#e05050", async () => {
-        const err = await unequipItem(slot);
-        if (err)
-          console.warn("Unequip failed:", err);
-        else
-          refresh();
-      });
-      details.textContent = parts.join(" · ") + " · ";
-      details.appendChild(unequipLink);
-      card.appendChild(details);
-    } else {
-      card.innerHTML = `<span style="color:#6a6a78">${label}</span> <span style="color:#3a3a48">— empty —</span>`;
-    }
-    return card;
-  }
-  function createBackpackCard(item) {
-    const card = document.createElement("div");
-    card.style.border = "1px solid #1a1a24";
-    card.style.padding = "8px";
-    card.style.marginBottom = "6px";
-    card.style.borderRadius = "3px";
-    card.style.background = "#12121a";
-    const color = RARITY_COLORS2[item.rarity] || "#808080";
-    const top = document.createElement("div");
-    const nameSpan = `<span style="color:${color}">${item.name}</span>`;
-    const qty = item.quantity > 1 ? ` <span style="color:#50c878;font-size:10px">×${item.quantity}</span>` : "";
-    const tag = item.slot_type ? ` <span style="color:#6a6a78;font-size:10px">${item.slot_type}</span>` : "";
-    top.innerHTML = nameSpan + qty + tag;
-    card.appendChild(top);
-    const actions = document.createElement("div");
-    actions.style.color = "#6a6a78";
-    actions.style.fontSize = "10px";
-    actions.style.marginTop = "2px";
-    const parts = [];
-    if (item.effects.length)
-      parts.push(item.effects[0]);
-    actions.textContent = parts.length ? parts.join(" · ") + " · " : "";
-    if (item.slot_type) {
-      actions.appendChild(createActionLink("equip", "#8b5cf6", async () => {
-        const err = await equipItem(item.id, item.slot_type);
-        if (err)
-          console.warn("Equip failed:", err);
-        else
-          refresh();
-      }));
-      actions.appendChild(document.createTextNode(" · "));
-    }
-    if (item.is_consumable) {
-      actions.appendChild(createActionLink("use", "#50c878", async () => {
-        const err = await useItem(item.id);
-        if (err)
-          console.warn("Use failed:", err);
-        else
-          refresh();
-      }));
-      actions.appendChild(document.createTextNode(" · "));
-    }
-    if (!item.is_quest_item) {
-      actions.appendChild(createActionLink("drop", "#e05050", async () => {
-        const err = await dropItem(item.id);
-        if (err)
-          console.warn("Drop failed:", err);
-        else
-          refresh();
-      }));
-    }
-    card.appendChild(actions);
-    return card;
-  }
-  function createActionLink(text, color, onClick) {
-    const link = document.createElement("span");
-    link.textContent = text;
-    link.style.color = color;
-    link.style.cursor = "pointer";
-    link.addEventListener("click", (e) => {
-      e.stopPropagation();
-      onClick();
-    });
-    return link;
+  function close() {
+    mm.close(MODAL_NAME2);
   }
   return {
-    el: backdrop,
     open,
     close,
     refresh,
     get active() {
-      return backdrop.style.display !== "none";
+      return mm.isOpen(MODAL_NAME2);
     }
   };
 }
+async function handleInventoryAction(data, refreshFn) {
+  const action = data.inventoryAction;
+  let err = null;
+  switch (action) {
+    case "equip":
+      err = await equipItem(data.itemId, data.slot);
+      break;
+    case "unequip":
+      err = await unequipItem(data.slot);
+      break;
+    case "drop":
+      err = await dropItem(data.itemId);
+      break;
+    case "use":
+      err = await useItem(data.itemId);
+      break;
+    case "pickup":
+      err = await pickupItem(data.itemId);
+      break;
+  }
+  if (err) {
+    console.warn(`Inventory ${action} failed:`, err);
+  } else {
+    refreshFn();
+  }
+}
 
-// src/ui/codex-modal.ts
+// src/ui/codex-renderer.ts
+var MODAL_NAME3 = "codex";
 var TYPE_COLORS = {
   npc: "#d4a574",
   item: "#808080",
@@ -5603,62 +5830,431 @@ var RARITY_COLORS3 = {
   epic: "#a335ee",
   legendary: "#ff8000"
 };
-function itemColor(entity) {
+function itemColor2(entity) {
   if (entity.rarity && RARITY_COLORS3[entity.rarity])
     return RARITY_COLORS3[entity.rarity];
   return TYPE_COLORS.item;
 }
 function entityColor(entity) {
   if (entity.type === "item")
-    return itemColor(entity);
+    return itemColor2(entity);
   return TYPE_COLORS[entity.type] || "#c8c8d0";
-}
-function esc(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 function formatAddr(addr) {
   if (!addr || addr.length < 10 || addr === "0x0000000000000000000000000000000000000000")
     return "None";
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
-function createCodexModal(getState, playerId, openArtViewer) {
-  const backdrop = document.createElement("div");
-  backdrop.className = "dialog-backdrop";
-  backdrop.style.display = "none";
-  const win = document.createElement("div");
-  win.className = "dialog-win";
-  win.style.maxWidth = "700px";
-  win.style.width = "90vw";
-  backdrop.appendChild(win);
-  backdrop.addEventListener("click", (e) => {
-    if (e.target === backdrop)
-      close();
+function wordWrap2(text, cols) {
+  const lines = [];
+  for (const paragraph of text.split(`
+`)) {
+    if (paragraph.length === 0) {
+      lines.push("");
+      continue;
+    }
+    const words = paragraph.split(/\s+/);
+    let current = "";
+    for (const word of words) {
+      if (current.length === 0) {
+        current = word;
+      } else if (current.length + 1 + word.length <= cols) {
+        current += " " + word;
+      } else {
+        lines.push(current);
+        current = word;
+      }
+    }
+    if (current.length > 0)
+      lines.push(current);
+  }
+  return lines;
+}
+function renderCodexContent(cols, _rows, codexData, allEntities, selectedId) {
+  const cells = [];
+  const hitRegions = [];
+  cells.push(coloredRow([
+    { text: "CODEX", fg: theme.colors.accent, attrs: ATTR_BOLD },
+    { text: " ".repeat(Math.max(0, cols - 8)), fg: theme.colors.dim },
+    { text: "[×]", fg: theme.colors.damage }
+  ], cols));
+  hitRegions.push({
+    col: cols - 3,
+    row: 0,
+    width: 3,
+    height: 1,
+    data: { modalAction: "close", modal: MODAL_NAME3 }
   });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && backdrop.style.display !== "none")
-      close();
-  });
+  cells.push(coloredRow([{ text: "─".repeat(cols), fg: theme.colors.dim }], cols));
+  if (!codexData) {
+    cells.push(coloredRow([{ text: "Loading...", fg: theme.colors.dim }], cols));
+    return { cells, hitRegions };
+  }
+  const sidebarCols = Math.min(24, Math.floor(cols * 0.3));
+  const detailCols = cols - sidebarCols - 1;
+  const sidebarRows = [];
+  const sidebarHits = [];
+  const detailRows = [];
+  const npcs = codexData.npcs || [];
+  const groundItems = codexData.ground_items || [];
+  const locations = codexData.locations || [];
+  const currentLoc = locations.find((l) => l.current);
+  const exitLocs = locations.filter((l) => !l.current);
+  if (currentLoc) {
+    const locText = truncate(`◉ ${currentLoc.name}`, sidebarCols);
+    const isSelected = currentLoc.id === selectedId;
+    sidebarRows.push(coloredRow([
+      {
+        text: locText,
+        fg: TYPE_COLORS.location,
+        attrs: isSelected ? ATTR_BOLD : undefined
+      }
+    ], sidebarCols));
+    sidebarHits.push({
+      col: 0,
+      row: sidebarRows.length - 1,
+      width: sidebarCols,
+      height: 1,
+      data: { codexSelect: currentLoc.id }
+    });
+    for (const npc of npcs) {
+      const npcText = truncate(`  ${npc.name}`, sidebarCols);
+      const sel = npc.id === selectedId;
+      sidebarRows.push(coloredRow([
+        {
+          text: npcText,
+          fg: TYPE_COLORS.npc,
+          attrs: sel ? ATTR_BOLD : undefined
+        }
+      ], sidebarCols));
+      sidebarHits.push({
+        col: 0,
+        row: sidebarRows.length - 1,
+        width: sidebarCols,
+        height: 1,
+        data: { codexSelect: npc.id }
+      });
+    }
+    for (const gi of groundItems) {
+      const giText = truncate(`  ${gi.name}`, sidebarCols);
+      const sel = gi.id === selectedId;
+      sidebarRows.push(coloredRow([
+        {
+          text: giText,
+          fg: itemColor2(gi),
+          attrs: sel ? ATTR_BOLD : undefined
+        }
+      ], sidebarCols));
+      sidebarHits.push({
+        col: 0,
+        row: sidebarRows.length - 1,
+        width: sidebarCols,
+        height: 1,
+        data: { codexSelect: gi.id }
+      });
+    }
+  }
+  if (exitLocs.length > 0) {
+    sidebarRows.push(emptyRow(sidebarCols));
+    sidebarRows.push(coloredRow([{ text: "EXITS", fg: theme.colors.dim }], sidebarCols));
+    for (const loc of exitLocs) {
+      const label = loc.direction ? truncate(`${loc.direction} → ${loc.name}`, sidebarCols) : truncate(loc.name, sidebarCols);
+      const sel = loc.id === selectedId;
+      sidebarRows.push(coloredRow([
+        {
+          text: label,
+          fg: TYPE_COLORS.location,
+          attrs: sel ? ATTR_BOLD : undefined
+        }
+      ], sidebarCols));
+      sidebarHits.push({
+        col: 0,
+        row: sidebarRows.length - 1,
+        width: sidebarCols,
+        height: 1,
+        data: { codexSelect: loc.id }
+      });
+    }
+  }
+  if (codexData.player) {
+    sidebarRows.push(emptyRow(sidebarCols));
+    const playerText = truncate(`♣ ${codexData.player.name}`, sidebarCols);
+    const sel = codexData.player.id === selectedId;
+    sidebarRows.push(coloredRow([
+      {
+        text: playerText,
+        fg: TYPE_COLORS.player,
+        attrs: sel ? ATTR_BOLD : undefined
+      }
+    ], sidebarCols));
+    sidebarHits.push({
+      col: 0,
+      row: sidebarRows.length - 1,
+      width: sidebarCols,
+      height: 1,
+      data: { codexSelect: codexData.player.id }
+    });
+  }
+  const selected = allEntities.find((e) => e.id === selectedId);
+  if (selected) {
+    renderEntityDetail(detailRows, selected, detailCols, codexData, allEntities, sidebarCols);
+  } else {
+    detailRows.push(coloredRow([{ text: "No entities to display", fg: theme.colors.dim }], detailCols));
+  }
+  const maxRows = Math.max(sidebarRows.length, detailRows.length);
+  const dividerChar = { char: "│", fg: theme.colors.dim };
+  for (let r = 0;r < maxRows; r++) {
+    const left = sidebarRows[r] || emptyRow(sidebarCols);
+    const right = detailRows[r] || emptyRow(detailCols);
+    const combinedRow = [
+      ...left.slice(0, sidebarCols),
+      dividerChar,
+      ...right.slice(0, detailCols)
+    ];
+    while (combinedRow.length < cols) {
+      combinedRow.push({ char: " ", fg: theme.colors.primary });
+    }
+    cells.push(combinedRow);
+  }
+  const headerRowCount = 2;
+  for (const h of sidebarHits) {
+    h.row += headerRowCount;
+  }
+  hitRegions.push(...sidebarHits);
+  return { cells, hitRegions };
+}
+function renderEntityDetail(rows, entity, cols, codexData, allEntities, _sidebarCols) {
+  const attrs = entity.attributes || {};
+  rows.push(coloredRow([{ text: entity.name, fg: entityColor(entity), attrs: ATTR_BOLD }], cols));
+  if (entity.labels.length) {
+    rows.push(coloredRow([{ text: entity.labels.join(" · "), fg: theme.colors.dim }], cols));
+  }
+  rows.push(emptyRow(cols));
+  let summaryText = entity.summary || "";
+  if (summaryText.startsWith("{")) {
+    summaryText = attrs.description || attrs.personality || "";
+  }
+  if (!summaryText && attrs.description) {
+    summaryText = attrs.description;
+  }
+  if (summaryText) {
+    const wrapped = wordWrap2(summaryText, cols);
+    for (const line of wrapped) {
+      rows.push(textRow(line, theme.colors.primary, cols));
+    }
+    rows.push(emptyRow(cols));
+  }
+  const asciiArt = attrs.ascii_art;
+  if (asciiArt) {
+    const artLines = asciiArt.split(`
+`).slice(0, 8);
+    for (const line of artLines) {
+      rows.push(coloredRow([{ text: truncate(line, cols), fg: entityColor(entity) }], cols));
+    }
+    if (asciiArt.split(`
+`).length > 8) {
+      rows.push(coloredRow([{ text: "  ... (truncated)", fg: theme.colors.dim }], cols));
+    }
+    rows.push(emptyRow(cols));
+  } else if (entity.type !== "player") {
+    rows.push(coloredRow([{ text: "[ art pending ]", fg: "#3a3a48" }], cols));
+    rows.push(emptyRow(cols));
+  }
+  if (entity.type === "npc") {
+    if (attrs.personality)
+      addSection(rows, cols, "PERSONALITY", attrs.personality);
+    if (attrs.backstory)
+      addSection(rows, cols, "BACKSTORY", attrs.backstory);
+    if (attrs.stats && typeof attrs.stats === "object") {
+      const statsText = Object.entries(attrs.stats).map(([k, v]) => `${k} ${v}`).join(" · ");
+      addSection(rows, cols, "STATS", statsText);
+    }
+    if (attrs.skills && typeof attrs.skills === "object") {
+      const skillsText = Object.entries(attrs.skills).map(([k, v]) => `${k}: ${v}`).join(", ");
+      addSection(rows, cols, "SKILLS", skillsText);
+    }
+    if (Array.isArray(attrs.abilities) && attrs.abilities.length) {
+      rows.push(coloredRow([{ text: "ABILITIES", fg: theme.colors.dim }], cols));
+      for (const ab of attrs.abilities) {
+        rows.push(coloredRow([
+          { text: ab.name, fg: theme.colors.accent },
+          { text: ` — ${ab.description}`, fg: theme.colors.dim }
+        ], cols));
+      }
+      rows.push(emptyRow(cols));
+    }
+    if (Array.isArray(attrs.traits) && attrs.traits.length) {
+      addSection(rows, cols, "TRAITS", attrs.traits.join(", "));
+    }
+    if (attrs.disposition)
+      addSection(rows, cols, "DISPOSITION", attrs.disposition);
+    if (attrs.motivation)
+      addSection(rows, cols, "MOTIVATION", attrs.motivation);
+  }
+  if (entity.type === "item") {
+    const parts = [];
+    if (attrs.damage)
+      parts.push(`Damage: ${attrs.damage}`);
+    if (attrs.defense)
+      parts.push(`Defense: ${attrs.defense}`);
+    if (attrs.weight)
+      parts.push(`Weight: ${attrs.weight}`);
+    if (parts.length)
+      addSection(rows, cols, "MECHANICS", parts.join(" · "));
+    if (attrs.lore)
+      addSection(rows, cols, "LORE", attrs.lore);
+    if (Array.isArray(attrs.effects) && attrs.effects.length) {
+      addSection(rows, cols, "EFFECTS", attrs.effects.join(", "));
+    }
+  }
+  if (entity.type === "location") {
+    if (attrs.biome)
+      addSection(rows, cols, "BIOME", attrs.biome);
+    if (attrs.atmosphere)
+      addSection(rows, cols, "ATMOSPHERE", attrs.atmosphere);
+    if (attrs.culture)
+      addSection(rows, cols, "CULTURE", attrs.culture);
+    if (Array.isArray(attrs.threats) && attrs.threats.length) {
+      addSection(rows, cols, "THREATS", attrs.threats.join(", "));
+    }
+    if (attrs.danger_level) {
+      const dl = attrs.danger_level;
+      const skulls = "☠".repeat(Math.min(dl, 5));
+      addSection(rows, cols, "DANGER", `${skulls} (${dl}/10)`);
+    }
+    if (attrs.lore)
+      addSection(rows, cols, "LORE", attrs.lore);
+  }
+  if (entity.type === "player" && codexData.player) {
+    const p = codexData.player;
+    rows.push(coloredRow([{ text: "STATS", fg: theme.colors.dim }], cols));
+    rows.push(coloredRow([
+      { text: "Level: ", fg: theme.colors.dim },
+      { text: String(p.level || 1), fg: theme.colors.primary }
+    ], cols));
+    rows.push(coloredRow([
+      { text: "Health: ", fg: theme.colors.dim },
+      { text: String(p.health || 100), fg: theme.colors.heal }
+    ], cols));
+    rows.push(coloredRow([
+      { text: "Archetype: ", fg: theme.colors.dim },
+      { text: p.archetype || "Unknown", fg: theme.colors.accent }
+    ], cols));
+    rows.push(emptyRow(cols));
+  }
+  if (entity.type === "location" && entity.exits) {
+    rows.push(coloredRow([{ text: "EXITS", fg: theme.colors.dim }], cols));
+    for (const ex of entity.exits) {
+      rows.push(coloredRow([
+        { text: ex.direction || "?", fg: theme.colors.accent },
+        { text: " → ", fg: theme.colors.dim },
+        { text: ex.target || "?", fg: TYPE_COLORS.location }
+      ], cols));
+    }
+    rows.push(emptyRow(cols));
+    if (entity.current) {
+      rows.push(coloredRow([{ text: "PRESENT", fg: theme.colors.dim }], cols));
+      if (codexData.player) {
+        rows.push(coloredRow([{ text: `♣ ${codexData.player.name} (you)`, fg: TYPE_COLORS.player }], cols));
+      }
+      for (const npc of codexData.npcs || []) {
+        rows.push(coloredRow([{ text: `● ${npc.name}`, fg: TYPE_COLORS.npc }], cols));
+      }
+      for (const item of codexData.ground_items || []) {
+        rows.push(coloredRow([{ text: `• ${item.name}`, fg: itemColor2(item) }], cols));
+      }
+      rows.push(emptyRow(cols));
+    }
+  }
+  if (entity.relationships?.length) {
+    rows.push(coloredRow([{ text: "CONNECTIONS", fg: theme.colors.dim }], cols));
+    for (const rel of entity.relationships) {
+      const relType = rel.relationship.replace(/_/g, " ");
+      const other = rel.source === entity.name ? rel.target : rel.source;
+      rows.push(coloredRow([
+        { text: relType + " ", fg: theme.colors.dim },
+        { text: other, fg: TYPE_COLORS.location, attrs: ATTR_UNDERLINE }
+      ], cols));
+      if (rel.fact) {
+        const factText = rel.fact.length > 80 ? rel.fact.slice(0, 80) + "…" : rel.fact;
+        const wrapped = wordWrap2(`  ${factText}`, cols);
+        for (const line of wrapped) {
+          rows.push(textRow(line, theme.colors.dim, cols));
+        }
+      }
+    }
+    rows.push(emptyRow(cols));
+  }
+  if (entity.chain_data) {
+    const chain = entity.chain_data;
+    rows.push(coloredRow([{ text: "ONCHAIN", fg: theme.colors.heal }], cols));
+    if (entity.type === "npc" || entity.type === "player") {
+      if (chain.level != null)
+        addChainRow(rows, cols, "Level", String(chain.level));
+      if (chain.alive != null)
+        addChainRow(rows, cols, "Status", chain.alive ? "Alive" : "Dead");
+      if (chain.wallet)
+        addChainRow(rows, cols, "Wallet", formatAddr(chain.wallet));
+    } else if (entity.type === "item") {
+      if (chain.rarity)
+        addChainRow(rows, cols, "Rarity", String(chain.rarity));
+      if (chain.ownerId)
+        addChainRow(rows, cols, "Owner", formatAddr(chain.ownerId));
+      if (chain.locationId)
+        addChainRow(rows, cols, "Location", formatAddr(chain.locationId));
+    }
+    rows.push(emptyRow(cols));
+  }
+}
+function addSection(rows, cols, label, text) {
+  rows.push(coloredRow([{ text: label, fg: theme.colors.dim }], cols));
+  const wrapped = wordWrap2(text, cols);
+  for (const line of wrapped) {
+    rows.push(textRow(line, theme.colors.primary, cols));
+  }
+  rows.push(emptyRow(cols));
+}
+function addChainRow(rows, cols, label, value) {
+  rows.push(coloredRow([
+    { text: `${label.padEnd(10)}`, fg: theme.colors.dim },
+    { text: value, fg: theme.colors.primary }
+  ], cols));
+}
+function truncate(s, maxLen) {
+  if (s.length <= maxLen)
+    return s;
+  return s.slice(0, maxLen - 1) + "…";
+}
+function createCodexController(mm, getState, playerId) {
   let _codexData = null;
   let _selectedId = null;
   let _allEntities = [];
-  let _detailPage = 0;
-  function close() {
-    backdrop.style.display = "none";
+  function render() {
+    if (!mm.isOpen(MODAL_NAME3))
+      return;
+    const modal = mm.getStack().find((m) => m.name === MODAL_NAME3);
+    if (!modal)
+      return;
+    const contentCols = modal.region.cols - 2;
+    const contentRows = modal.region.rows - 2;
+    mm.setContent(MODAL_NAME3, renderCodexContent(contentCols, contentRows, _codexData, _allEntities, _selectedId));
   }
   async function open(entityId) {
-    backdrop.style.display = "";
-    win.innerHTML = "";
-    const loading = document.createElement("div");
-    loading.style.color = "#6a6a78";
-    loading.style.fontStyle = "italic";
-    loading.style.padding = "16px";
-    loading.textContent = "Loading...";
-    win.appendChild(loading);
+    mm.open(MODAL_NAME3, 0.7, 0.7);
+    const modal = mm.getStack().find((m) => m.name === MODAL_NAME3);
+    if (modal) {
+      const contentCols = modal.region.cols - 2;
+      mm.setContent(MODAL_NAME3, {
+        cells: [
+          coloredRow([{ text: "Loading...", fg: theme.colors.dim }], contentCols)
+        ]
+      });
+    }
     try {
       const pid = playerId();
       const state2 = getState();
       const locId = state2?.roomMap?.id || "";
-      const url = locId ? `/api/codex/${pid}?location_uuid=${locId}` : `/api/codex/${pid}`;
+      const url = locId ? `${GATEWAY_URL}/api/codex/${pid}?location_uuid=${locId}` : `${GATEWAY_URL}/api/codex/${pid}`;
       const resp = await fetch(url);
       _codexData = await resp.json();
     } catch {
@@ -5682,15 +6278,22 @@ function createCodexModal(getState, playerId, openArtViewer) {
       for (const loc of _codexData.locations || []) {
         if (!seen.has(loc.id)) {
           seen.add(loc.id);
-          _allEntities.push({ ...loc, type: "location", labels: loc.labels || ["Location"] });
+          _allEntities.push({
+            ...loc,
+            type: "location",
+            labels: loc.labels || ["Location"]
+          });
         }
       }
-      if (_codexData.player) {
-        const p = _codexData.player;
-        if (!seen.has(p.id)) {
-          seen.add(p.id);
-          _allEntities.push({ id: p.id, name: p.name, type: "player", labels: [p.archetype || "Player"], summary: "" });
-        }
+      if (_codexData.player && !seen.has(_codexData.player.id)) {
+        seen.add(_codexData.player.id);
+        _allEntities.push({
+          id: _codexData.player.id,
+          name: _codexData.player.name,
+          type: "player",
+          labels: [_codexData.player.archetype || "Player"],
+          summary: ""
+        });
       }
     }
     if (entityId) {
@@ -5701,548 +6304,11 @@ function createCodexModal(getState, playerId, openArtViewer) {
     }
     if (_selectedId && !_allEntities.find((e) => e.id === _selectedId)) {
       _selectedId = _allEntities.length ? _allEntities[0].id : null;
-    } else if (!_selectedId) {
-      _selectedId = _allEntities.length ? _allEntities[0].id : null;
     }
     render();
   }
-  function render() {
-    win.innerHTML = "";
-    const header = document.createElement("div");
-    header.className = "win-title dialog-title";
-    header.style.display = "flex";
-    header.style.justifyContent = "space-between";
-    header.style.alignItems = "center";
-    const title = document.createElement("span");
-    title.style.color = "#8b5cf6";
-    title.textContent = "CODEX";
-    const closeBtn = document.createElement("span");
-    closeBtn.textContent = "[×]";
-    closeBtn.style.color = "#e05050";
-    closeBtn.style.cursor = "pointer";
-    closeBtn.onclick = close;
-    header.appendChild(title);
-    header.appendChild(closeBtn);
-    win.appendChild(header);
-    const body = document.createElement("div");
-    body.style.display = "flex";
-    body.style.gap = "0";
-    body.style.fontFamily = "'Fira Code', monospace";
-    body.style.fontSize = "12px";
-    body.style.lineHeight = "1.6";
-    body.style.height = "50vh";
-    const sidebar = document.createElement("div");
-    sidebar.style.width = "140px";
-    sidebar.style.flexShrink = "0";
-    sidebar.style.borderRight = "1px solid #1a1a24";
-    sidebar.style.overflowY = "auto";
-    sidebar.style.padding = "8px 0";
-    const npcs = _codexData?.npcs || [];
-    const groundItems = _codexData?.ground_items || [];
-    const invItems = _codexData?.inventory || [];
-    const locations = _codexData?.locations || [];
-    const currentLoc = locations.find((l) => l.current);
-    const exitLocs = locations.filter((l) => !l.current);
-    if (currentLoc) {
-      const locHeader = createSectionHeader(`◉ ${currentLoc.name}`, TYPE_COLORS.location, true);
-      locHeader.addEventListener("click", () => {
-        _selectedId = currentLoc.id;
-        render();
-      });
-      sidebar.appendChild(locHeader);
-      for (const npc of npcs) {
-        sidebar.appendChild(createSidebarItem(npc, TYPE_COLORS.npc, "  "));
-      }
-      for (const gi of groundItems) {
-        sidebar.appendChild(createSidebarItem(gi, itemColor(gi), "  "));
-      }
-    }
-    if (exitLocs.length) {
-      const exitHeader = createSectionHeader("EXITS", "#6a6a78");
-      sidebar.appendChild(exitHeader);
-      for (const loc of exitLocs) {
-        const label = loc.direction ? `${loc.direction} → ${loc.name}` : loc.name;
-        sidebar.appendChild(createSidebarItem({ ...loc, name: label }, TYPE_COLORS.location));
-      }
-    }
-    const playerData = _codexData?.player;
-    if (playerData) {
-      if (!_allEntities.find((e) => e.id === playerData.id)) {
-        _allEntities.push({
-          id: playerData.id,
-          name: playerData.name,
-          type: "player",
-          labels: [playerData.archetype || "Player"],
-          summary: ""
-        });
-      }
-      const playerHeader = createSectionHeader(`♣ ${playerData.name}`, TYPE_COLORS.player, true);
-      playerHeader.addEventListener("click", () => {
-        _selectedId = playerData.id;
-        render();
-      });
-      sidebar.appendChild(playerHeader);
-    }
-    const detail = document.createElement("div");
-    detail.style.flex = "1";
-    detail.style.minWidth = "0";
-    detail.style.display = "flex";
-    detail.style.flexDirection = "column";
-    detail.style.padding = "8px 12px";
-    const selected = _allEntities.find((e) => e.id === _selectedId);
-    if (selected) {
-      const sections = [];
-      renderDetailSections(sections, selected);
-      const contentArea = document.createElement("div");
-      contentArea.style.flex = "1";
-      contentArea.style.overflowY = "auto";
-      for (let i = 0;i < sections.length; i++) {
-        sections[i].dataset.sectionIdx = String(i);
-        contentArea.appendChild(sections[i]);
-      }
-      detail.appendChild(contentArea);
-      if (sections.length > 2) {
-        const jumpBar = document.createElement("div");
-        jumpBar.style.display = "flex";
-        jumpBar.style.flexWrap = "wrap";
-        jumpBar.style.gap = "4px";
-        jumpBar.style.padding = "4px 0 2px";
-        jumpBar.style.borderTop = "1px solid #1a1a24";
-        for (let i = 1;i < sections.length; i++) {
-          const headers = sections[i].querySelectorAll("div");
-          let label = `§${i}`;
-          for (const h of headers) {
-            const style = h.style;
-            if (style.letterSpacing || style.fontSize === "10px") {
-              label = h.textContent?.trim() || label;
-              break;
-            }
-          }
-          const chip = document.createElement("span");
-          chip.style.color = "#6a6a78";
-          chip.style.fontSize = "9px";
-          chip.style.cursor = "pointer";
-          chip.style.padding = "1px 4px";
-          chip.style.border = "1px solid #1a1a24";
-          chip.style.borderRadius = "2px";
-          chip.textContent = label;
-          chip.addEventListener("click", () => {
-            sections[i].scrollIntoView({ behavior: "smooth", block: "start" });
-          });
-          chip.addEventListener("mouseenter", () => {
-            chip.style.borderColor = "#8b5cf6";
-          });
-          chip.addEventListener("mouseleave", () => {
-            chip.style.borderColor = "#1a1a24";
-          });
-          jumpBar.appendChild(chip);
-        }
-        detail.appendChild(jumpBar);
-      }
-    } else {
-      detail.style.color = "#6a6a78";
-      detail.style.fontStyle = "italic";
-      detail.style.paddingTop = "16px";
-      detail.textContent = "No entities to display";
-    }
-    body.appendChild(sidebar);
-    body.appendChild(detail);
-    win.appendChild(body);
-  }
-  function createSectionHeader(text, color, bold = false) {
-    const el = document.createElement("div");
-    el.style.color = color;
-    el.style.fontSize = "10px";
-    el.style.letterSpacing = "1px";
-    el.style.padding = "6px 8px 2px";
-    el.style.cursor = "pointer";
-    if (bold) {
-      el.style.fontWeight = "bold";
-      el.style.fontSize = "11px";
-    }
-    el.textContent = text;
-    return el;
-  }
-  function createSidebarItem(entity, color, prefix = "") {
-    const item = document.createElement("div");
-    item.style.padding = "2px 8px";
-    item.style.cursor = "pointer";
-    item.style.color = color;
-    item.style.fontSize = "11px";
-    item.style.whiteSpace = "nowrap";
-    item.style.overflow = "hidden";
-    item.style.textOverflow = "ellipsis";
-    if (entity.id === _selectedId) {
-      item.style.background = "#1a1a24";
-    }
-    item.textContent = prefix + entity.name;
-    item.addEventListener("click", () => {
-      _selectedId = entity.id;
-      render();
-    });
-    return item;
-  }
-  function renderDetailSections(sections, entity) {
-    const container = { appendChild(el) {
-      sections.push(el);
-    } };
-    renderDetailInto(container, entity);
-  }
-  function renderDetailInto(container, entity) {
-    const attrs = entity.attributes || {};
-    const headerSection = document.createElement("div");
-    headerSection.style.marginBottom = "8px";
-    const name = document.createElement("div");
-    name.style.color = entityColor(entity);
-    name.style.fontWeight = "bold";
-    name.style.fontSize = "15px";
-    name.style.marginBottom = "4px";
-    name.textContent = entity.name;
-    headerSection.appendChild(name);
-    if (entity.labels.length) {
-      const labels = document.createElement("div");
-      labels.style.color = "#6a6a78";
-      labels.style.fontSize = "10px";
-      labels.style.marginBottom = "8px";
-      labels.textContent = entity.labels.join(" · ");
-      headerSection.appendChild(labels);
-    }
-    let summaryText = entity.summary || "";
-    if (summaryText.startsWith("{")) {
-      summaryText = attrs.description || attrs.personality || "";
-    }
-    if (!summaryText && attrs.description) {
-      summaryText = attrs.description;
-    }
-    if (summaryText) {
-      const summary = document.createElement("div");
-      summary.style.color = "#c8c8d0";
-      summary.style.lineHeight = "1.5";
-      summary.textContent = summaryText;
-      headerSection.appendChild(summary);
-    }
-    container.appendChild(headerSection);
-    const asciiArt = attrs.ascii_art;
-    if (asciiArt && typeof asciiArt === "string") {
-      const artSection = document.createElement("div");
-      artSection.style.marginBottom = "8px";
-      artSection.style.cursor = "pointer";
-      artSection.title = "Click to enlarge";
-      const artPre = document.createElement("pre");
-      artPre.style.cssText = 'font-family:"Fira Code",Consolas,"Courier New",monospace;' + "font-size:10px;line-height:1.15;margin:0;padding:8px;" + "white-space:pre;overflow-x:auto;border-radius:2px;" + "background:#0a0a10;letter-spacing:0.5px;tab-size:4;";
-      artPre.style.color = entityColor(entity);
-      artPre.style.border = `1px solid ${entityColor(entity)}33`;
-      artPre.textContent = asciiArt;
-      artSection.appendChild(artPre);
-      artSection.addEventListener("click", () => {
-        if (openArtViewer)
-          openArtViewer(entity.name, asciiArt, entityColor(entity));
-      });
-      container.appendChild(artSection);
-    } else if (entity.type !== "player") {
-      const placeholder = document.createElement("div");
-      placeholder.style.cssText = "color:#3a3a48;font-size:10px;font-style:italic;margin-bottom:8px;";
-      placeholder.textContent = "[ art pending ]";
-      container.appendChild(placeholder);
-    }
-    if (Object.keys(attrs).length > 0) {
-      if (entity.type === "npc") {
-        if (attrs.personality)
-          addSection(container, "PERSONALITY", attrs.personality);
-        if (attrs.backstory)
-          addSection(container, "BACKSTORY", attrs.backstory);
-        if (attrs.stats && Object.keys(attrs.stats).length) {
-          const statsText = Object.entries(attrs.stats).map(([k, v]) => `${k} ${v}`).join(" · ");
-          addSection(container, "STATS", statsText);
-        }
-        if (attrs.skills && Object.keys(attrs.skills).length) {
-          const skillsText = Object.entries(attrs.skills).map(([k, v]) => `${k}: ${v}`).join(", ");
-          addSection(container, "SKILLS", skillsText);
-        }
-        if (attrs.abilities?.length) {
-          const abDiv = document.createElement("div");
-          abDiv.style.marginBottom = "8px";
-          const abHeader = document.createElement("div");
-          abHeader.style.color = "#6a6a78";
-          abHeader.style.fontSize = "10px";
-          abHeader.style.letterSpacing = "1px";
-          abHeader.style.marginBottom = "4px";
-          abHeader.textContent = "ABILITIES";
-          abDiv.appendChild(abHeader);
-          for (const ab of attrs.abilities) {
-            const row = document.createElement("div");
-            row.style.marginBottom = "4px";
-            row.innerHTML = `<span style="color:#8b5cf6">${esc(ab.name)}</span> <span style="color:#6a6a78">— ${esc(ab.description)}</span>`;
-            abDiv.appendChild(row);
-          }
-          container.appendChild(abDiv);
-        }
-        if (attrs.traits?.length)
-          addSection(container, "TRAITS", attrs.traits.join(", "));
-        if (attrs.disposition)
-          addSection(container, "DISPOSITION", attrs.disposition);
-        if (attrs.motivation)
-          addSection(container, "MOTIVATION", attrs.motivation);
-      }
-      if (entity.type === "item") {
-        const parts = [];
-        if (attrs.damage)
-          parts.push(`Damage: ${attrs.damage}`);
-        if (attrs.defense)
-          parts.push(`Defense: ${attrs.defense}`);
-        if (attrs.weight)
-          parts.push(`Weight: ${attrs.weight}`);
-        if (parts.length)
-          addSection(container, "MECHANICS", parts.join(" · "));
-        if (attrs.lore)
-          addSection(container, "LORE", attrs.lore);
-        if (attrs.effects?.length)
-          addSection(container, "EFFECTS", attrs.effects.join(", "));
-      }
-      if (entity.type === "location") {
-        const locAttrs = document.createElement("div");
-        locAttrs.style.marginBottom = "8px";
-        let hasLocAttrs = false;
-        if (attrs.biome) {
-          addSectionTo(locAttrs, "BIOME", attrs.biome);
-          hasLocAttrs = true;
-        }
-        if (attrs.atmosphere) {
-          addSectionTo(locAttrs, "ATMOSPHERE", attrs.atmosphere);
-          hasLocAttrs = true;
-        }
-        if (attrs.culture) {
-          addSectionTo(locAttrs, "CULTURE", attrs.culture);
-          hasLocAttrs = true;
-        }
-        if (attrs.threats?.length) {
-          addSectionTo(locAttrs, "THREATS", attrs.threats.join(", "));
-          hasLocAttrs = true;
-        }
-        if (attrs.danger_level) {
-          const skulls = "☠".repeat(Math.min(attrs.danger_level, 5));
-          addSectionTo(locAttrs, "DANGER", `${skulls} (${attrs.danger_level}/10)`);
-          hasLocAttrs = true;
-        }
-        if (attrs.lore) {
-          addSectionTo(locAttrs, "LORE", attrs.lore);
-          hasLocAttrs = true;
-        }
-        if (hasLocAttrs)
-          container.appendChild(locAttrs);
-      }
-    }
-    if (entity.type === "player") {
-      const playerData = _codexData?.player;
-      if (playerData) {
-        const statsDiv = document.createElement("div");
-        statsDiv.style.marginBottom = "12px";
-        statsDiv.innerHTML = `
-          <div style="color:#6a6a78;font-size:10px;letter-spacing:1px;margin-bottom:4px">STATS</div>
-          <div>Level: <span style="color:#c8c8d0">${playerData.level || 1}</span></div>
-          <div>Health: <span style="color:#50c878">${playerData.health || 100}</span></div>
-          <div>Archetype: <span style="color:#8b5cf6">${esc(playerData.archetype || "Unknown")}</span></div>
-        `;
-        container.appendChild(statsDiv);
-      }
-      const spacer = document.createElement("div");
-      spacer.style.marginTop = "12px";
-      container.appendChild(spacer);
-    }
-    if (entity.type === "location" && entity.exits) {
-      const locSection = document.createElement("div");
-      locSection.style.marginBottom = "8px";
-      addSectionTo(locSection, "EXITS", "");
-      const exitsBody = locSection.lastElementChild?.querySelector("div:last-child");
-      if (exitsBody)
-        exitsBody.remove();
-      for (const ex of entity.exits) {
-        const row = document.createElement("div");
-        row.style.marginBottom = "2px";
-        row.innerHTML = `<span style="color:#8b5cf6">${esc(ex.direction || "?")}</span> <span style="color:#6a6a78">→</span> <span style="color:#7aa2d4;cursor:pointer">${esc(ex.target || "?")}</span>`;
-        const targetSpan = row.querySelector("span:last-child");
-        if (targetSpan) {
-          targetSpan.addEventListener("click", () => {
-            const linked = _allEntities.find((e) => e.name === ex.target);
-            if (linked) {
-              _selectedId = linked.id;
-              _detailPage = 0;
-              render();
-            }
-          });
-        }
-        locSection.appendChild(row);
-      }
-      if (entity.current) {
-        const npcsHere = _codexData?.npcs || [];
-        const itemsHere = _codexData?.ground_items || [];
-        const playerHere = _codexData?.player;
-        const presHeader = document.createElement("div");
-        presHeader.style.color = "#6a6a78";
-        presHeader.style.fontSize = "10px";
-        presHeader.style.letterSpacing = "1px";
-        presHeader.style.margin = "8px 0 4px";
-        presHeader.textContent = "PRESENT";
-        locSection.appendChild(presHeader);
-        if (playerHere) {
-          const row = document.createElement("div");
-          row.style.color = TYPE_COLORS.player;
-          row.style.cursor = "pointer";
-          row.textContent = `♣ ${playerHere.name} (you)`;
-          row.addEventListener("click", () => {
-            _selectedId = playerHere.id;
-            _detailPage = 0;
-            render();
-          });
-          locSection.appendChild(row);
-        }
-        for (const npc of npcsHere) {
-          const row = document.createElement("div");
-          row.style.color = TYPE_COLORS.npc;
-          row.style.cursor = "pointer";
-          row.textContent = `● ${npc.name}`;
-          row.addEventListener("click", () => {
-            _selectedId = npc.id;
-            _detailPage = 0;
-            render();
-          });
-          locSection.appendChild(row);
-        }
-        for (const item of itemsHere) {
-          const row = document.createElement("div");
-          row.style.color = itemColor(item);
-          row.style.cursor = "pointer";
-          row.textContent = `• ${item.name}`;
-          row.addEventListener("click", () => {
-            _selectedId = item.id;
-            _detailPage = 0;
-            render();
-          });
-          locSection.appendChild(row);
-        }
-      }
-      container.appendChild(locSection);
-    }
-    if (entity.relationships?.length) {
-      const connHeader = document.createElement("div");
-      connHeader.style.color = "#6a6a78";
-      connHeader.style.fontSize = "10px";
-      connHeader.style.letterSpacing = "1px";
-      connHeader.style.marginBottom = "4px";
-      connHeader.textContent = "CONNECTIONS";
-      container.appendChild(connHeader);
-      for (const rel of entity.relationships) {
-        const row = document.createElement("div");
-        row.style.marginBottom = "4px";
-        const relType = document.createElement("span");
-        relType.style.color = "#6a6a78";
-        relType.style.fontSize = "10px";
-        relType.textContent = rel.relationship.replace(/_/g, " ") + " ";
-        const target = document.createElement("span");
-        const other = rel.source === entity.name ? rel.target : rel.source;
-        target.style.color = "#7aa2d4";
-        target.style.cursor = "pointer";
-        target.style.textDecoration = "underline dotted";
-        target.textContent = other;
-        target.addEventListener("click", () => {
-          const linked = _allEntities.find((e) => e.name === other);
-          if (linked) {
-            _selectedId = linked.id;
-            render();
-          }
-        });
-        row.appendChild(relType);
-        row.appendChild(target);
-        if (rel.fact) {
-          const fact = document.createElement("div");
-          fact.style.color = "#6a6a78";
-          fact.style.fontSize = "11px";
-          fact.style.fontStyle = "italic";
-          fact.style.marginLeft = "8px";
-          fact.textContent = rel.fact.length > 100 ? rel.fact.slice(0, 100) + "…" : rel.fact;
-          row.appendChild(fact);
-        }
-        container.appendChild(row);
-      }
-      const spacer = document.createElement("div");
-      spacer.style.marginTop = "12px";
-      container.appendChild(spacer);
-    }
-    if (entity.chain_data) {
-      renderChainSection(container, entity);
-    }
-  }
-  function renderChainSection(container, entity) {
-    const chain = entity.chain_data;
-    const card = document.createElement("div");
-    card.style.border = "1px solid #1a3a1a";
-    card.style.borderRadius = "3px";
-    card.style.padding = "8px";
-    card.style.marginTop = "4px";
-    const cardHeader = document.createElement("div");
-    cardHeader.style.color = "#50c878";
-    cardHeader.style.fontSize = "10px";
-    cardHeader.style.letterSpacing = "1px";
-    cardHeader.style.marginBottom = "4px";
-    cardHeader.textContent = "ONCHAIN";
-    card.appendChild(cardHeader);
-    if (entity.type === "npc" || entity.type === "player") {
-      if (chain.level != null)
-        addChainRow(card, "Level", String(chain.level));
-      if (chain.alive != null)
-        addChainRow(card, "Status", chain.alive ? "Alive" : "Dead");
-      if (chain.wallet)
-        addChainRow(card, "Wallet", formatAddr(chain.wallet));
-    } else if (entity.type === "item") {
-      if (chain.rarity)
-        addChainRow(card, "Rarity", String(chain.rarity));
-      if (chain.ownerId)
-        addChainRow(card, "Owner", formatAddr(chain.ownerId));
-      if (chain.locationId)
-        addChainRow(card, "Location", formatAddr(chain.locationId));
-    }
-    container.appendChild(card);
-  }
-  function addChainRow(container, label, value) {
-    const row = document.createElement("div");
-    row.style.padding = "1px 0";
-    row.style.fontSize = "12px";
-    const lbl = document.createElement("span");
-    lbl.style.color = "#6a6a78";
-    lbl.style.display = "inline-block";
-    lbl.style.width = "70px";
-    lbl.style.fontSize = "10px";
-    lbl.style.letterSpacing = "0.5px";
-    lbl.style.textTransform = "uppercase";
-    lbl.textContent = label;
-    const val = document.createElement("span");
-    val.style.color = "#c8c8d0";
-    val.textContent = value;
-    row.appendChild(lbl);
-    row.appendChild(val);
-    container.appendChild(row);
-  }
-  function addSectionTo(parent, label, text) {
-    const section = document.createElement("div");
-    section.style.marginBottom = "6px";
-    const header = document.createElement("div");
-    header.style.color = "#6a6a78";
-    header.style.fontSize = "10px";
-    header.style.letterSpacing = "1px";
-    header.style.marginBottom = "2px";
-    header.textContent = label;
-    section.appendChild(header);
-    if (text) {
-      const body = document.createElement("div");
-      body.style.color = "#c8c8d0";
-      body.style.fontSize = "12px";
-      body.textContent = text;
-      section.appendChild(body);
-    }
-    parent.appendChild(section);
-  }
-  function addSection(container, label, text) {
-    addSectionTo(container, label, text);
+  function close() {
+    mm.close(MODAL_NAME3);
   }
   function refreshEntityArt(entityId, lines) {
     const artText = lines.join(`
@@ -6252,18 +6318,25 @@ function createCodexModal(getState, playerId, openArtViewer) {
       if (!entity.attributes)
         entity.attributes = {};
       entity.attributes.ascii_art = artText;
-      if (_selectedId === entityId && backdrop.style.display !== "none") {
+      if (_selectedId === entityId && mm.isOpen(MODAL_NAME3)) {
         render();
       }
     }
   }
+  function handleSelect(entityId) {
+    _selectedId = entityId;
+    const modal = mm.getStack().find((m) => m.name === MODAL_NAME3);
+    if (modal)
+      modal.scrollOffset = 0;
+    render();
+  }
   return {
-    el: backdrop,
     open,
     close,
     refreshEntityArt,
+    selectEntity: handleSelect,
     get active() {
-      return backdrop.style.display !== "none";
+      return mm.isOpen(MODAL_NAME3);
     }
   };
 }
@@ -6316,103 +6389,6 @@ function createArtViewer() {
       return backdrop.style.display !== "none";
     }
   };
-}
-
-// src/ui/status.ts
-function createStatusBar() {
-  const el = document.createElement("div");
-  el.className = "status-bar";
-  el.innerHTML = `
-    <span class="status-phase">✓ Ready</span>
-    <span class="status-activity"></span>
-    <span class="status-chain">◇ Redstone: offline</span>
-    <span class="status-tick">☽ Tick 0</span>
-  `;
-  const phaseEl = el.querySelector(".status-phase");
-  const activityEl = el.querySelector(".status-activity");
-  const chainEl = el.querySelector(".status-chain");
-  const tickEl = el.querySelector(".status-tick");
-  let activityTimer = null;
-  function renderPhase(rs) {
-    switch (rs.phase) {
-      case "ready":
-        phaseEl.textContent = rs.location ? `✓ Ready · ${rs.location}` : "✓ Ready";
-        phaseEl.className = "status-phase ready";
-        break;
-      case "collecting": {
-        const count = rs.actionCount ?? 0;
-        const timer = rs.secondsLeft != null ? ` (${rs.secondsLeft}s)` : "";
-        phaseEl.textContent = `⟳ Collecting · ${count} action${count !== 1 ? "s" : ""}${timer}`;
-        phaseEl.className = "status-phase collecting";
-        break;
-      }
-      case "resolving": {
-        const crewLabel = rs.crew ? rs.crew.charAt(0).toUpperCase() + rs.crew.slice(1).replace("_", "-") : "";
-        phaseEl.textContent = crewLabel ? `⟳ Resolving · ${crewLabel}` : "⟳ Resolving";
-        phaseEl.className = "status-phase resolving";
-        break;
-      }
-      case "npc_response":
-        phaseEl.textContent = "⟳ NPCs Responding";
-        phaseEl.className = "status-phase npc-response";
-        break;
-    }
-  }
-  onRoundStateChange(renderPhase);
-  return {
-    el,
-    setChain(connected) {
-      chainEl.textContent = connected ? "◆ Redstone: synced" : "◇ Redstone: offline";
-      chainEl.className = `status-chain ${connected ? "connected" : ""}`;
-    },
-    setTick(tick) {
-      tickEl.textContent = `☽ Tick ${tick}`;
-    },
-    setActivity(text) {
-      if (activityTimer)
-        clearTimeout(activityTimer);
-      if (text) {
-        activityEl.textContent = `✨ ${text}`;
-        activityEl.style.color = "#8b5cf6";
-        activityTimer = setTimeout(() => {
-          activityEl.textContent = "";
-          activityTimer = null;
-        }, 5000);
-      } else {
-        activityEl.textContent = "";
-      }
-    }
-  };
-}
-
-// src/chain/wallet.ts
-var connectedAddress = null;
-function hasProvider() {
-  return typeof window.ethereum !== "undefined";
-}
-async function connectWallet() {
-  if (!window.ethereum) {
-    throw new Error("No wallet provider found");
-  }
-  const accounts = await window.ethereum.request({
-    method: "eth_requestAccounts"
-  });
-  if (!accounts.length) {
-    throw new Error("No accounts returned");
-  }
-  connectedAddress = accounts[0];
-  localStorage.setItem("mm_wallet", connectedAddress);
-  return connectedAddress;
-}
-function getAddress() {
-  if (connectedAddress)
-    return connectedAddress;
-  return localStorage.getItem("mm_wallet");
-}
-function formatAddress(addr) {
-  if (addr.length < 10)
-    return addr;
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
 // src/ui/overlay.ts
@@ -6566,294 +6542,275 @@ function initIntroNav(onDone) {
   showPage(0);
 }
 
-// src/app.ts
-var gameState;
-var narrative;
-var eventsFeed;
-var header;
-var npcDialog;
-var codex;
-var artViewer;
-var statusBar;
-var narrativeWin;
-var eventsWin;
-var mapWin;
-var characterWin;
-var inventoryWin;
-var exitsWin;
-var presentWin;
-var questWin;
-var factionWin;
-var commandWin;
-var overlays;
-var invModal;
-function registerMapEntities(map) {
-  if (!map)
-    return;
-  const entities = [];
-  for (const npc of map.npcs)
-    entities.push({ name: npc.name, id: npc.id, type: "npc" });
-  for (const item of map.items)
-    entities.push({ name: item.name, id: item.id, type: "item" });
-  for (const exit of map.exits)
-    entities.push({ name: exit.target, id: exit.target, type: "location" });
-  entities.push({ name: map.name, id: map.id, type: "location" });
-  setKnownEntities(entities);
-}
-async function fetchPlayerWorldMap() {
-  try {
-    const pid = getSession().playerId;
-    if (!pid || !gameState)
-      return;
-    const resp = await fetch(`${GATEWAY_URL}/api/worldmap/${pid}`);
-    if (resp.ok) {
-      gameState.worldMap = await resp.json();
-      renderWorldMapPanel(exitsWin.panel, gameState, handleAction);
-    }
-  } catch {}
-}
-function renderAllPanels() {
-  if (!gameState)
-    return;
-  characterWin.setTitle(gameState.player.name || "Character");
-  renderCharacterPanel(characterWin.panel, gameState);
-  renderInventoryPanel(inventoryWin.panel, gameState);
-  renderWorldMapPanel(exitsWin.panel, gameState, handleAction);
-  renderPresentPanel(presentWin.panel, gameState, handleAction);
-  renderQuestLogPanel(questWin.panel, gameState.quests);
-  renderFactionsPanel(factionWin.panel, gameState.factions);
-  updateMap(gameState, handleAction);
-}
-async function handleAction(action) {
-  if (!action.trim() || action.length > 500)
-    return;
-  const phase = getRoundState().phase;
-  if (phase !== "ready" && phase !== "collecting")
-    return;
-  narrative.addBlock(`> ${action}`, "player-action");
-  await sendAction(action);
-}
-function showDeathScreen(cause) {
-  const causeEl = document.getElementById("death-cause");
-  const statsEl = document.getElementById("death-stats");
-  causeEl.textContent = cause || "The world continues without you.";
-  statsEl.innerHTML = gameState ? `
-    <div>Name: ${gameState.player.name}</div>
-    <div>Level: ${gameState.player.level}</div>
-    <div>Last Location: ${gameState.location.name}</div>
-  ` : "";
-  overlays.show("death");
-}
-function handleMessage(msg) {
-  switch (msg.type) {
-    case "narrative": {
-      narrative.removeThinking();
-      const channel = msg.channel || "narrative";
-      if (channel === "events") {
-        eventsFeed.addBlock(msg.text || "", "event");
-      } else if (channel === "ooc") {
-        eventsFeed.addBlock(msg.text || "", "ooc");
-      } else if (msg.npc) {
-        const npcKey = msg.npc_username || msg.npc.toLowerCase().replace(/\s+/g, "-");
-        narrative.removeBlockById(`npc-status-${npcKey}`);
-        narrative.addBlock(`${msg.npc}`, "npc-name");
-        narrative.addBlock(msg.text || "", "npc-dialogue");
-      } else {
-        narrative.addBlock(msg.text || "", "narrative");
-      }
-      if (msg.state_update && gameState) {
-        applyStateUpdate(gameState, msg.state_update);
-        const session2 = getSession();
-        session2.currentLocation = gameState.location.name;
-        if (gameState.roomMap)
-          registerMapEntities(gameState.roomMap);
-        if (msg.state_update.world_time) {
-          header.updateTime(msg.state_update.world_time);
-          statusBar.setTick(msg.state_update.world_time.tick || 0);
-        }
-        renderAllPanels();
-        fetchPlayerWorldMap();
-        if (msg.state_update.events) {
-          const events = msg.state_update.events;
-          if (events.combat) {
-            const c = events.combat;
-            if (c.damage_dealt != null) {
-              eventsFeed.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ""}`, "event-combat");
-            }
-            if (c.xp_gained) {
-              eventsFeed.addBlock(`[+${c.xp_gained} XP]`, "event-xp");
-            }
-            if (c.target_dead) {
-              eventsFeed.addBlock(`${c.target_name || "Target"} has been slain.`, "event-death");
-            }
-          }
-          if (events.inventory_changes) {
-            for (const inv of events.inventory_changes) {
-              const prefix = inv.event_type === "DROP" ? "-" : "+";
-              eventsFeed.addBlock(`[${prefix}${inv.item_name}]`, "event-item");
-            }
-          }
-        }
-      }
-      if (msg.state_update?.status === "dead" || msg.state_update?.events?.combat?.target_dead || msg.text && msg.text.toLowerCase().includes("you have died")) {
-        showDeathScreen(msg.state_update?.cause || "");
-      }
-      break;
-    }
-    case "death_feed": {
-      const skull = "☠";
-      const deathMsg = `${skull} ${msg.player_name || "Unknown"} (Level ${msg.level || "?"}) fell at ${msg.location || "unknown"}. ${msg.cause || ""}`;
-      narrative.addBlock(deathMsg, "death-feed");
-      break;
-    }
-    case "scene_art": {
-      const artText = (msg.lines || []).join(`
-`);
-      if (artText) {
-        narrative.addBlock(artText, "scene-art");
-      }
-      break;
-    }
-    case "entity_art": {
-      const artLines = msg.lines || [];
-      if (msg.entity_id && gameState) {
-        const npc = gameState.location.npcs.find((n) => n.id === msg.entity_id);
-        const item = gameState.location.items.find((i) => i.id === msg.entity_id);
-        const entity = npc || item;
-        if (entity) {
-          entity.ascii_art = artLines.join(`
-`);
-        }
-      }
-      if (msg.entity_id && codex?.active) {
-        codex.refreshEntityArt(msg.entity_id, artLines);
-      }
-      break;
-    }
-    case "codex_refresh": {
-      break;
-    }
-    case "npc_status": {
-      const npcKey = msg.npc_username || msg.npc || "unknown";
-      narrative.replaceBlock(`npc-status-${npcKey}`, `${msg.npc}: ${msg.text}`, "npc-status");
-      break;
-    }
-    case "phase": {
-      updateRoundState(msg);
-      const phase = msg.phase || "";
-      const crew = msg.crew || "";
-      if (phase === "resolving" && crew) {
-        eventsFeed.replaceBlock("phase-progress", `[${crew}]`, "event");
-      } else if (phase === "npc_response") {
-        eventsFeed.replaceBlock("phase-progress", "[waiting for NPCs]", "event");
-      } else if (phase === "ready") {
-        eventsFeed.removeBlockById("phase-progress");
-      }
-      break;
-    }
-    case "status":
-      if (msg.tick != null)
-        statusBar.setTick(msg.tick);
-      if (msg.chain != null)
-        statusBar.setChain(msg.chain);
-      if (msg.activity)
-        statusBar.setActivity(msg.activity);
-      break;
-    case "player_joined": {
-      if (gameState) {
-        const exists = gameState.location.players.some((p) => p.id === msg.player_id);
-        if (!exists) {
-          gameState.location.players.push({ name: msg.player_name, id: msg.player_id });
-          renderPresentPanel(presentWin.panel, gameState, handleAction);
-          narrative.addBlock(`${msg.player_name} arrived.`, "system");
-        }
-      }
-      break;
-    }
-    case "player_left": {
-      if (gameState) {
-        gameState.location.players = gameState.location.players.filter((p) => p.id !== msg.player_id);
-        renderPresentPanel(presentWin.panel, gameState, handleAction);
-        narrative.addBlock(`${msg.player_name} departed.`, "system");
-      }
-      break;
-    }
-    case "position_update": {
-      if (gameState && msg.entity_id) {
-        if (gameState.roomMap) {
-          const npc = gameState.roomMap.npcs.find((n) => n.id === msg.entity_id);
-          if (npc) {
-            npc.x = msg.x;
-            npc.y = msg.y;
-          }
-          const item = gameState.roomMap.items.find((i) => i.id === msg.entity_id);
-          if (item) {
-            item.x = msg.x;
-            item.y = msg.y;
-          }
-        }
-        const locNpc = gameState.location.npcs.find((n) => n.id === msg.entity_id);
-        if (locNpc) {
-          locNpc.x = msg.x;
-          locNpc.y = msg.y;
-        }
-        const locItem = gameState.location.items.find((i) => i.id === msg.entity_id);
-        if (locItem) {
-          locItem.x = msg.x;
-          locItem.y = msg.y;
-        }
-        updateMap(gameState, handleAction);
-      }
-      break;
-    }
-    case "npc_left": {
-      if (gameState) {
-        const leftName = msg.npc_name.toLowerCase();
-        gameState.location.npcs = gameState.location.npcs.filter((n) => n.name.toLowerCase() !== leftName && !n.name.toLowerCase().startsWith(leftName));
-        renderPresentPanel(presentWin.panel, gameState, handleAction);
-      }
-      break;
-    }
-    case "npc_joined": {
-      if (gameState && msg.npc_name) {
-        const joinName = msg.npc_name.toLowerCase();
-        const exists = gameState.location.npcs.some((n) => n.name.toLowerCase() === joinName || n.name.toLowerCase().startsWith(joinName));
-        if (!exists) {
-          gameState.location.npcs.push({ name: msg.npc_name, id: msg.npc_id || "", role: "" });
-          renderPresentPanel(presentWin.panel, gameState, handleAction);
-        }
-      }
-      break;
-    }
-    case "presence": {
-      if (gameState) {
-        gameState.location.players = (msg.players || []).map((p) => ({
-          name: p.player_name,
-          id: p.player_id
-        }));
-        renderPresentPanel(presentWin.panel, gameState, handleAction);
-      }
-      break;
-    }
-    case "state_update": {
-      if (msg.state_update && gameState) {
-        applyStateUpdate(gameState, msg.state_update);
-        renderAllPanels();
-        fetchPlayerWorldMap();
-        if (invModal.active)
-          invModal.refresh();
-      }
-      break;
-    }
-    case "room_items_changed": {
-      if (invModal.active)
-        invModal.refresh();
-      break;
-    }
-    default:
-      console.log("Unknown message:", msg);
+// src/ui/mention-dropdown.ts
+function createMentionDropdown() {
+  const el = document.createElement("div");
+  el.className = "mention-dropdown";
+  el.style.display = "none";
+  document.body.appendChild(el);
+  let items = [];
+  let filtered = [];
+  let selectedIndex = 0;
+  let selectCallback = null;
+  function render() {
+    el.innerHTML = filtered.map((s, i) => {
+      const icon = s.type === "npc" ? "◆" : "@";
+      const cls = i === selectedIndex ? "mention-item selected" : "mention-item";
+      const typeCls = s.type === "npc" ? "mention-npc" : "mention-player";
+      return `<div class="${cls} ${typeCls}" data-index="${i}"><span class="mention-icon">${icon}</span>${s.name}</div>`;
+    }).join("");
+    el.querySelectorAll(".mention-item").forEach((row) => {
+      row.addEventListener("click", () => {
+        const idx = parseInt(row.dataset.index || "0", 10);
+        if (filtered[idx] && selectCallback)
+          selectCallback(filtered[idx].name);
+        dropdown.hide();
+      });
+    });
   }
+  const dropdown = {
+    el,
+    onSelect: null,
+    show(suggestions, anchor) {
+      items = suggestions;
+      filtered = [...items];
+      selectedIndex = 0;
+      selectCallback = this.onSelect;
+      const rect = anchor.getBoundingClientRect();
+      el.style.position = "fixed";
+      el.style.bottom = `${window.innerHeight - rect.top + 4}px`;
+      el.style.left = `${rect.left}px`;
+      el.style.display = "";
+      render();
+    },
+    hide() {
+      el.style.display = "none";
+      items = [];
+      filtered = [];
+    },
+    isVisible() {
+      return el.style.display !== "none";
+    },
+    filter(query) {
+      const q = query.toLowerCase();
+      filtered = q ? items.filter((s) => s.name.toLowerCase().startsWith(q)) : [...items];
+      selectedIndex = 0;
+      render();
+      el.style.display = filtered.length > 0 ? "" : "none";
+    },
+    handleKey(e) {
+      if (!this.isVisible())
+        return false;
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selectedIndex = Math.max(0, selectedIndex - 1);
+        render();
+        return true;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selectedIndex = Math.min(filtered.length - 1, selectedIndex + 1);
+        render();
+        return true;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        if (filtered[selectedIndex] && selectCallback) {
+          e.preventDefault();
+          selectCallback(filtered[selectedIndex].name);
+          this.hide();
+          return true;
+        }
+      }
+      if (e.key === "Escape") {
+        this.hide();
+        return true;
+      }
+      return false;
+    }
+  };
+  return dropdown;
 }
+
+// src/panels/input.ts
+function initInput(inputEl, onSubmit, getContext) {
+  const history = [];
+  let historyIndex = -1;
+  let locked = false;
+  const defaultPlaceholder = inputEl.placeholder || "What do you do?";
+  function setLocked(isLocked) {
+    locked = isLocked;
+    inputEl.disabled = isLocked;
+    inputEl.classList.toggle("input-locked", isLocked);
+  }
+  onRoundStateChange((rs) => {
+    switch (rs.phase) {
+      case "ready":
+        setLocked(false);
+        inputEl.placeholder = defaultPlaceholder;
+        break;
+      case "collecting": {
+        setLocked(false);
+        const timer = rs.secondsLeft != null ? `${rs.secondsLeft}s left to act...` : "Round open...";
+        inputEl.placeholder = timer;
+        break;
+      }
+      case "resolving":
+        setLocked(true);
+        inputEl.placeholder = "Resolving...";
+        break;
+      case "npc_response":
+        setLocked(true);
+        inputEl.placeholder = "NPCs responding...";
+        break;
+    }
+  });
+  const dropdown = createMentionDropdown();
+  let mentionActive = false;
+  let mentionStart = -1;
+  function getMentionSuggestions() {
+    if (!getContext)
+      return [];
+    const ctx = getContext();
+    const suggestions = [];
+    for (const npc of ctx.npcs) {
+      const name = typeof npc === "string" ? npc : npc.name;
+      suggestions.push({ name, type: "npc" });
+    }
+    for (const p of ctx.players) {
+      const name = typeof p === "string" ? p : p.name;
+      suggestions.push({ name, type: "player" });
+    }
+    return suggestions;
+  }
+  dropdown.onSelect = (name) => {
+    const before = inputEl.value.slice(0, mentionStart);
+    const after = inputEl.value.slice(inputEl.selectionStart || inputEl.value.length);
+    inputEl.value = `${before}@${name} ${after}`;
+    inputEl.focus();
+    mentionActive = false;
+    mentionStart = -1;
+  };
+  inputEl.addEventListener("keydown", (e) => {
+    if (locked)
+      return;
+    if (mentionActive && dropdown.handleKey(e))
+      return;
+    if (e.key === "Enter") {
+      if (mentionActive) {
+        dropdown.hide();
+        mentionActive = false;
+      }
+      const action = inputEl.value.trim();
+      if (action) {
+        history.unshift(action);
+        historyIndex = -1;
+        onSubmit(action);
+        inputEl.value = "";
+      }
+    } else if (e.key === "ArrowUp" && !mentionActive) {
+      e.preventDefault();
+      if (historyIndex < history.length - 1) {
+        historyIndex++;
+        inputEl.value = history[historyIndex];
+      }
+    } else if (e.key === "ArrowDown" && !mentionActive) {
+      e.preventDefault();
+      if (historyIndex > 0) {
+        historyIndex--;
+        inputEl.value = history[historyIndex];
+      } else {
+        historyIndex = -1;
+        inputEl.value = "";
+      }
+    } else if (e.key === "Escape" && mentionActive) {
+      dropdown.hide();
+      mentionActive = false;
+    }
+  });
+  inputEl.addEventListener("input", () => {
+    const val = inputEl.value;
+    const cursor = inputEl.selectionStart || val.length;
+    if (!mentionActive) {
+      if (cursor > 0 && val[cursor - 1] === "@") {
+        const charBefore = cursor > 1 ? val[cursor - 2] : " ";
+        if (charBefore === " " || charBefore === undefined || cursor === 1) {
+          mentionActive = true;
+          mentionStart = cursor - 1;
+          const suggestions = getMentionSuggestions();
+          dropdown.show(suggestions, inputEl);
+          dropdown.filter("");
+        }
+      }
+    } else {
+      const query = val.slice(mentionStart + 1, cursor);
+      if (query.includes(" ") || cursor <= mentionStart) {
+        dropdown.hide();
+        mentionActive = false;
+      } else {
+        dropdown.filter(query);
+      }
+    }
+  });
+}
+
+// src/hotkeys.ts
+function initHotkeys(refs) {
+  document.addEventListener("keydown", (e) => {
+    if (document.activeElement?.tagName === "INPUT")
+      return;
+    switch (e.key) {
+      case "i":
+        if (refs.invModal.active)
+          refs.invModal.close();
+        else
+          refs.invModal.open();
+        break;
+      case "k":
+        if (refs.codex.active)
+          refs.codex.close();
+        else
+          refs.codex.open();
+        break;
+      case "Escape":
+        if (refs.modalManager.active) {
+          refs.modalManager.closeTopmost();
+        }
+        break;
+    }
+  });
+}
+
+// src/chain/wallet.ts
+var connectedAddress = null;
+function hasProvider() {
+  return typeof window.ethereum !== "undefined";
+}
+async function connectWallet() {
+  if (!window.ethereum) {
+    throw new Error("No wallet provider found");
+  }
+  const accounts = await window.ethereum.request({
+    method: "eth_requestAccounts"
+  });
+  if (!accounts.length) {
+    throw new Error("No accounts returned");
+  }
+  connectedAddress = accounts[0];
+  localStorage.setItem("mm_wallet", connectedAddress);
+  return connectedAddress;
+}
+function getAddress() {
+  if (connectedAddress)
+    return connectedAddress;
+  return localStorage.getItem("mm_wallet");
+}
+function formatAddress(addr) {
+  if (addr.length < 10)
+    return addr;
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
+// src/char-creation.ts
 var selectedArchetype = "";
 async function loadArchetypes() {
   const container = document.getElementById("archetype-cards");
@@ -6882,31 +6839,7 @@ async function loadArchetypes() {
     container.innerHTML = '<div style="color:var(--text-dim)">Archetypes unavailable</div>';
   }
 }
-function enterGame(config) {
-  startGame({ ...config }, overlays, {
-    onGameReady(state2, openingNarrative) {
-      gameState = state2;
-      const session2 = getSession();
-      window.__mmPlayerId = session2.playerId;
-      initInventoryApi(gameState, session2.playerId, renderAllPanels, (text, style) => {
-        eventsFeed.addBlock(text, style);
-      });
-      if (gameState.roomMap)
-        registerMapEntities(gameState.roomMap);
-      renderAllPanels();
-      fetchPlayerWorldMap();
-      if (openingNarrative) {
-        narrative.addBlock(openingNarrative, config.isReturning ? "system" : "narrative");
-      }
-      document.getElementById("action-input").focus();
-    }
-  }).catch((err) => {
-    console.error("startGame failed:", err);
-    overlays.dismiss("loading");
-    overlays.show("char-create");
-  });
-}
-function showCharacterPicker(characters, walletAddress) {
+function showCharacterPicker(characters, walletAddress, overlays, enterGame) {
   const walletStepEl = document.getElementById("wallet-step");
   const pickerDiv = document.createElement("div");
   pickerDiv.id = "char-picker";
@@ -6955,123 +6888,7 @@ function showCharacterPicker(characters, walletAddress) {
     }
   });
 }
-function mount(mountId, el) {
-  const mountEl = document.getElementById(mountId);
-  if (mountEl && mountEl.parentElement) {
-    mountEl.parentElement.replaceChild(el, mountEl);
-  }
-}
-document.addEventListener("DOMContentLoaded", () => {
-  header = createHeader();
-  mount("tui-header", header.el);
-  narrativeWin = createWindow({ title: "Narrative", id: "narrative-win", className: "resizable" });
-  eventsWin = createWindow({ title: "Events", id: "events-win" });
-  mapWin = createWindow({ title: "Map", id: "map-win" });
-  characterWin = createWindow({ title: "Character", id: "character-win", className: "sidebar-win resizable", canvas: true });
-  inventoryWin = createWindow({ title: "Inventory", id: "inventory-win", className: "sidebar-win resizable", canvas: true });
-  exitsWin = createWindow({ title: "World", id: "exits-win", className: "sidebar-win resizable", canvas: true });
-  presentWin = createWindow({ title: "Present", id: "present-win", className: "sidebar-win resizable", canvas: true });
-  questWin = createWindow({ title: "Quests", id: "quest-win", className: "sidebar-win resizable", canvas: true });
-  factionWin = createWindow({ title: "Factions", id: "faction-win", className: "sidebar-win resizable", canvas: true });
-  commandWin = createWindow({ title: "Command", id: "command-win" });
-  mount("narrative-mount", narrativeWin.el);
-  mount("events-mount", eventsWin.el);
-  mount("map-mount", mapWin.el);
-  mount("character-mount", characterWin.el);
-  mount("inventory-mount", inventoryWin.el);
-  mount("exits-mount", exitsWin.el);
-  mount("present-mount", presentWin.el);
-  mount("quest-mount", questWin.el);
-  mount("faction-mount", factionWin.el);
-  mount("command-mount", commandWin.el);
-  statusBar = createStatusBar();
-  mount("status-mount", statusBar.el);
-  overlays = createOverlayManager(["char-create", "death", "loading", "intro"]);
-  exitsWin.panel.canvas.addEventListener("panel-click", (e) => {
-    const detail = e.detail;
-    if (detail.action)
-      handleAction(detail.action);
-  });
-  presentWin.panel.canvas.addEventListener("panel-click", (e) => {
-    const detail = e.detail;
-    if (detail.action)
-      handleAction(detail.action);
-  });
-  questWin.panel.canvas.addEventListener("panel-click", (e) => {
-    const detail = e.detail;
-    if (detail.questName && gameState) {
-      const quest = gameState.quests.find((q) => q.name === detail.questName);
-      if (quest)
-        npcDialog.showQuest(quest);
-    }
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "m" && document.activeElement?.tagName !== "INPUT") {
-      mapWin.toggle();
-    }
-  });
-  npcDialog = createDialog();
-  mount("dialog-mount", npcDialog.el);
-  invModal = createInventoryModal(() => gameState);
-  document.body.appendChild(invModal.el);
-  setManageInventoryCallback(() => invModal.open());
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "i" && document.activeElement?.tagName !== "INPUT") {
-      if (invModal.active)
-        invModal.close();
-      else
-        invModal.open();
-    }
-  });
-  narrative = initNarrative(narrativeWin.body);
-  eventsFeed = initNarrative(eventsWin.body);
-  narrative.canvas.addEventListener("narrative-entity-click", (e) => {
-    const { entityId } = e.detail;
-    codex.open(entityId || undefined);
-  });
-  commandWin.body.innerHTML = `
-    <span class="prompt-char">&gt;</span>
-    <input type="text" id="action-input" placeholder="What do you do?" autocomplete="off" spellcheck="false" />
-  `;
-  const actionInput = commandWin.body.querySelector("#action-input");
-  initInput(actionInput, handleAction, () => ({
-    npcs: gameState?.location?.npcs || [],
-    players: gameState?.location?.players || []
-  }));
-  const mapCanvasWrap = document.createElement("div");
-  mapCanvasWrap.className = "map-canvas-wrap";
-  mapWin.body.appendChild(mapCanvasWrap);
-  initMapPanel(mapCanvasWrap, handleAction);
-  artViewer = createArtViewer();
-  document.body.appendChild(artViewer.el);
-  codex = createCodexModal(() => gameState, () => getSession().playerId, artViewer.open);
-  document.body.appendChild(codex.el);
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "k" && document.activeElement?.tagName !== "INPUT") {
-      if (codex.active)
-        codex.close();
-      else
-        codex.open();
-    }
-  });
-  setMessageHandler(handleMessage);
-  setConnectionHandler((connected) => {
-    if (connected) {
-      narrative.addBlock("Reconnected.", "system");
-    } else {
-      narrative.addBlock("Connection lost. Reconnecting...", "system");
-    }
-  });
-  document.getElementById("death-restart-btn").addEventListener("click", () => {
-    overlays.dismiss("death");
-    overlays.show("char-create");
-    narrative = initNarrative(narrativeWin.body);
-    narrative.canvas.addEventListener("narrative-entity-click", (e) => {
-      const { entityId } = e.detail;
-      codex.open(entityId || undefined);
-    });
-    document.getElementById("char-name-input").focus();
-  });
+function initCharCreation(enterGame, overlays) {
   const walletConnectBtn = document.getElementById("wallet-connect-btn");
   const walletStep = document.getElementById("wallet-step");
   const nameStep = document.getElementById("name-step");
@@ -7099,7 +6916,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         const charData = await charResp.json();
         if (charData.characters && charData.characters.length > 0) {
-          showCharacterPicker(charData.characters, addr);
+          showCharacterPicker(charData.characters, addr, overlays, enterGame);
           return;
         }
       } catch {}
@@ -7141,4 +6958,362 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
   });
+}
+
+// src/app.ts
+var gameState;
+var narrative;
+var eventsFeed;
+var uc;
+var npcDialog;
+var codex;
+var artViewer;
+var invModal;
+var overlays;
+var headerState = { title: "MEMENTO MORI", worldTime: undefined };
+var statusState = { phase: "ready", tick: 0, chain: false, activity: "", location: "" };
+var currentCard = null;
+var currentScene = null;
+function registerMapEntities(map) {
+  if (!map)
+    return;
+  const entities = [];
+  for (const npc of map.npcs)
+    entities.push({ name: npc.name, id: npc.id, type: "npc" });
+  for (const item of map.items)
+    entities.push({ name: item.name, id: item.id, type: "item" });
+  for (const exit of map.exits)
+    entities.push({ name: exit.target, id: exit.target, type: "location" });
+  entities.push({ name: map.name, id: map.id, type: "location" });
+  setKnownEntities(entities);
+}
+async function fetchPlayerWorldMap() {
+  try {
+    const pid = getSession().playerId;
+    if (!pid || !gameState)
+      return;
+    const resp = await fetch(`${GATEWAY_URL}/api/worldmap/${pid}`);
+    if (resp.ok) {
+      gameState.worldMap = await resp.json();
+      renderAllPanels();
+    }
+  } catch {}
+}
+function renderAllPanels() {
+  if (!uc)
+    return;
+  const r = (name) => uc.getRegion(name);
+  const headerRegion = r("header");
+  if (headerRegion) {
+    uc.setRegionContent("header", renderHeader(headerRegion.cols, headerState));
+  }
+  const statusRegion = r("status");
+  if (statusRegion) {
+    uc.setRegionContent("status", renderStatusBar(statusRegion.cols, statusState));
+  }
+  if (!gameState)
+    return;
+  const charRegion = r("character");
+  if (charRegion) {
+    uc.setRegionContent("character", renderCharacterPanel(charRegion.cols, charRegion.rows, gameState));
+  }
+  const invRegion = r("inventory");
+  if (invRegion) {
+    uc.setRegionContent("inventory", renderInventoryPanel(invRegion.cols, invRegion.rows, gameState));
+  }
+  const questRegion = r("quests");
+  if (questRegion) {
+    uc.setRegionContent("quests", renderQuestLogPanel(questRegion.cols, questRegion.rows, gameState.quests));
+  }
+  const presentRegion = r("present");
+  if (presentRegion) {
+    uc.setRegionContent("present", renderPresentPanel(presentRegion.cols, presentRegion.rows, gameState));
+  }
+  const vpRegion = r("viewport");
+  if (vpRegion) {
+    uc.setRegionContent("viewport", renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
+  }
+  updateMap(gameState, handleAction);
+  const mapCanvas = getMapCanvas();
+  if (mapCanvas && mapCanvas.width > 0) {
+    uc.setOffscreen("viewport", mapCanvas);
+  }
+}
+async function handleAction(action) {
+  if (!action.trim() || action.length > 500)
+    return;
+  const phase = getRoundState().phase;
+  if (phase !== "ready" && phase !== "collecting")
+    return;
+  narrative.addBlock(`> ${action}`, "player-action");
+  await sendAction(action);
+}
+function showDeathScreen(cause) {
+  const causeEl = document.getElementById("death-cause");
+  const statsEl = document.getElementById("death-stats");
+  causeEl.textContent = cause || "The world continues without you.";
+  statsEl.innerHTML = gameState ? `
+    <div>Name: ${gameState.player.name}</div>
+    <div>Level: ${gameState.player.level}</div>
+    <div>Last Location: ${gameState.location.name}</div>
+  ` : "";
+  overlays.show("death");
+}
+function setViewportCard(card) {
+  currentCard = card;
+  currentScene = null;
+  const vpRegion = uc?.getRegion("viewport");
+  if (vpRegion) {
+    uc.setRegionContent("viewport", renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
+  }
+}
+function setViewportScene(lines) {
+  currentScene = lines;
+  currentCard = null;
+  const vpRegion = uc?.getRegion("viewport");
+  if (vpRegion) {
+    uc.setRegionContent("viewport", renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
+  }
+}
+function enterGame(config) {
+  startGame({ ...config }, overlays, {
+    onGameReady(state2, openingNarrative) {
+      gameState = state2;
+      const session2 = getSession();
+      window.__mmPlayerId = session2.playerId;
+      initInventoryApi(gameState, session2.playerId, renderAllPanels, (text, style) => {
+        eventsFeed.addBlock(text, style);
+      });
+      if (gameState.roomMap)
+        registerMapEntities(gameState.roomMap);
+      renderAllPanels();
+      fetchPlayerWorldMap();
+      if (openingNarrative) {
+        narrative.addBlock(openingNarrative, config.isReturning ? "system" : "narrative");
+      }
+      document.getElementById("action-input").focus();
+    }
+  }).catch((err) => {
+    console.error("startGame failed:", err);
+    overlays.dismiss("loading");
+    overlays.show("char-create");
+  });
+}
+function positionActionInput(inputEl) {
+  const inputRegion = uc.getRegion("input");
+  if (!inputRegion)
+    return;
+  const cs = uc.getCharSize();
+  const canvasRect = uc.canvas.getBoundingClientRect();
+  const appRect = uc.canvas.parentElement.getBoundingClientRect();
+  const offsetX = canvasRect.left - appRect.left;
+  const offsetY = canvasRect.top - appRect.top;
+  const promptCols = 2;
+  inputEl.style.left = `${offsetX + (inputRegion.col + promptCols) * cs.width}px`;
+  inputEl.style.top = `${offsetY + inputRegion.row * cs.height}px`;
+  inputEl.style.width = `${(inputRegion.cols - promptCols) * cs.width}px`;
+  inputEl.style.height = `${cs.height}px`;
+  inputEl.style.fontSize = `${cs.height - 2}px`;
+}
+document.addEventListener("DOMContentLoaded", () => {
+  const tuiMain = document.getElementById("tui-main");
+  uc = new UnifiedCanvas(tuiMain);
+  const narrativeContainer = document.createElement("div");
+  narrativeContainer.style.position = "absolute";
+  narrativeContainer.style.left = "-9999px";
+  document.body.appendChild(narrativeContainer);
+  const eventsContainer = document.createElement("div");
+  eventsContainer.style.position = "absolute";
+  eventsContainer.style.left = "-9999px";
+  document.body.appendChild(eventsContainer);
+  function sizeNarrativeContainers() {
+    const cs = uc.getCharSize();
+    const narRegion = uc.getRegion("narrative");
+    if (narRegion) {
+      narrativeContainer.style.width = `${narRegion.cols * cs.width}px`;
+      narrativeContainer.style.height = `${narRegion.rows * cs.height}px`;
+    }
+    const evtRegion = uc.getRegion("events");
+    if (evtRegion) {
+      eventsContainer.style.width = `${evtRegion.cols * cs.width}px`;
+      eventsContainer.style.height = `${evtRegion.rows * cs.height}px`;
+    }
+  }
+  sizeNarrativeContainers();
+  narrative = initNarrative(narrativeContainer);
+  eventsFeed = initNarrative(eventsContainer);
+  uc.setPixelRenderer("narrative", (ctx, region, charSize) => {
+    const px = region.col * charSize.width;
+    const py = region.row * charSize.height;
+    const pw = region.cols * charSize.width;
+    const ph = region.rows * charSize.height;
+    ctx.drawImage(narrative.canvas, 0, 0, narrative.canvas.width, narrative.canvas.height, px, py, pw, ph);
+  });
+  uc.setPixelRenderer("events", (ctx, region, charSize) => {
+    const px = region.col * charSize.width;
+    const py = region.row * charSize.height;
+    const pw = region.cols * charSize.width;
+    const ph = region.rows * charSize.height;
+    ctx.drawImage(eventsFeed.canvas, 0, 0, eventsFeed.canvas.width, eventsFeed.canvas.height, px, py, pw, ph);
+  });
+  uc.onWheel((region, deltaY) => {
+    if (region === "narrative") {
+      narrative.scroll(deltaY);
+      uc.markDirty("narrative");
+    }
+    if (region === "events") {
+      eventsFeed.scroll(deltaY);
+      uc.markDirty("events");
+    }
+  });
+  uc.onClick((region, data) => {
+    if (data.modalAction === "close") {
+      const modal = data.modal;
+      if (modal === "inventory")
+        invModal.close();
+      else if (modal === "codex")
+        codex.close();
+      else if (modal === "dialog")
+        npcDialog.dismiss();
+      return;
+    }
+    if (data.inventoryAction) {
+      handleInventoryAction(data, () => invModal.refresh()).catch(console.error);
+      return;
+    }
+    if (data.codexSelect) {
+      codex.selectEntity(data.codexSelect);
+      return;
+    }
+    if (data.action)
+      handleAction(data.action);
+    if (data.questName) {
+      const quest = gameState?.quests.find((q) => q.name === data.questName);
+      if (quest)
+        npcDialog.showQuest(quest);
+    }
+    if (data.entityId)
+      codex.open(data.entityId);
+    if (data.npcName) {
+      const lastMsg = getLastNpcMessage(data.npcName);
+      if (lastMsg)
+        npcDialog.show(data.npcName, "", lastMsg);
+    }
+  });
+  setViewportCallback(setViewportCard);
+  const mapContainer = document.createElement("div");
+  mapContainer.style.position = "absolute";
+  mapContainer.style.left = "-9999px";
+  mapContainer.style.width = "400px";
+  mapContainer.style.height = "300px";
+  document.body.appendChild(mapContainer);
+  initMapPanel(mapContainer, handleAction);
+  const actionInput = document.getElementById("action-input");
+  initInput(actionInput, handleAction, () => ({
+    npcs: gameState?.location?.npcs || [],
+    players: gameState?.location?.players || []
+  }));
+  positionActionInput(actionInput);
+  const resizeObserver = new ResizeObserver(() => {
+    sizeNarrativeContainers();
+    positionActionInput(actionInput);
+  });
+  resizeObserver.observe(tuiMain);
+  function renderInputPrompt() {
+    const inputRegion = uc.getRegion("input");
+    if (!inputRegion)
+      return;
+    const cells = [[
+      { char: ">", fg: "#6a6a78" },
+      { char: " ", fg: "#6a6a78" }
+    ]];
+    while (cells[0].length < inputRegion.cols) {
+      cells[0].push({ char: " ", fg: "#6a6a78" });
+    }
+    uc.setRegionContent("input", { cells });
+  }
+  renderInputPrompt();
+  setInterval(() => {
+    uc.markDirty("narrative");
+    uc.markDirty("events");
+  }, 100);
+  overlays = createOverlayManager(["char-create", "death", "loading", "intro"]);
+  const mm = uc.modalManager;
+  npcDialog = createDialogController(mm);
+  invModal = createInventoryController(mm, () => gameState, renderAllPanels, (text, style) => {
+    eventsFeed.addBlock(text, style);
+  });
+  setManageInventoryCallback(() => invModal.open());
+  artViewer = createArtViewer();
+  document.body.appendChild(artViewer.el);
+  codex = createCodexController(mm, () => gameState, () => getSession().playerId);
+  initHotkeys({ invModal, codex, npcDialog, modalManager: mm });
+  const handleMessage = createMessageHandler({
+    getGameState: () => gameState,
+    narrative,
+    eventsFeed,
+    renderAllPanels,
+    header: {
+      updateTime(t) {
+        headerState.worldTime = t;
+        const headerRegion = uc.getRegion("header");
+        if (headerRegion) {
+          uc.setRegionContent("header", renderHeader(headerRegion.cols, headerState));
+        }
+      }
+    },
+    statusBar: {
+      setTick(t) {
+        statusState.tick = t;
+        const region = uc.getRegion("status");
+        if (region)
+          uc.setRegionContent("status", renderStatusBar(region.cols, statusState));
+      },
+      setChain(c) {
+        statusState.chain = c;
+        const region = uc.getRegion("status");
+        if (region)
+          uc.setRegionContent("status", renderStatusBar(region.cols, statusState));
+      },
+      setActivity(a) {
+        statusState.activity = a;
+        const region = uc.getRegion("status");
+        if (region)
+          uc.setRegionContent("status", renderStatusBar(region.cols, statusState));
+      }
+    },
+    codex,
+    invModal,
+    handleAction,
+    registerMapEntities,
+    fetchPlayerWorldMap,
+    showDeathScreen,
+    setViewportScene
+  });
+  setMessageHandler(handleMessage);
+  setConnectionHandler((connected) => {
+    if (connected) {
+      narrative.addBlock("Reconnected.", "system");
+    } else {
+      narrative.addBlock("Connection lost. Reconnecting...", "system");
+    }
+  });
+  setErrorHandler((msg) => eventsFeed.addBlock(msg, "error"));
+  document.getElementById("death-restart-btn").addEventListener("click", () => {
+    overlays.dismiss("death");
+    overlays.show("char-create");
+    narrativeContainer.innerHTML = "";
+    narrative = initNarrative(narrativeContainer);
+    uc.setPixelRenderer("narrative", (ctx, region, charSize) => {
+      const px = region.col * charSize.width;
+      const py = region.row * charSize.height;
+      const pw = region.cols * charSize.width;
+      const ph = region.rows * charSize.height;
+      ctx.drawImage(narrative.canvas, 0, 0, narrative.canvas.width, narrative.canvas.height, px, py, pw, ph);
+    });
+    initHotkeys({ invModal, codex, npcDialog, modalManager: mm });
+    document.getElementById("char-name-input").focus();
+  });
+  initCharCreation(enterGame, overlays);
+  renderAllPanels();
 });

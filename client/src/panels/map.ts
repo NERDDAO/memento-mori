@@ -55,6 +55,11 @@ async function fetchEntityData(id: string, name: string): Promise<EntityCardData
   return fallback;
 }
 
+/** Get the map renderer's canvas element for compositing. */
+export function getMapCanvas(): HTMLCanvasElement | null {
+  return renderer?.element ?? null;
+}
+
 export function initMapPanel(
   mapContainer: HTMLElement,
   _onAction: (action: string) => void,
