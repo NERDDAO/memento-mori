@@ -18,6 +18,7 @@ import { renderPresentPanel } from './panels/present';
 import { renderQuestLogPanel } from './panels/questlog';
 import { renderFactionsPanel } from './panels/factions';
 import { renderViewport } from './panels/viewport';
+import { renderViewer, setViewerArt } from './panels/viewer';
 import { renderHeader, type WorldTime } from './ui/header';
 import { renderStatusBar, type StatusState } from './ui/status';
 import { UnifiedCanvas } from './canvas/unified-canvas';
@@ -96,6 +97,12 @@ function renderAllPanels(): void {
     uc.setRegionContent('status', renderStatusBar(statusRegion.cols, statusState));
   }
 
+  // Viewer renders even without game state
+  const viewerRegionEarly = r('viewer');
+  if (viewerRegionEarly) {
+    uc.setRegionContent('viewer', renderViewer(viewerRegionEarly.cols, viewerRegionEarly.rows));
+  }
+
   // Game panels only render when gameState exists
   if (!gameState) return;
 
@@ -131,7 +138,6 @@ function renderAllPanels(): void {
   if (mapCanvas && mapCanvas.width > 0) {
     uc.setOffscreen('viewport', mapCanvas);
   }
-
 }
 
 // --- Action handling ---
@@ -172,9 +178,11 @@ function setViewportCard(card: CardContent | null): void {
 function setViewportScene(lines: string[]): void {
   currentScene = lines;
   currentCard = null;
-  const vpRegion = uc?.getRegion('viewport');
-  if (vpRegion) {
-    uc.setRegionContent('viewport', renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
+  // Show scene art in the viewer panel
+  setViewerArt(lines, '');
+  const viewerRegion = uc?.getRegion('viewer');
+  if (viewerRegion) {
+    uc.setRegionContent('viewer', renderViewer(viewerRegion.cols, viewerRegion.rows));
   }
 }
 

@@ -4389,6 +4389,73 @@ function padRow(row, cols) {
   }
 }
 
+// src/panels/viewer.ts
+var currentArt = null;
+var currentLabel = "";
+function setViewerArt(lines, label) {
+  currentArt = lines;
+  currentLabel = label || "";
+}
+function renderViewer(cols, rows) {
+  const cells = [];
+  const dim = theme.colors.dim;
+  const primary = theme.colors.primary;
+  if (!currentArt || currentArt.length === 0) {
+    for (let r = 0;r < rows; r++) {
+      const row = [];
+      for (let c = 0;c < cols; c++) {
+        row.push({ char: " ", fg: dim });
+      }
+      cells.push(row);
+    }
+    const label = "~ no scene ~";
+    const startCol = Math.max(0, Math.floor((cols - label.length) / 2));
+    const midRow = Math.floor(rows / 2);
+    if (midRow < rows) {
+      for (let i = 0;i < label.length && startCol + i < cols; i++) {
+        cells[midRow][startCol + i] = { char: label[i], fg: dim };
+      }
+    }
+    return { cells };
+  }
+  let artRow = 0;
+  if (currentLabel) {
+    const row = [];
+    const title = currentLabel.slice(0, cols);
+    for (let c = 0;c < cols; c++) {
+      if (c < title.length) {
+        row.push({ char: title[c], fg: theme.colors.npc, attrs: ATTR_BOLD });
+      } else {
+        row.push({ char: " ", fg: dim });
+      }
+    }
+    cells.push(row);
+    artRow++;
+  }
+  for (const line of currentArt) {
+    if (artRow >= rows)
+      break;
+    const row = [];
+    for (let c = 0;c < cols; c++) {
+      if (c < line.length) {
+        row.push({ char: line[c], fg: primary });
+      } else {
+        row.push({ char: " ", fg: dim });
+      }
+    }
+    cells.push(row);
+    artRow++;
+  }
+  while (cells.length < rows) {
+    const row = [];
+    for (let c = 0;c < cols; c++) {
+      row.push({ char: " ", fg: dim });
+    }
+    cells.push(row);
+  }
+  return { cells };
+}
+
 // src/ui/header.ts
 function renderHeader(cols, state2) {
   const titleText = state2.title;
@@ -4559,7 +4626,11 @@ function computeRegions(totalCols, totalRows) {
     type: "grid",
     scrollOffset: 0
   });
-  const narrativeCols = presentCols + 1 + viewportCols;
+  const VIEWER_COLS = 28;
+  const viewerCols = Math.min(VIEWER_COLS, Math.floor((presentCols + 1 + viewportCols) / 2));
+  const narrativeCols = presentCols + 1 + viewportCols - viewerCols - 1;
+  const colViewer = colPresent + narrativeCols + 1;
+  const colBotVDiv = colPresent + narrativeCols;
   add({
     name: "narrative",
     col: colPresent,
@@ -4570,12 +4641,30 @@ function computeRegions(totalCols, totalRows) {
     scrollOffset: 0
   });
   add({
+    name: "viewer",
+    col: colViewer,
+    row: rowBotStart,
+    cols: viewerCols,
+    rows: bottomZoneRows,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
     name: "events",
     col: colSidebar,
     row: rowBotStart,
     cols: sidebarCols,
     rows: bottomZoneRows,
     type: "pixel",
+    scrollOffset: 0
+  });
+  add({
+    name: "_vDiv2",
+    col: colBotVDiv,
+    row: rowBotStart,
+    cols: 1,
+    rows: bottomZoneRows,
+    type: "grid",
     scrollOffset: 0
   });
   add({
@@ -4690,6 +4779,7 @@ function drawBorders(grid, regions, totalCols, totalRows) {
   const vDiv1 = regions.get("_vDiv1");
   const sDiv0 = regions.get("_sDiv0");
   const sDiv1 = regions.get("_sDiv1");
+  const vDiv2 = regions.get("_vDiv2");
   if (!hDiv0 || !hDiv1 || !hDiv2 || !hDiv3 || !vDiv0 || !vDiv1 || !sDiv0 || !sDiv1) {
     console.warn("[border-renderer] Missing divider metadata regions — skipping border draw");
     return;
@@ -4746,6 +4836,11 @@ function drawBorders(grid, regions, totalCols, totalRows) {
   hLine(grid, sDiv1.row, sCol, sEnd, S_H, fg);
   setCell(grid, sDiv1.row, lastCol, M_SH_DV_R, fg);
   setCell(grid, hDiv3.row, vDiv1.col, "╧", fg);
+  if (vDiv2) {
+    vLine(grid, vDiv2.col, vDiv2.row, vDiv2.row + vDiv2.rows - 1, S_V, fg);
+    setCell(grid, hDiv1.row, vDiv2.col, "╪", fg);
+    setCell(grid, hDiv2.row, vDiv2.col, "╧", fg);
+  }
 }
 
 // src/canvas/hit-registry.ts
@@ -7051,6 +7146,10 @@ function renderAllPanels() {
   if (statusRegion) {
     uc.setRegionContent("status", renderStatusBar(statusRegion.cols, statusState));
   }
+  const viewerRegionEarly = r("viewer");
+  if (viewerRegionEarly) {
+    uc.setRegionContent("viewer", renderViewer(viewerRegionEarly.cols, viewerRegionEarly.rows));
+  }
   if (!gameState)
     return;
   const charRegion = r("character");
@@ -7110,9 +7209,10 @@ function setViewportCard(card) {
 function setViewportScene(lines) {
   currentScene = lines;
   currentCard = null;
-  const vpRegion = uc?.getRegion("viewport");
-  if (vpRegion) {
-    uc.setRegionContent("viewport", renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
+  setViewerArt(lines, "");
+  const viewerRegion = uc?.getRegion("viewer");
+  if (viewerRegion) {
+    uc.setRegionContent("viewer", renderViewer(viewerRegion.cols, viewerRegion.rows));
   }
 }
 function enterGame(config) {

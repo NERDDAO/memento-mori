@@ -75,6 +75,8 @@ export function drawBorders(
   const sDiv0 = regions.get('_sDiv0');
   const sDiv1 = regions.get('_sDiv1');
 
+  const vDiv2 = regions.get('_vDiv2');
+
   if (!hDiv0 || !hDiv1 || !hDiv2 || !hDiv3 || !vDiv0 || !vDiv1 || !sDiv0 || !sDiv1) {
     console.warn('[border-renderer] Missing divider metadata regions — skipping border draw');
     return;
@@ -230,4 +232,13 @@ export function drawBorders(
 
   // However, hDivs DO span the full inner width and cross double-V columns at col 0/lastCol
   // — already handled by D_ML/D_MR in drawHDiv().
+
+  // ── 7. vDiv2: narrative | viewer divider in bottom zone ──────────
+  if (vDiv2) {
+    vLine(grid, vDiv2.col, vDiv2.row, vDiv2.row + vDiv2.rows - 1, S_V, fg);
+    // Junction at hDiv1 (top of bottom zone): single-V hangs down from double-H
+    setCell(grid, hDiv1.row, vDiv2.col, '\u256A', fg); // ╪ double-H × single-V
+    // Junction at hDiv2 (bottom of bottom zone): single-V ends
+    setCell(grid, hDiv2.row, vDiv2.col, '╧', fg);
+  }
 }

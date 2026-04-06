@@ -190,8 +190,15 @@ export function computeRegions(totalCols: number, totalRows: number): Map<string
   });
 
   // ── Bottom zone panels ───────────────────────────────────────────
-  // Narrative spans present+viewport columns (separated by vDiv0, but narrative renders over it)
-  const narrativeCols = presentCols + 1 + viewportCols; // +1 includes the vDiv0 column
+  // Bottom zone has 3 columns: narrative | vDiv | viewer | vDiv | events
+  // Total bottom inner width = presentCols + 1(vDiv0) + viewportCols + 1(vDiv1) + sidebarCols
+  // Viewer gets a fixed width (~28 chars), narrative gets the rest of present+viewport space
+  const VIEWER_COLS = 28;
+  const viewerCols = Math.min(VIEWER_COLS, Math.floor((presentCols + 1 + viewportCols) / 2));
+  const narrativeCols = presentCols + 1 + viewportCols - viewerCols - 1; // -1 for vDiv between narrative and viewer
+  const colViewer = colPresent + narrativeCols + 1; // +1 for vDiv
+  const colBotVDiv = colPresent + narrativeCols; // vertical divider between narrative and viewer
+
   add({
     name: 'narrative',
     col: colPresent,
@@ -203,12 +210,33 @@ export function computeRegions(totalCols: number, totalRows: number): Map<string
   });
 
   add({
+    name: 'viewer',
+    col: colViewer,
+    row: rowBotStart,
+    cols: viewerCols,
+    rows: bottomZoneRows,
+    type: 'grid',
+    scrollOffset: 0,
+  });
+
+  add({
     name: 'events',
     col: colSidebar,
     row: rowBotStart,
     cols: sidebarCols,
     rows: bottomZoneRows,
     type: 'pixel',
+    scrollOffset: 0,
+  });
+
+  // Vertical divider between narrative and viewer in bottom zone
+  add({
+    name: '_vDiv2',
+    col: colBotVDiv,
+    row: rowBotStart,
+    cols: 1,
+    rows: bottomZoneRows,
+    type: 'grid',
     scrollOffset: 0,
   });
 
