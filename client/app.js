@@ -5229,6 +5229,16 @@ class UnifiedCanvas {
             }
           }
         }
+        for (const entry of this.pixelRenderers) {
+          const region = this.regions.get(entry.regionName);
+          if (region)
+            this._paintPixelRegion(region, entry.renderer);
+        }
+        for (const slot of this.offscreenSlots) {
+          const region = this.regions.get(slot.regionName);
+          if (region)
+            this._blitOffscreen(region, slot.canvas);
+        }
       }
       this.allDirty = false;
       this.dirtySet.clear();

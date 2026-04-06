@@ -270,11 +270,10 @@ export class UnifiedCanvas {
       // Paint modal overlays on top of everything
       if (this.modalManager.active) {
         this.modalManager.renderInto(this.grid, this.totalCols, this.totalRows);
-        // Repaint all cells (modal dims backdrop + draws border + content)
+        // Repaint grid cells (modal dims backdrop + draws border + content)
         for (let r = 0; r < this.totalRows; r++) {
           for (let c = 0; c < this.totalCols; c++) {
             const cell = this.grid[r][c];
-            // Clear cell area then draw
             const px = c * cs.width;
             const py = r * cs.height;
             ctx.fillStyle = cell.bg || theme.colors.bg;
@@ -283,6 +282,16 @@ export class UnifiedCanvas {
               fillCell(ctx, c, r, cell, cs);
             }
           }
+        }
+        // Re-composite pixel renderers and offscreen slots on top
+        // (the grid repaint above overwrote them with empty/dimmed cells)
+        for (const entry of this.pixelRenderers) {
+          const region = this.regions.get(entry.regionName);
+          if (region) this._paintPixelRegion(region, entry.renderer);
+        }
+        for (const slot of this.offscreenSlots) {
+          const region = this.regions.get(slot.regionName);
+          if (region) this._blitOffscreen(region, slot.canvas);
         }
       }
 
