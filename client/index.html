@@ -27,17 +27,19 @@
       background: #050508; color: var(--text-primary);
       font-family: 'Courier New', Consolas, monospace; font-size: 13px;
     }
-    /* Textured background — subtle noise behind the game window */
+    /* Background — deep void with subtle texture */
     body {
+      background-color: #020204;
       background-image:
-        radial-gradient(ellipse at 20% 50%, rgba(139, 92, 246, 0.03) 0%, transparent 50%),
-        radial-gradient(ellipse at 80% 50%, rgba(80, 200, 120, 0.02) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 30%, rgba(139, 92, 246, 0.05) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 70%, rgba(80, 200, 120, 0.03) 0%, transparent 50%),
+        radial-gradient(circle at 50% 50%, transparent 20%, rgba(0,0,0,0.9) 80%),
         repeating-linear-gradient(
           0deg,
           transparent,
-          transparent 2px,
-          rgba(255,255,255,0.008) 2px,
-          rgba(255,255,255,0.008) 3px
+          transparent 1px,
+          rgba(255,255,255,0.015) 1px,
+          rgba(255,255,255,0.015) 2px
         );
     }
 
@@ -49,19 +51,31 @@
     ::-webkit-scrollbar-corner { background: transparent; }
     * { scrollbar-width: thin; scrollbar-color: #2a2a38 transparent; }
 
-    /* TUI Shell — floating window over dark background */
+    /* TUI Shell — floating terminal with extreme depth */
     #app {
       display: grid; grid-template-rows: auto 1fr auto auto auto;
-      height: calc(100vh - 16px); gap: 2px; padding: 4px;
-      margin: 8px;
+      height: calc(100vh - 64px); gap: 2px; padding: 6px;
+      margin: 32px 48px;
       background: var(--bg-primary);
-      border: 1px solid var(--border);
-      border-radius: 4px;
+      border: 1px solid #2a2a3a;
+      border-top-color: #3a3a4a;
+      border-radius: 8px;
       box-shadow:
-        0 0 0 1px rgba(0,0,0,0.5),
-        0 4px 24px rgba(0,0,0,0.6),
-        0 12px 48px rgba(0,0,0,0.4),
-        inset 0 1px 0 rgba(255,255,255,0.03);
+        /* Outer ambient glow */
+        0 0 120px 40px rgba(139, 92, 246, 0.07),
+        0 0 300px 80px rgba(139, 92, 246, 0.03),
+        /* Hard shadow stack */
+        0 0 0 1px rgba(0,0,0,0.9),
+        0 1px 2px rgba(0,0,0,0.8),
+        0 4px 8px rgba(0,0,0,0.7),
+        0 8px 24px rgba(0,0,0,0.7),
+        0 16px 48px rgba(0,0,0,0.6),
+        0 32px 96px rgba(0,0,0,0.5),
+        0 64px 200px rgba(0,0,0,0.4),
+        /* Inner bevel */
+        inset 0 1px 0 rgba(255,255,255,0.08),
+        inset 0 -1px 0 rgba(0,0,0,0.4),
+        inset 0 0 60px rgba(0,0,0,0.4);
     }
 
     /* Header */
@@ -73,29 +87,39 @@
     .tui-header .header-title { color: var(--accent); letter-spacing: 2px; font-weight: bold; }
     .tui-header .header-moon { margin-right: 6px; }
 
-    /* Main grid — unified roguelike layout */
+    /* Main grid — ASCII art centered, narrative dominant */
     #tui-main {
       display: grid;
-      grid-template-columns: 180px 1fr 280px;
-      grid-template-rows: 3fr auto 2fr;
+      grid-template-columns: 160px 1fr 240px;
+      grid-template-rows: 2fr 1fr;
       grid-template-areas:
-        "present  map       sidebar"
         "present  viewport  sidebar"
-        "events   narrative narrative";
+        "narrative narrative events";
       gap: 2px;
       overflow: hidden; min-height: 0;
     }
-    #present-mount { grid-area: present; min-height: 0; }
-    #map-mount { grid-area: map; min-height: 0; }
-    #viewport-mount { grid-area: viewport; min-height: 80px; max-height: 200px; }
+    #present-mount { grid-area: present; min-height: 0; overflow-y: auto; }
+    #viewport-mount {
+      grid-area: viewport; min-height: 0; overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    /* Map + ASCII viewer stacked in the center viewport */
+    #map-mount {
+      flex: 3; min-height: 0; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #ascii-viewport-mount {
+      flex: 2; min-height: 80px; overflow: hidden;
+    }
     #sidebar-col {
       grid-area: sidebar;
-      display: flex; flex-direction: column; gap: 2px; min-height: 0;
+      display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto;
     }
     #sidebar-col > #inventory-mount { flex: 3; min-height: 0; }
     #sidebar-col > #character-mount { flex: 2; min-height: 0; }
-    #events-mount { grid-area: events; min-height: 0; }
+    #sidebar-col > #quest-mount { flex: 2; min-height: 0; }
     #narrative-mount { grid-area: narrative; min-height: 0; }
+    #events-mount { grid-area: events; min-height: 0; }
 
     /* Window */
     .win {
@@ -447,14 +471,17 @@
     <div id="tui-header"></div>
     <div id="tui-main">
       <div id="present-mount"></div>
-      <div id="map-mount"></div>
-      <div id="viewport-mount"></div>
+      <div id="viewport-mount">
+        <div id="map-mount"></div>
+        <div id="ascii-viewport-mount"></div>
+      </div>
       <div id="sidebar-col">
         <div id="inventory-mount"></div>
         <div id="character-mount"></div>
+        <div id="quest-mount"></div>
       </div>
-      <div id="events-mount"></div>
       <div id="narrative-mount"></div>
+      <div id="events-mount"></div>
     </div>
     <div id="command-mount"></div>
     <div id="status-mount"></div>

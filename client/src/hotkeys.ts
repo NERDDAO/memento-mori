@@ -43,7 +43,6 @@ export function initHotkeys(refs: HotkeyRefs): void {
         if (refs.invModal.active) refs.invModal.close();
         else if (refs.codex.active) refs.codex.close();
         else if (refs.exitsWin.visible) refs.exitsWin.toggle();
-        else if (refs.questWin.visible) refs.questWin.toggle();
         else if (refs.factionWin.visible) refs.factionWin.toggle();
         break;
     }

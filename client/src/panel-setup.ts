@@ -74,9 +74,10 @@ export function initPanels(
   const presentWin = createWindow({ title: 'Present', id: 'present-win', className: 'sidebar-win', canvas: true, chromeless: true });
   const viewportWin = createWindow({ title: 'Viewport', id: 'viewport-win', canvas: true, chromeless: true });
   const commandWin = createWindow({ title: 'Command', id: 'command-win', chromeless: true });
+  // Quest panel — inline in sidebar, chromeless
+  const questWin = createWindow({ title: 'Quests', id: 'quest-win', className: 'sidebar-win', canvas: true, chromeless: true });
   // Overlay panels — keep chrome for context when floating
   const exitsWin = createWindow({ title: 'World', id: 'exits-win', className: 'sidebar-win', canvas: true });
-  const questWin = createWindow({ title: 'Quests', id: 'quest-win', className: 'sidebar-win', canvas: true });
   const factionWin = createWindow({ title: 'Factions', id: 'faction-win', className: 'sidebar-win', canvas: true });
 
   // 3. Mount windows — inline panels replace mount divs, overlay panels go to body
@@ -86,11 +87,12 @@ export function initPanels(
   mount('character-mount', characterWin.el);
   mount('inventory-mount', inventoryWin.el);
   mount('present-mount', presentWin.el);
-  mount('viewport-mount', viewportWin.el);
+  mount('ascii-viewport-mount', viewportWin.el);
+  mount('quest-mount', questWin.el);
   mount('command-mount', commandWin.el);
 
   // Overlay panels — float over the game canvas, toggled by hotkeys
-  for (const win of [exitsWin, questWin, factionWin]) {
+  for (const win of [exitsWin, factionWin]) {
     win.el.classList.add('overlay-panel');
     document.body.appendChild(win.el);
     win.hide();
