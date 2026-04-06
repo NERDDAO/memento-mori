@@ -138,6 +138,7 @@ export function setupMapInput(
   controller: PlayerController,
   renderer: { render: (map: RoomMap, x: number, y: number) => void },
   map: { current: RoomMap | null },
+  onMapUpdate?: () => void,
 ): () => void {
   const handler = (e: KeyboardEvent) => {
     // Don't capture if typing in the action input
@@ -148,6 +149,7 @@ export function setupMapInput(
       e.preventDefault();
       if (controller.move(delta[0], delta[1]) && map.current) {
         renderer.render(map.current, controller.x, controller.y);
+        onMapUpdate?.();
       }
     } else if (e.key === 'Enter' || e.key === ' ') {
       // Don't capture Enter in input

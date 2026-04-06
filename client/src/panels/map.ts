@@ -10,6 +10,7 @@ let renderer: MapRenderer | null = null;
 let controller: PlayerController | null = null;
 let cleanupInput: (() => void) | null = null;
 const mapRef = { current: null as RoomMap | null };
+let mapUpdateCallback: (() => void) | null = null;
 
 // Viewport callback — receives card content for the ASCII viewport panel
 let viewportCallback: ((card: CardContent | null) => void) | null = null;
@@ -58,6 +59,11 @@ async function fetchEntityData(id: string, name: string): Promise<EntityCardData
 /** Get the map renderer's canvas element for compositing. */
 export function getMapCanvas(): HTMLCanvasElement | null {
   return renderer?.element ?? null;
+}
+
+/** Set callback invoked after player moves on the map (for UC repaint). */
+export function setMapUpdateCallback(cb: () => void): void {
+  mapUpdateCallback = cb;
 }
 
 export function initMapPanel(
@@ -132,7 +138,7 @@ export function updateMap(
     );
 
     cleanupInput?.();
-    cleanupInput = setupMapInput(controller, renderer, mapRef);
+    cleanupInput = setupMapInput(controller, renderer, mapRef, () => mapUpdateCallback?.());
   } else {
     controller.loadMap(map);
   }

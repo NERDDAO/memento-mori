@@ -3864,7 +3864,7 @@ var MOVE_KEYS = {
   h: [-1, 0],
   l: [1, 0]
 };
-function setupMapInput(controller, renderer, map) {
+function setupMapInput(controller, renderer, map, onMapUpdate) {
   const handler = (e) => {
     if (e.target?.tagName === "INPUT")
       return;
@@ -3873,6 +3873,7 @@ function setupMapInput(controller, renderer, map) {
       e.preventDefault();
       if (controller.move(delta[0], delta[1]) && map.current) {
         renderer.render(map.current, controller.x, controller.y);
+        onMapUpdate?.();
       }
     } else if (e.key === "Enter" || e.key === " ") {
       if (e.target?.tagName === "INPUT")
@@ -3890,6 +3891,7 @@ var renderer = null;
 var controller = null;
 var cleanupInput = null;
 var mapRef = { current: null };
+var mapUpdateCallback = null;
 var viewportCallback = null;
 function setViewportCallback(cb) {
   viewportCallback = cb;
@@ -3924,6 +3926,9 @@ async function fetchEntityData(id, name) {
 }
 function getMapCanvas() {
   return renderer?.element ?? null;
+}
+function setMapUpdateCallback(cb) {
+  mapUpdateCallback = cb;
 }
 function initMapPanel(mapContainer, _onAction) {
   renderer = new MapRenderer(mapContainer);
@@ -3985,7 +3990,7 @@ function updateMap(state2, onAction) {
       }
     });
     cleanupInput?.();
-    cleanupInput = setupMapInput(controller, renderer, mapRef);
+    cleanupInput = setupMapInput(controller, renderer, mapRef, () => mapUpdateCallback?.());
   } else {
     controller.loadMap(map);
   }
@@ -7358,6 +7363,12 @@ document.addEventListener("DOMContentLoaded", () => {
   mapContainer.style.height = "300px";
   document.body.appendChild(mapContainer);
   initMapPanel(mapContainer, handleAction);
+  setMapUpdateCallback(() => {
+    const mapCanvas = getMapCanvas();
+    if (mapCanvas && mapCanvas.width > 0) {
+      uc.setOffscreen("viewport", mapCanvas);
+    }
+  });
   const actionInput = document.getElementById("action-input");
   initInput(actionInput, handleAction, () => ({
     npcs: gameState?.location?.npcs || [],

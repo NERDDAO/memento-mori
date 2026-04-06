@@ -10,7 +10,7 @@ import { getRoundState } from './state/round-state';
 import { setKnownEntities } from './renderer/text-renderer';
 import { createMessageHandler, getLastNpcMessage } from './message-handler';
 import { initNarrative, type NarrativeController } from './panels/narrative';
-import { updateMap, setViewportCallback, initMapPanel, getMapCanvas } from './panels/map';
+import { updateMap, setViewportCallback, initMapPanel, getMapCanvas, setMapUpdateCallback } from './panels/map';
 import { renderCharacterPanel } from './panels/character';
 import { renderInventoryPanel } from './panels/inventory';
 import { renderWorldMapPanel } from './panels/worldmap';
@@ -350,6 +350,12 @@ document.addEventListener('DOMContentLoaded', () => {
   mapContainer.style.height = '300px';
   document.body.appendChild(mapContainer);
   initMapPanel(mapContainer, handleAction);
+  setMapUpdateCallback(() => {
+    const mapCanvas = getMapCanvas();
+    if (mapCanvas && mapCanvas.width > 0) {
+      uc.setOffscreen('viewport', mapCanvas);
+    }
+  });
 
   // Action input positioning and wiring
   const actionInput = document.getElementById('action-input') as HTMLInputElement;
