@@ -114,61 +114,6 @@
     .win.resizable { resize: both; overflow: auto; }
     .win-body { padding: 8px 10px; flex: 1; min-height: 0; }
 
-    /* Narrative */
-    #narrative-win { flex: 1; min-height: 0; }
-    #narrative-win .win-body {
-      overflow-y: auto; position: relative;
-      font-family: Georgia, 'Times New Roman', serif; font-size: 16px; line-height: 1.7;
-    }
-    /* Events feed */
-    #events-win { flex: 1; min-height: 0; }
-    #events-win .win-body {
-      overflow-y: auto; position: relative;
-      font-family: 'Fira Code', 'Cascadia Code', monospace; font-size: 12px; line-height: 1.5;
-      color: var(--text-dim);
-    }
-
-    /* Map */
-    #map-win .win-body {
-      padding: 0; display: flex; flex-direction: row;
-    }
-    #map-win .map-canvas-wrap {
-      flex: 1; min-width: 0; overflow: hidden;
-    }
-    #map-win canvas { display: block; width: 100%; }
-
-    /* Sidebar */
-    .sidebar-win .win-body { font-size: 13px; }
-
-    /* Command — full-width row */
-    #command-mount { min-height: 0; }
-    #command-win { min-height: 0; }
-    #command-win .win-body {
-      display: flex; align-items: center; gap: 8px; padding: 4px 10px;
-    }
-    #command-win .prompt-char { color: var(--text-dim); flex-shrink: 0; }
-    #command-win input {
-      flex: 1; background: none; border: none; color: var(--text-primary);
-      font-family: inherit; font-size: 14px; outline: none;
-    }
-    #command-win input::placeholder { color: var(--text-dim); opacity: 0.5; }
-
-    /* Floating overlay panels (exits, quests, factions) */
-    .overlay-panel {
-      position: fixed; z-index: 50;
-      top: 50%; left: 50%; transform: translate(-50%, -50%);
-      min-width: 280px; max-width: 420px; max-height: 60vh;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.8);
-      border: 1px solid var(--accent);
-    }
-    .overlay-panel .win-title {
-      background: var(--bg-primary); color: var(--accent);
-      border-bottom: 1px solid var(--accent);
-    }
-    .overlay-backdrop {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 49;
-    }
-
     /* Dialog overlay */
     .dialog-backdrop {
       position: fixed; inset: 0; background: rgba(0,0,0,0.6);
