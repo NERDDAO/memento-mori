@@ -7,17 +7,13 @@ cd "$(dirname "$0")"
 
 echo "=== Memento Mori ==="
 
-# Load env (--dev uses .env.dev for local Bonfires stack)
-ENV_FILE=".env"
-if [ "$1" = "--dev" ]; then
-    ENV_FILE=".env.dev"
-    shift
-fi
-if [ -f "$ENV_FILE" ]; then
-    export $(grep -v '^#' "$ENV_FILE" | grep -v '^\s*$' | xargs)
-    echo "Loaded $ENV_FILE"
+# Load env
+if [ -f ".env" ]; then
+    export $(grep -v '^#' ".env" | grep -v '^\s*$' | xargs)
+    echo "Loaded .env"
 else
-    echo "Warning: $ENV_FILE not found"
+    echo "Error: .env not found. Copy example.env to .env and fill in values."
+    exit 1
 fi
 
 # Seed world if requested
@@ -59,8 +55,8 @@ GATEWAY_PID=$!
 
 wait_for_port "$GATEWAY_PORT" "gateway"
 
-# --- Wait for Bonfires backend (if --dev) ---
-if [ "$ENV_FILE" = ".env.dev" ]; then
+# --- Wait for local Bonfires backend if pointing at localhost ---
+if echo "${BONFIRE_BASE_URL:-}" | grep -q "localhost"; then
     wait_for_port 8000 "delve backend" 10 || echo "Warning: delve not reachable"
 fi
 

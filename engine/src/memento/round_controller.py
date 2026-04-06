@@ -29,6 +29,7 @@ from memento.log import get_logger
 from memento.models.state_update import (
     CombatEvent,
     EventSummary,
+    InventoryEvent,
     QuestSummary,
     StateUpdate,
     WorldTimeDisplay,
@@ -348,6 +349,14 @@ class RoundController:
                 logger.warning("Quest flow failed", exc_info=True)
                 self.subsystem_warnings.append("quest_unavailable")
 
+        if "inventory" in categories:
+            self.emit_phase("resolving", "inventory")
+            try:
+                self._resolve_inventory()
+            except Exception:
+                logger.warning("Inventory resolution failed", exc_info=True)
+                self.subsystem_warnings.append("inventory_unavailable")
+
         if "social" in categories:
             self.emit_phase("resolving", "social")
             try:
@@ -363,6 +372,42 @@ class RoundController:
                 self.subsystem_warnings.append("reputation_unavailable")
 
         return self.events
+
+    def _resolve_inventory(self) -> None:
+        """Execute detected inventory events (pickup/drop) against the KG."""
+        from memento.inventory_actions import pickup, get_inventory_manifest
+        from memento.room_manifest import get_room_manifest
+
+        if not self.player_id or not self.location_uuid:
+            logger.warning("Cannot resolve inventory: missing player_id or location_uuid")
+            return
+
+        # Get room items to match names from the LLM event detection
+        room = get_room_manifest(self.location_uuid)
+        room_items = {i["name"].lower(): i for i in room.get("items", [])}
+
+        action_lower = self.combined_action.lower()
+
+        # Match any room item mentioned in the action text
+        picked_up = []
+        for item_name, item_data in room_items.items():
+            if item_name in action_lower:
+                item_id = item_data.get("id", "")
+                if not item_id:
+                    continue
+                try:
+                    pickup(self.player_id, item_id, self.location_uuid)
+                    picked_up.append(item_data.get("name", item_name))
+                    logger.info("Inventory pickup: %s → %s", item_name, self.player_id)
+                except Exception as e:
+                    logger.warning("Pickup failed for %s: %s", item_name, e)
+
+        if picked_up:
+            self.events["inventory_changes"] = [
+                {"event_type": "PICKUP", "item_name": name} for name in picked_up
+            ]
+            # Cache updated manifest for state_update
+            self.events["inventory_manifest"] = get_inventory_manifest(self.player_id)
 
     def narrate(self, mode: str = "action") -> str:
         self.emit_phase("resolving", "narrating")
@@ -493,6 +538,35 @@ class RoundController:
         if raw_quests:
             active_quests = [QuestSummary(**q) for q in raw_quests]
 
+        # Include inventory if it was updated this turn
+        inventory_items = None
+        inv_manifest = self.events.get("inventory_manifest") if self.events else None
+        if inv_manifest:
+            from memento.models.state_update import InventoryItemUpdate
+            inventory_items = []
+            for slot in ["weapon", "armor", "accessory", "ring"]:
+                eq = inv_manifest.get(slot)
+                if eq:
+                    inventory_items.append(InventoryItemUpdate(
+                        id=eq.get("id", ""), name=eq.get("name", ""),
+                        rarity=eq.get("rarity", "common"), slot_type=slot,
+                        equipped=True, quantity=1,
+                    ))
+            for bp_item in inv_manifest.get("backpack", []):
+                inventory_items.append(InventoryItemUpdate(
+                    id=bp_item.get("id", ""), name=bp_item.get("name", ""),
+                    rarity=bp_item.get("rarity", "common"),
+                    slot_type=bp_item.get("slot_type", ""),
+                    equipped=False, quantity=bp_item.get("quantity", 1),
+                ))
+
+        # Include inventory events in EventSummary
+        inv_changes = self.events.get("inventory_changes", []) if self.events else []
+        if inv_changes and events_summary:
+            events_summary.inventory_changes = [
+                InventoryEvent(**c) for c in inv_changes
+            ]
+
         state_update = StateUpdate(
             location=self.location,
             world_time=WorldTimeDisplay(**self.world_time)
@@ -500,6 +574,7 @@ class RoundController:
             else None,
             events=events_summary,
             active_quests=active_quests,
+            inventory=inventory_items,
             subsystem_warnings=self.subsystem_warnings,
         )
         return state_update.model_dump(exclude_none=True)
