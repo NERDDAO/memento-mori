@@ -3470,6 +3470,31 @@ function initNarrative(container) {
   };
 }
 
+// src/map/colors.ts
+var TILE_COLORS = {
+  "#": ["#3a3a48", "#1a1a22"],
+  ".": ["#2a2a35", "#0a0a0f"],
+  "+": ["#50c8c8", "#0a0a0f"],
+  T: ["#8b6914", "#0a0a0f"],
+  B: ["#8b6914", "#0a0a0f"],
+  "~": ["#3060c0", "#0a0a0f"],
+  ",": ["#2a5a2a", "#0a0a0f"],
+  ":": ["#555550", "#0a0a0f"],
+  "=": ["#666660", "#0a0a0f"],
+  "^": ["#888880", "#0a0a0f"],
+  " ": ["#0a0a0f", "#0a0a0f"]
+};
+var DEFAULT_COLORS = ["#555555", "#0a0a0f"];
+function tileColors(ch) {
+  return TILE_COLORS[ch] || DEFAULT_COLORS;
+}
+var ENTITY_COLORS = {
+  player: "#ffd700",
+  npc: "#d4a574",
+  item: "#a335ee",
+  exit: "#50c8c8"
+};
+
 // src/map/card-renderer.ts
 var CARD_FONT = "13px monospace";
 var CARD_BOLD_FONT = "bold 14px monospace";
@@ -3621,79 +3646,6 @@ function wrapText(text, maxCols) {
   return lines;
 }
 
-// src/panels/cards.ts
-var offscreen = null;
-var offscreenCtx = null;
-function renderCards(state2) {
-  if (!offscreen) {
-    offscreen = document.createElement("canvas");
-    offscreenCtx = offscreen.getContext("2d");
-  }
-  const cards = [];
-  cards.push({
-    type: "player",
-    name: state2.player.name,
-    labels: [`Lv ${state2.player.level}`, state2.player.archetype || "Wanderer"],
-    summary: state2.location.name,
-    health: state2.player.health,
-    maxHealth: state2.player.maxHealth,
-    xp: state2.player.xp,
-    xpThreshold: state2.player.xpThreshold
-  });
-  for (const npc of state2.location.npcs) {
-    cards.push({
-      type: "entity",
-      name: npc.name,
-      labels: npc.role ? [npc.role] : ["NPC"],
-      summary: ""
-    });
-  }
-  const estimatedHeight = cards.length * 200;
-  offscreen.width = Math.ceil(CARD_W);
-  offscreen.height = Math.max(estimatedHeight, 100);
-  offscreenCtx.fillStyle = theme.colors.bg;
-  offscreenCtx.fillRect(0, 0, offscreen.width, offscreen.height);
-  let y = 4;
-  for (const card of cards) {
-    const h = drawCard(offscreenCtx, 0, y, card);
-    y += h + 8;
-  }
-  offscreen.height = Math.max(y, 10);
-  offscreenCtx.fillStyle = theme.colors.bg;
-  offscreenCtx.fillRect(0, 0, offscreen.width, offscreen.height);
-  y = 4;
-  for (const card of cards) {
-    const h = drawCard(offscreenCtx, 0, y, card);
-    y += h + 8;
-  }
-  return offscreen;
-}
-
-// src/map/colors.ts
-var TILE_COLORS = {
-  "#": ["#3a3a48", "#1a1a22"],
-  ".": ["#2a2a35", "#0a0a0f"],
-  "+": ["#50c8c8", "#0a0a0f"],
-  T: ["#8b6914", "#0a0a0f"],
-  B: ["#8b6914", "#0a0a0f"],
-  "~": ["#3060c0", "#0a0a0f"],
-  ",": ["#2a5a2a", "#0a0a0f"],
-  ":": ["#555550", "#0a0a0f"],
-  "=": ["#666660", "#0a0a0f"],
-  "^": ["#888880", "#0a0a0f"],
-  " ": ["#0a0a0f", "#0a0a0f"]
-};
-var DEFAULT_COLORS = ["#555555", "#0a0a0f"];
-function tileColors(ch) {
-  return TILE_COLORS[ch] || DEFAULT_COLORS;
-}
-var ENTITY_COLORS = {
-  player: "#ffd700",
-  npc: "#d4a574",
-  item: "#a335ee",
-  exit: "#50c8c8"
-};
-
 // src/map/renderer.ts
 var TILE_W = 14;
 var TILE_H = 18;
@@ -3704,7 +3656,7 @@ class MapRenderer {
   canvas;
   ctx;
   dpr;
-  cardContent = null;
+  cards = [];
   constructor(container) {
     this.dpr = Math.min(devicePixelRatio, 2);
     this.canvas = document.createElement("canvas");
@@ -3717,20 +3669,30 @@ class MapRenderer {
     return this.canvas;
   }
   setCard(content) {
-    this.cardContent = content;
+    if (content) {
+      this.cards = [content, ...this.cards.slice(1)];
+    } else {
+      this.cards = this.cards.slice(1);
+    }
+  }
+  setCards(cards) {
+    this.cards = cards;
   }
   render(map, playerX, playerY) {
     const mapW = map.width * TILE_W;
     const mapH = map.height * TILE_H;
-    const totalW = mapW + (this.cardContent ? GAP + CARD_W : 0);
+    const hasCards = this.cards.length > 0;
+    const totalW = mapW + (hasCards ? GAP + CARD_W : 0);
+    const cardStackH = this.cards.length * 120;
+    const totalH = Math.max(mapH, hasCards ? cardStackH : 0);
     this.canvas.width = totalW * this.dpr;
-    this.canvas.height = mapH * this.dpr;
+    this.canvas.height = totalH * this.dpr;
     this.canvas.style.width = `${totalW}px`;
-    this.canvas.style.height = `${mapH}px`;
+    this.canvas.style.height = `${totalH}px`;
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = "#0a0a0f";
-    ctx.fillRect(0, 0, totalW, mapH);
+    ctx.fillRect(0, 0, totalW, totalH);
     ctx.font = FONT;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -3756,8 +3718,12 @@ class MapRenderer {
       this.drawEntity(npc.x, npc.y, npc.ch, ENTITY_COLORS.npc);
     }
     this.drawEntity(playerX, playerY, "@", ENTITY_COLORS.player);
-    if (this.cardContent) {
-      drawCard(ctx, mapW + GAP, 8, this.cardContent);
+    if (hasCards) {
+      let cardY = 8;
+      for (const card of this.cards) {
+        const h = drawCard(ctx, mapW + GAP, cardY, card);
+        cardY += h + 6;
+      }
     }
   }
   drawEntity(x, y, ch, color) {
@@ -4023,8 +3989,34 @@ function updateMap(state2, onAction) {
   } else {
     controller.loadMap(map);
   }
-  showPlayerCard(state2);
+  buildCardStack(state2);
   renderer.render(map, controller.x, controller.y);
+}
+function buildCardStack(state2) {
+  if (!renderer)
+    return;
+  const cards = [];
+  cards.push({
+    type: "player",
+    name: state2.player.name,
+    labels: [`Lv ${state2.player.level}`, state2.player.archetype || "Wanderer"],
+    summary: state2.location.name,
+    health: state2.player.health,
+    maxHealth: state2.player.maxHealth,
+    level: state2.player.level,
+    xp: state2.player.xp,
+    xpThreshold: state2.player.xpThreshold
+  });
+  for (const npc of state2.location.npcs) {
+    cards.push({
+      type: "entity",
+      name: npc.name,
+      labels: npc.role ? [npc.role] : ["NPC"],
+      summary: ""
+    });
+  }
+  renderer.setCards(cards);
+  viewportCallback?.(cards[0]);
 }
 function showPlayerCard(state2) {
   if (!renderer)
@@ -4578,7 +4570,7 @@ function computeRegions(totalCols, totalRows) {
     scrollOffset: 0
   });
   add({
-    name: "cards",
+    name: "events",
     col: colSidebar,
     row: rowBotStart,
     cols: sidebarCols,
@@ -5211,14 +5203,14 @@ class UnifiedCanvas {
     renderer2(ctx, region, cs);
     ctx.restore();
   }
-  _blitOffscreen(region, offscreen2) {
+  _blitOffscreen(region, offscreen) {
     const ctx = this.ctx;
     const cs = this.charSize;
     const px = region.col * cs.width;
     const py = region.row * cs.height;
     const pw = region.cols * cs.width;
     const ph = region.rows * cs.height;
-    ctx.drawImage(offscreen2, px, py, pw, ph);
+    ctx.drawImage(offscreen, px, py, pw, ph);
   }
   _pixelToGrid(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect();
@@ -7086,11 +7078,6 @@ function renderAllPanels() {
   if (mapCanvas && mapCanvas.width > 0) {
     uc.setOffscreen("viewport", mapCanvas);
   }
-  const cardsRegion = r("cards");
-  if (cardsRegion) {
-    const cardsCanvas = renderCards(gameState);
-    uc.setOffscreen("cards", cardsCanvas);
-  }
 }
 async function handleAction(action) {
   if (!action.trim() || action.length > 500)
@@ -7175,6 +7162,10 @@ document.addEventListener("DOMContentLoaded", () => {
   narrativeContainer.style.position = "absolute";
   narrativeContainer.style.left = "-9999px";
   document.body.appendChild(narrativeContainer);
+  const eventsContainer = document.createElement("div");
+  eventsContainer.style.position = "absolute";
+  eventsContainer.style.left = "-9999px";
+  document.body.appendChild(eventsContainer);
   function sizeNarrativeContainers() {
     const cs = uc.getCharSize();
     const narRegion = uc.getRegion("narrative");
@@ -7182,10 +7173,15 @@ document.addEventListener("DOMContentLoaded", () => {
       narrativeContainer.style.width = `${narRegion.cols * cs.width}px`;
       narrativeContainer.style.height = `${narRegion.rows * cs.height}px`;
     }
+    const evtRegion = uc.getRegion("events");
+    if (evtRegion) {
+      eventsContainer.style.width = `${evtRegion.cols * cs.width}px`;
+      eventsContainer.style.height = `${evtRegion.rows * cs.height}px`;
+    }
   }
   sizeNarrativeContainers();
   narrative = initNarrative(narrativeContainer);
-  eventsFeed = narrative;
+  eventsFeed = initNarrative(eventsContainer);
   uc.setPixelRenderer("narrative", (ctx, region, charSize) => {
     const px = region.col * charSize.width;
     const py = region.row * charSize.height;
@@ -7193,10 +7189,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const ph = region.rows * charSize.height;
     ctx.drawImage(narrative.canvas, 0, 0, narrative.canvas.width, narrative.canvas.height, px, py, pw, ph);
   });
+  uc.setPixelRenderer("events", (ctx, region, charSize) => {
+    const px = region.col * charSize.width;
+    const py = region.row * charSize.height;
+    const pw = region.cols * charSize.width;
+    const ph = region.rows * charSize.height;
+    ctx.drawImage(eventsFeed.canvas, 0, 0, eventsFeed.canvas.width, eventsFeed.canvas.height, px, py, pw, ph);
+  });
   uc.onWheel((region, deltaY) => {
     if (region === "narrative") {
       narrative.scroll(deltaY);
       uc.markDirty("narrative");
+    }
+    if (region === "events") {
+      eventsFeed.scroll(deltaY);
+      uc.markDirty("events");
     }
   });
   uc.onClick((region, data) => {
@@ -7268,7 +7275,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderInputPrompt();
   setInterval(() => {
     uc.markDirty("narrative");
-    uc.markDirty("cards");
+    uc.markDirty("events");
   }, 100);
   overlays = createOverlayManager(["char-create", "death", "loading", "intro"]);
   const mm = uc.modalManager;

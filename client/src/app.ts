@@ -10,7 +10,6 @@ import { getRoundState } from './state/round-state';
 import { setKnownEntities } from './renderer/text-renderer';
 import { createMessageHandler, getLastNpcMessage } from './message-handler';
 import { initNarrative, type NarrativeController } from './panels/narrative';
-import { renderCards } from './panels/cards';
 import { updateMap, setViewportCallback, initMapPanel, getMapCanvas } from './panels/map';
 import { renderCharacterPanel } from './panels/character';
 import { renderInventoryPanel } from './panels/inventory';
@@ -133,12 +132,6 @@ function renderAllPanels(): void {
     uc.setOffscreen('viewport', mapCanvas);
   }
 
-  // Composite NPC cards into cards region
-  const cardsRegion = r('cards');
-  if (cardsRegion) {
-    const cardsCanvas = renderCards(gameState);
-    uc.setOffscreen('cards', cardsCanvas);
-  }
 }
 
 // --- Action handling ---
@@ -242,13 +235,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const tuiMain = document.getElementById('tui-main')!;
   uc = new UnifiedCanvas(tuiMain);
 
-  // Create offscreen container for narrative
+  // Create offscreen containers for narrative and events
   const narrativeContainer = document.createElement('div');
   narrativeContainer.style.position = 'absolute';
   narrativeContainer.style.left = '-9999px';
   document.body.appendChild(narrativeContainer);
 
-  // Size offscreen container to match narrative region
+  const eventsContainer = document.createElement('div');
+  eventsContainer.style.position = 'absolute';
+  eventsContainer.style.left = '-9999px';
+  document.body.appendChild(eventsContainer);
+
+  // Size offscreen containers to match regions
   function sizeNarrativeContainers(): void {
     const cs = uc.getCharSize();
     const narRegion = uc.getRegion('narrative');
@@ -256,14 +254,19 @@ document.addEventListener('DOMContentLoaded', () => {
       narrativeContainer.style.width = `${narRegion.cols * cs.width}px`;
       narrativeContainer.style.height = `${narRegion.rows * cs.height}px`;
     }
+    const evtRegion = uc.getRegion('events');
+    if (evtRegion) {
+      eventsContainer.style.width = `${evtRegion.cols * cs.width}px`;
+      eventsContainer.style.height = `${evtRegion.rows * cs.height}px`;
+    }
   }
   sizeNarrativeContainers();
 
-  // Init narrative controller; events feed is aliased to narrative
+  // Init narrative + events controllers
   narrative = initNarrative(narrativeContainer);
-  eventsFeed = narrative;
+  eventsFeed = initNarrative(eventsContainer);
 
-  // Composite narrative canvases into the UC via pixel renderers
+  // Composite narrative and events canvases into the UC via pixel renderers
   uc.setPixelRenderer('narrative', (ctx, region, charSize) => {
     const px = region.col * charSize.width;
     const py = region.row * charSize.height;
@@ -272,11 +275,23 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.drawImage(narrative.canvas, 0, 0, narrative.canvas.width, narrative.canvas.height, px, py, pw, ph);
   });
 
-  // Forward wheel events to narrative
+  uc.setPixelRenderer('events', (ctx, region, charSize) => {
+    const px = region.col * charSize.width;
+    const py = region.row * charSize.height;
+    const pw = region.cols * charSize.width;
+    const ph = region.rows * charSize.height;
+    ctx.drawImage(eventsFeed.canvas, 0, 0, eventsFeed.canvas.width, eventsFeed.canvas.height, px, py, pw, ph);
+  });
+
+  // Forward wheel events to narrative and events
   uc.onWheel((region, deltaY) => {
     if (region === 'narrative') {
       narrative.scroll(deltaY);
       uc.markDirty('narrative');
+    }
+    if (region === 'events') {
+      eventsFeed.scroll(deltaY);
+      uc.markDirty('events');
     }
   });
 
@@ -362,7 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Periodically repaint narrative and cards panels
   setInterval(() => {
     uc.markDirty('narrative');
-    uc.markDirty('cards');
+    uc.markDirty('events');
   }, 100);
 
   // Overlay manager

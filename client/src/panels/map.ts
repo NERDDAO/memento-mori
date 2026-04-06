@@ -137,9 +137,41 @@ export function updateMap(
     controller.loadMap(map);
   }
 
-  // Default: show player card
-  showPlayerCard(state);
+  // Build card stack: player + all NPCs
+  buildCardStack(state);
   renderer.render(map, controller.x, controller.y);
+}
+
+function buildCardStack(state: GameState): void {
+  if (!renderer) return;
+
+  const cards: CardContent[] = [];
+
+  // Player card first
+  cards.push({
+    type: 'player',
+    name: state.player.name,
+    labels: [`Lv ${state.player.level}`, state.player.archetype || 'Wanderer'],
+    summary: state.location.name,
+    health: state.player.health,
+    maxHealth: state.player.maxHealth,
+    level: state.player.level,
+    xp: state.player.xp,
+    xpThreshold: state.player.xpThreshold,
+  });
+
+  // NPC cards
+  for (const npc of state.location.npcs) {
+    cards.push({
+      type: 'entity',
+      name: npc.name,
+      labels: npc.role ? [npc.role] : ['NPC'],
+      summary: '',
+    });
+  }
+
+  renderer.setCards(cards);
+  viewportCallback?.(cards[0]);
 }
 
 function showPlayerCard(state: GameState): void {

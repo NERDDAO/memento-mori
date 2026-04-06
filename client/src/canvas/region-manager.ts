@@ -203,7 +203,7 @@ export function computeRegions(totalCols: number, totalRows: number): Map<string
   });
 
   add({
-    name: 'cards',
+    name: 'events',
     col: colSidebar,
     row: rowBotStart,
     cols: sidebarCols,

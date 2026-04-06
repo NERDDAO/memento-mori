@@ -13,7 +13,7 @@ export class MapRenderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private dpr: number;
-  private cardContent: CardContent | null = null;
+  private cards: CardContent[] = [];
 
   constructor(container: HTMLElement) {
     this.dpr = Math.min(devicePixelRatio, 2);
@@ -30,25 +30,39 @@ export class MapRenderer {
 
   /** Set the card content to display next to the map. */
   setCard(content: CardContent | null): void {
-    this.cardContent = content;
+    // Keep first card as the proximity/player card; NPC cards are appended via setCards
+    if (content) {
+      this.cards = [content, ...this.cards.slice(1)];
+    } else {
+      this.cards = this.cards.slice(1);
+    }
+  }
+
+  /** Set all cards (player + NPCs) to display next to the map. */
+  setCards(cards: CardContent[]): void {
+    this.cards = cards;
   }
 
   render(map: RoomMap, playerX: number, playerY: number): void {
     const mapW = map.width * TILE_W;
     const mapH = map.height * TILE_H;
-    const totalW = mapW + (this.cardContent ? GAP + CARD_W : 0);
+    const hasCards = this.cards.length > 0;
+    const totalW = mapW + (hasCards ? GAP + CARD_W : 0);
+    // Estimate card stack height to size canvas
+    const cardStackH = this.cards.length * 120; // rough estimate per card
+    const totalH = Math.max(mapH, hasCards ? cardStackH : 0);
 
     this.canvas.width = totalW * this.dpr;
-    this.canvas.height = mapH * this.dpr;
+    this.canvas.height = totalH * this.dpr;
     this.canvas.style.width = `${totalW}px`;
-    this.canvas.style.height = `${mapH}px`;
+    this.canvas.style.height = `${totalH}px`;
 
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
     // Clear entire canvas
     ctx.fillStyle = '#0a0a0f';
-    ctx.fillRect(0, 0, totalW, mapH);
+    ctx.fillRect(0, 0, totalW, totalH);
 
     // Draw map tiles
     ctx.font = FONT;
@@ -86,9 +100,13 @@ export class MapRenderer {
     // Draw player
     this.drawEntity(playerX, playerY, '@', ENTITY_COLORS.player);
 
-    // Draw card panel on the right
-    if (this.cardContent) {
-      drawCard(ctx, mapW + GAP, 8, this.cardContent);
+    // Draw card stack on the right
+    if (hasCards) {
+      let cardY = 8;
+      for (const card of this.cards) {
+        const h = drawCard(ctx, mapW + GAP, cardY, card);
+        cardY += h + 6; // 6px gap between cards
+      }
     }
   }
 
