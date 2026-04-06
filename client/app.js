@@ -3470,31 +3470,6 @@ function initNarrative(container) {
   };
 }
 
-// src/map/colors.ts
-var TILE_COLORS = {
-  "#": ["#3a3a48", "#1a1a22"],
-  ".": ["#2a2a35", "#0a0a0f"],
-  "+": ["#50c8c8", "#0a0a0f"],
-  T: ["#8b6914", "#0a0a0f"],
-  B: ["#8b6914", "#0a0a0f"],
-  "~": ["#3060c0", "#0a0a0f"],
-  ",": ["#2a5a2a", "#0a0a0f"],
-  ":": ["#555550", "#0a0a0f"],
-  "=": ["#666660", "#0a0a0f"],
-  "^": ["#888880", "#0a0a0f"],
-  " ": ["#0a0a0f", "#0a0a0f"]
-};
-var DEFAULT_COLORS = ["#555555", "#0a0a0f"];
-function tileColors(ch) {
-  return TILE_COLORS[ch] || DEFAULT_COLORS;
-}
-var ENTITY_COLORS = {
-  player: "#ffd700",
-  npc: "#d4a574",
-  item: "#a335ee",
-  exit: "#50c8c8"
-};
-
 // src/map/card-renderer.ts
 var CARD_FONT = "13px monospace";
 var CARD_BOLD_FONT = "bold 14px monospace";
@@ -3645,6 +3620,79 @@ function wrapText(text, maxCols) {
     lines.push(current);
   return lines;
 }
+
+// src/panels/cards.ts
+var offscreen = null;
+var offscreenCtx = null;
+function renderCards(state2) {
+  if (!offscreen) {
+    offscreen = document.createElement("canvas");
+    offscreenCtx = offscreen.getContext("2d");
+  }
+  const cards = [];
+  cards.push({
+    type: "player",
+    name: state2.player.name,
+    labels: [`Lv ${state2.player.level}`, state2.player.archetype || "Wanderer"],
+    summary: state2.location.name,
+    health: state2.player.health,
+    maxHealth: state2.player.maxHealth,
+    xp: state2.player.xp,
+    xpThreshold: state2.player.xpThreshold
+  });
+  for (const npc of state2.location.npcs) {
+    cards.push({
+      type: "entity",
+      name: npc.name,
+      labels: npc.role ? [npc.role] : ["NPC"],
+      summary: ""
+    });
+  }
+  const estimatedHeight = cards.length * 200;
+  offscreen.width = Math.ceil(CARD_W);
+  offscreen.height = Math.max(estimatedHeight, 100);
+  offscreenCtx.fillStyle = theme.colors.bg;
+  offscreenCtx.fillRect(0, 0, offscreen.width, offscreen.height);
+  let y = 4;
+  for (const card of cards) {
+    const h = drawCard(offscreenCtx, 0, y, card);
+    y += h + 8;
+  }
+  offscreen.height = Math.max(y, 10);
+  offscreenCtx.fillStyle = theme.colors.bg;
+  offscreenCtx.fillRect(0, 0, offscreen.width, offscreen.height);
+  y = 4;
+  for (const card of cards) {
+    const h = drawCard(offscreenCtx, 0, y, card);
+    y += h + 8;
+  }
+  return offscreen;
+}
+
+// src/map/colors.ts
+var TILE_COLORS = {
+  "#": ["#3a3a48", "#1a1a22"],
+  ".": ["#2a2a35", "#0a0a0f"],
+  "+": ["#50c8c8", "#0a0a0f"],
+  T: ["#8b6914", "#0a0a0f"],
+  B: ["#8b6914", "#0a0a0f"],
+  "~": ["#3060c0", "#0a0a0f"],
+  ",": ["#2a5a2a", "#0a0a0f"],
+  ":": ["#555550", "#0a0a0f"],
+  "=": ["#666660", "#0a0a0f"],
+  "^": ["#888880", "#0a0a0f"],
+  " ": ["#0a0a0f", "#0a0a0f"]
+};
+var DEFAULT_COLORS = ["#555555", "#0a0a0f"];
+function tileColors(ch) {
+  return TILE_COLORS[ch] || DEFAULT_COLORS;
+}
+var ENTITY_COLORS = {
+  player: "#ffd700",
+  npc: "#d4a574",
+  item: "#a335ee",
+  exit: "#50c8c8"
+};
 
 // src/map/renderer.ts
 var TILE_W = 14;
@@ -4530,12 +4578,12 @@ function computeRegions(totalCols, totalRows) {
     scrollOffset: 0
   });
   add({
-    name: "events",
+    name: "cards",
     col: colSidebar,
     row: rowBotStart,
     cols: sidebarCols,
     rows: bottomZoneRows,
-    type: "grid",
+    type: "pixel",
     scrollOffset: 0
   });
   add({
@@ -5163,14 +5211,14 @@ class UnifiedCanvas {
     renderer2(ctx, region, cs);
     ctx.restore();
   }
-  _blitOffscreen(region, offscreen) {
+  _blitOffscreen(region, offscreen2) {
     const ctx = this.ctx;
     const cs = this.charSize;
     const px = region.col * cs.width;
     const py = region.row * cs.height;
     const pw = region.cols * cs.width;
     const ph = region.rows * cs.height;
-    ctx.drawImage(offscreen, px, py, pw, ph);
+    ctx.drawImage(offscreen2, px, py, pw, ph);
   }
   _pixelToGrid(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect();
@@ -7038,6 +7086,11 @@ function renderAllPanels() {
   if (mapCanvas && mapCanvas.width > 0) {
     uc.setOffscreen("viewport", mapCanvas);
   }
+  const cardsRegion = r("cards");
+  if (cardsRegion) {
+    const cardsCanvas = renderCards(gameState);
+    uc.setOffscreen("cards", cardsCanvas);
+  }
 }
 async function handleAction(action) {
   if (!action.trim() || action.length > 500)
@@ -7122,10 +7175,6 @@ document.addEventListener("DOMContentLoaded", () => {
   narrativeContainer.style.position = "absolute";
   narrativeContainer.style.left = "-9999px";
   document.body.appendChild(narrativeContainer);
-  const eventsContainer = document.createElement("div");
-  eventsContainer.style.position = "absolute";
-  eventsContainer.style.left = "-9999px";
-  document.body.appendChild(eventsContainer);
   function sizeNarrativeContainers() {
     const cs = uc.getCharSize();
     const narRegion = uc.getRegion("narrative");
@@ -7133,15 +7182,10 @@ document.addEventListener("DOMContentLoaded", () => {
       narrativeContainer.style.width = `${narRegion.cols * cs.width}px`;
       narrativeContainer.style.height = `${narRegion.rows * cs.height}px`;
     }
-    const evtRegion = uc.getRegion("events");
-    if (evtRegion) {
-      eventsContainer.style.width = `${evtRegion.cols * cs.width}px`;
-      eventsContainer.style.height = `${evtRegion.rows * cs.height}px`;
-    }
   }
   sizeNarrativeContainers();
   narrative = initNarrative(narrativeContainer);
-  eventsFeed = initNarrative(eventsContainer);
+  eventsFeed = narrative;
   uc.setPixelRenderer("narrative", (ctx, region, charSize) => {
     const px = region.col * charSize.width;
     const py = region.row * charSize.height;
@@ -7149,21 +7193,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const ph = region.rows * charSize.height;
     ctx.drawImage(narrative.canvas, 0, 0, narrative.canvas.width, narrative.canvas.height, px, py, pw, ph);
   });
-  uc.setPixelRenderer("events", (ctx, region, charSize) => {
-    const px = region.col * charSize.width;
-    const py = region.row * charSize.height;
-    const pw = region.cols * charSize.width;
-    const ph = region.rows * charSize.height;
-    ctx.drawImage(eventsFeed.canvas, 0, 0, eventsFeed.canvas.width, eventsFeed.canvas.height, px, py, pw, ph);
-  });
   uc.onWheel((region, deltaY) => {
     if (region === "narrative") {
       narrative.scroll(deltaY);
       uc.markDirty("narrative");
-    }
-    if (region === "events") {
-      eventsFeed.scroll(deltaY);
-      uc.markDirty("events");
     }
   });
   uc.onClick((region, data) => {
@@ -7235,7 +7268,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderInputPrompt();
   setInterval(() => {
     uc.markDirty("narrative");
-    uc.markDirty("events");
+    uc.markDirty("cards");
   }, 100);
   overlays = createOverlayManager(["char-create", "death", "loading", "intro"]);
   const mm = uc.modalManager;

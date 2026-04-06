@@ -203,12 +203,12 @@ export function computeRegions(totalCols: number, totalRows: number): Map<string
   });
 
   add({
-    name: 'events',
+    name: 'cards',
     col: colSidebar,
     row: rowBotStart,
     cols: sidebarCols,
     rows: bottomZoneRows,
-    type: 'grid',
+    type: 'pixel',
     scrollOffset: 0,
   });
 
