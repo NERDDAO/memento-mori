@@ -4,8 +4,8 @@
  * "manage inventory" button opens the full modal.
  */
 import type { GameState } from '../state/game-state';
-import type { TerminalPanel } from '../ui/terminal-panel';
 import type { CharCell } from '../renderer/canvas-text';
+import type { PanelResult } from '../canvas/types';
 import { theme } from '../renderer/theme';
 import { textRow, coloredRow, emptyRow } from './panel-utils';
 
@@ -29,8 +29,7 @@ export function setManageInventoryCallback(fn: () => void): void {
 }
 
 
-export function renderInventoryPanel(panel: TerminalPanel, state: GameState): void {
-  const cols = panel.cols;
+export function renderInventoryPanel(cols: number, _rows: number, state: GameState): PanelResult {
   const cells: CharCell[][] = [];
 
   // ── EQUIPPED ──
@@ -87,5 +86,5 @@ export function renderInventoryPanel(panel: TerminalPanel, state: GameState): vo
     { text: '  [manage inventory]', fg: theme.colors.accent },
   ], cols));
 
-  panel.paint(cells);
+  return { cells };
 }

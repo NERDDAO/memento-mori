@@ -1,7 +1,7 @@
 // client/src/panels/character.ts
 import type { GameState } from '../state/game-state';
-import type { TerminalPanel } from '../ui/terminal-panel';
 import type { CharCell } from '../renderer/canvas-text';
+import type { PanelResult } from '../canvas/types';
 import { theme } from '../renderer/theme';
 import { textRow, coloredRow, emptyRow } from './panel-utils';
 
@@ -29,9 +29,8 @@ function barRow(
   return coloredRow(segments, cols);
 }
 
-export function renderCharacterPanel(panel: TerminalPanel, state: GameState): void {
+export function renderCharacterPanel(cols: number, _rows: number, state: GameState): PanelResult {
   const p = state.player;
-  const cols = panel.cols;
   const cells: CharCell[][] = [];
 
   // Archetype label
@@ -66,5 +65,5 @@ export function renderCharacterPanel(panel: TerminalPanel, state: GameState): vo
     }
   }
 
-  panel.paint(cells);
+  return { cells };
 }

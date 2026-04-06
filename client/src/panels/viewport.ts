@@ -4,8 +4,8 @@
  * and scene art. Renders CardContent as a canvas CharCell grid.
  */
 
-import type { TerminalPanel } from '../ui/terminal-panel';
 import type { CardContent } from '../map/card-renderer';
+import type { PanelResult } from '../canvas/types';
 import { type CharCell, ATTR_BOLD } from '../renderer/canvas-text';
 import { theme } from '../renderer/theme';
 
@@ -14,17 +14,15 @@ const BAR_FULL = '█';
 const BAR_EMPTY = '░';
 const BAR_WIDTH = 12;
 
-/** Render entity/player card content into the viewport TerminalPanel. */
+/** Render entity/player card content into the viewport panel. */
 export function renderViewport(
-  panel: TerminalPanel,
+  cols: number,
+  _rows: number,
   card: CardContent | null,
   sceneArt: string[] | null,
-): void {
+): PanelResult {
   const cells: CharCell[][] = [];
-  const cols = panel.cols;
-  if (cols < 10) return;
-
-  panel.clearHitRegions();
+  if (cols < 10) return { cells };
 
   if (sceneArt && sceneArt.length > 0) {
     // Scene art mode — render ASCII art centered
@@ -51,7 +49,7 @@ export function renderViewport(
     cells.push(row);
   }
 
-  panel.paint(cells);
+  return { cells };
 }
 
 function renderCard(cells: CharCell[][], cols: number, card: CardContent): void {

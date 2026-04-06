@@ -1,6 +1,6 @@
 // client/src/panels/questlog.ts
-import type { TerminalPanel } from '../ui/terminal-panel';
 import type { CharCell } from '../renderer/canvas-text';
+import type { PanelResult, LocalHitRegion } from '../canvas/types';
 import { theme } from '../renderer/theme';
 import { textRow, coloredRow, emptyRow } from './panel-utils';
 
@@ -14,16 +14,13 @@ export interface QuestEntry {
 }
 
 
-export function renderQuestLogPanel(panel: TerminalPanel, quests: QuestEntry[]): void {
-  const cols = panel.cols;
+export function renderQuestLogPanel(cols: number, _rows: number, quests: QuestEntry[]): PanelResult {
   const cells: CharCell[][] = [];
-
-  panel.clearHitRegions();
+  const hitRegions: LocalHitRegion[] = [];
 
   if (!quests || quests.length === 0) {
     cells.push(textRow('No active quests', theme.colors.dim, cols));
-    panel.paint(cells);
-    return;
+    return { cells };
   }
 
   for (let i = 0; i < quests.length; i++) {
@@ -69,7 +66,7 @@ export function renderQuestLogPanel(panel: TerminalPanel, quests: QuestEntry[]):
 
     // Register hit region for the entire quest entry
     const questEndRow = cells.length;
-    panel.registerHitRegion({
+    hitRegions.push({
       col: 0,
       row: questStartRow,
       width: cols,
@@ -78,5 +75,5 @@ export function renderQuestLogPanel(panel: TerminalPanel, quests: QuestEntry[]):
     });
   }
 
-  panel.paint(cells);
+  return { cells, hitRegions };
 }

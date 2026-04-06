@@ -1,28 +1,23 @@
 // client/src/panels/present.ts
 import type { GameState } from '../state/game-state';
-import type { TerminalPanel } from '../ui/terminal-panel';
 import type { CharCell } from '../renderer/canvas-text';
+import type { PanelResult, LocalHitRegion } from '../canvas/types';
 import { ATTR_BOLD } from '../renderer/canvas-text';
 import { getRoundState } from '../state/round-state';
 import { theme } from '../renderer/theme';
 import { textRow, coloredRow, emptyRow } from './panel-utils';
 
 
-export function renderPresentPanel(
-  panel: TerminalPanel, state: GameState, onAction: (action: string) => void,
-): void {
-  const cols = panel.cols;
+export function renderPresentPanel(cols: number, _rows: number, state: GameState): PanelResult {
   const cells: CharCell[][] = [];
+  const hitRegions: LocalHitRegion[] = [];
   const npcs = state.location.npcs || [];
   const items = state.location.items || [];
   const players = state.location.players || [];
 
-  panel.clearHitRegions();
-
   if (npcs.length === 0 && items.length === 0 && players.length === 0) {
     cells.push(textRow('Nothing here', theme.colors.dim, cols));
-    panel.paint(cells);
-    return;
+    return { cells };
   }
 
   const rs = getRoundState();
@@ -58,7 +53,7 @@ export function renderPresentPanel(
     cells.push(sep);
 
     // Hit region spans all rows for this NPC
-    panel.registerHitRegion({
+    hitRegions.push({
       col: 0,
       row: startRow,
       width: cols,
@@ -89,7 +84,7 @@ export function renderPresentPanel(
       { text: name, fg: theme.colors.primary },
     ], cols));
 
-    panel.registerHitRegion({
+    hitRegions.push({
       col: 0,
       row: rowIdx,
       width: cols,
@@ -98,5 +93,5 @@ export function renderPresentPanel(
     });
   }
 
-  panel.paint(cells);
+  return { cells, hitRegions };
 }

@@ -11,8 +11,8 @@
  */
 
 import type { GameState, WorldMapRoom } from '../state/game-state';
-import type { TerminalPanel } from '../ui/terminal-panel';
 import type { CharCell } from '../renderer/canvas-text';
+import type { PanelResult, LocalHitRegion } from '../canvas/types';
 import { theme } from '../renderer/theme';
 import { coloredRow, emptyRow, textRow } from './panel-utils';
 
@@ -58,21 +58,14 @@ function segmentRow(
 
 // ── main renderer ─────────────────────────────────────────────────────────────
 
-export function renderWorldMapPanel(
-  panel: TerminalPanel,
-  state: GameState,
-  onAction: (action: string) => void,
-): void {
-  const cols = panel.cols;
+export function renderWorldMapPanel(cols: number, _rows: number, state: GameState): PanelResult {
   const cells: CharCell[][] = [];
-
-  panel.clearHitRegions();
+  const hitRegions: LocalHitRegion[] = [];
 
   const wm = state.worldMap;
   if (!wm) {
     cells.push(textRow('No map data', COLOR_UNVISITED, cols));
-    panel.paint(cells);
-    return;
+    return { cells };
   }
 
   // Find current room by UUID with name fallback.
@@ -161,7 +154,7 @@ export function renderWorldMapPanel(
     if (westText !== null) {
       const westStart = mainStart;
       const westWidth = westText.length;
-      panel.registerHitRegion({
+      hitRegions.push({
         col: westStart,
         row: mainRowIdx,
         width: westWidth,
@@ -174,7 +167,7 @@ export function renderWorldMapPanel(
     if (eastText !== null) {
       const eastStart = mainStart + westPart.length + label.length + HORIZ.length;
       const eastWidth = eastText.length;
-      panel.registerHitRegion({
+      hitRegions.push({
         col: eastStart,
         row: mainRowIdx,
         width: eastWidth,
@@ -194,7 +187,7 @@ export function renderWorldMapPanel(
     const southRowIdx = cells.length;
     cells.push(segmentRow([{ text: southText, fg }], cols, nameStart));
 
-    panel.registerHitRegion({
+    hitRegions.push({
       col: nameStart,
       row: southRowIdx,
       width: southText.length,
@@ -206,7 +199,7 @@ export function renderWorldMapPanel(
   // Register North hit region (row 0 if northText exists).
   if (northText !== null) {
     const nameStart = Math.max(0, labelMidCol - Math.floor(northText.length / 2));
-    panel.registerHitRegion({
+    hitRegions.push({
       col: nameStart,
       row: 0,
       width: northText.length,
@@ -215,5 +208,5 @@ export function renderWorldMapPanel(
     });
   }
 
-  panel.paint(cells);
+  return { cells, hitRegions };
 }
