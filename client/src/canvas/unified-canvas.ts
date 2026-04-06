@@ -270,21 +270,32 @@ export class UnifiedCanvas {
       // Paint modal overlays on top of everything
       if (this.modalManager.active) {
         this.modalManager.renderInto(this.grid, this.totalCols, this.totalRows);
-        // Repaint grid cells (modal dims backdrop + draws border + content)
+        // Repaint: clear canvas, draw dimmed borders + grid, then pixel/offscreen regions
+        ctx.fillStyle = theme.colors.bg;
+        ctx.fillRect(0, 0, this.totalCols * cs.width, this.totalRows * cs.height);
+
+        // Draw dimmed border chars
+        for (let r = 0; r < this.totalRows; r++) {
+          for (let c = 0; c < this.totalCols; c++) {
+            const bc = this.borderGrid[r][c];
+            if (bc.char !== ' ') {
+              // Dim the border color to match backdrop
+              fillCell(ctx, c, r, { ...bc, fg: theme.colors.dim }, cs);
+            }
+          }
+        }
+
+        // Draw grid cells (modal content + dimmed backdrop)
         for (let r = 0; r < this.totalRows; r++) {
           for (let c = 0; c < this.totalCols; c++) {
             const cell = this.grid[r][c];
-            const px = c * cs.width;
-            const py = r * cs.height;
-            ctx.fillStyle = cell.bg || theme.colors.bg;
-            ctx.fillRect(px, py, cs.width, cs.height);
             if (cell.char !== ' ' || cell.bg) {
               fillCell(ctx, c, r, cell, cs);
             }
           }
         }
-        // Re-composite pixel renderers and offscreen slots on top
-        // (the grid repaint above overwrote them with empty/dimmed cells)
+
+        // Re-composite pixel renderers and offscreen slots
         for (const entry of this.pixelRenderers) {
           const region = this.regions.get(entry.regionName);
           if (region) this._paintPixelRegion(region, entry.renderer);

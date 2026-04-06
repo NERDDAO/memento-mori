@@ -5226,13 +5226,19 @@ class UnifiedCanvas {
       }
       if (this.modalManager.active) {
         this.modalManager.renderInto(this.grid, this.totalCols, this.totalRows);
+        ctx.fillStyle = theme.colors.bg;
+        ctx.fillRect(0, 0, this.totalCols * cs.width, this.totalRows * cs.height);
+        for (let r = 0;r < this.totalRows; r++) {
+          for (let c = 0;c < this.totalCols; c++) {
+            const bc = this.borderGrid[r][c];
+            if (bc.char !== " ") {
+              fillCell(ctx, c, r, { ...bc, fg: theme.colors.dim }, cs);
+            }
+          }
+        }
         for (let r = 0;r < this.totalRows; r++) {
           for (let c = 0;c < this.totalCols; c++) {
             const cell = this.grid[r][c];
-            const px = c * cs.width;
-            const py = r * cs.height;
-            ctx.fillStyle = cell.bg || theme.colors.bg;
-            ctx.fillRect(px, py, cs.width, cs.height);
             if (cell.char !== " " || cell.bg) {
               fillCell(ctx, c, r, cell, cs);
             }
