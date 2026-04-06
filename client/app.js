@@ -7378,6 +7378,13 @@ document.addEventListener("DOMContentLoaded", () => {
     uc.markDirty("events");
   }, 100);
   overlays = createOverlayManager(["char-create", "death", "loading", "intro"]);
+  for (const name of ["char-create", "death", "loading", "intro"]) {
+    overlays.onDismiss(name, () => {
+      sizeNarrativeContainers();
+      uc.markAllDirty();
+      renderAllPanels();
+    });
+  }
   const mm = uc.modalManager;
   npcDialog = createDialogController(mm);
   invModal = createInventoryController(mm, () => gameState, renderAllPanels, (text, style) => {

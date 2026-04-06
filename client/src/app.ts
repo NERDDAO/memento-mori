@@ -388,8 +388,15 @@ document.addEventListener('DOMContentLoaded', () => {
     uc.markDirty('events');
   }, 100);
 
-  // Overlay manager
+  // Overlay manager — force full repaint when any overlay dismisses
   overlays = createOverlayManager(['char-create', 'death', 'loading', 'intro']);
+  for (const name of ['char-create', 'death', 'loading', 'intro']) {
+    overlays.onDismiss(name, () => {
+      sizeNarrativeContainers();
+      uc.markAllDirty();
+      renderAllPanels();
+    });
+  }
 
   // Modal manager lives on the unified canvas
   const mm = uc.modalManager;
