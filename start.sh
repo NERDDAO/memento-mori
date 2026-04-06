@@ -27,6 +27,9 @@ if [ "$1" = "--seed" ]; then
     echo "Seeding complete."
 fi
 
+# Seed engine MCP tools (idempotent)
+MONGO_URI=mongodb://localhost:27017 python scripts/seed_engine_tools.py 2>/dev/null || true
+
 # Build client
 echo "Building client..."
 (cd client && bun build src/app.ts --outdir . 2>&1) || echo "Client build skipped"
