@@ -4756,11 +4756,12 @@ var D_H = "═";
 var D_V = "║";
 var D_ML = "╠";
 var D_MR = "╣";
-var D_MT = "╦";
 var S_H = "─";
 var S_V = "│";
 var S_ML = "├";
 var M_SH_DV_R = "╡";
+var M_SV_DH_T = "╥";
+var M_SV_DH_B = "╨";
 function setCell(grid, row, col, char, fg) {
   if (row < 0 || col < 0 || row >= grid.length || col >= (grid[0]?.length ?? 0))
     return;
@@ -4808,10 +4809,13 @@ function drawBorders(grid, regions, totalCols, totalRows) {
     setCell(grid, row, lastCol, D_MR, fg);
     hLine(grid, row, innerColStart, innerColEnd, D_H, fg);
     if (row >= vd0.row && row < vd0.row + vd0.rows) {
-      setCell(grid, row, vd0.col, D_MT, fg);
+      setCell(grid, row, vd0.col, "╪", fg);
     }
     if (row >= vd1.row && row < vd1.row + vd1.rows) {
-      setCell(grid, row, vd1.col, D_MT, fg);
+      setCell(grid, row, vd1.col, "╪", fg);
+    }
+    if (vDiv2 && row >= vDiv2.row && row < vDiv2.row + vDiv2.rows) {
+      setCell(grid, row, vDiv2.col, "╪", fg);
     }
   }
   drawHDiv(hDiv0.row);
@@ -4843,8 +4847,8 @@ function drawBorders(grid, regions, totalCols, totalRows) {
   setCell(grid, hDiv3.row, vDiv1.col, "╧", fg);
   if (vDiv2) {
     vLine(grid, vDiv2.col, vDiv2.row, vDiv2.row + vDiv2.rows - 1, S_V, fg);
-    setCell(grid, hDiv1.row, vDiv2.col, "╪", fg);
-    setCell(grid, hDiv2.row, vDiv2.col, "╧", fg);
+    setCell(grid, hDiv1.row, vDiv2.col, M_SV_DH_T, fg);
+    setCell(grid, hDiv2.row, vDiv2.col, M_SV_DH_B, fg);
   }
 }
 

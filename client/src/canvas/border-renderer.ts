@@ -118,13 +118,15 @@ export function drawBorders(
     setCell(grid, row, lastCol, D_MR, fg);
     // Fill inner with double-H
     hLine(grid, row, innerColStart, innerColEnd, D_H, fg);
-    // Fix intersections with any vertical dividers that cross this row
-    // vDiv0 may not cross all hDivs — check range
+    // Fix intersections with any vertical dividers that cross or touch this row
     if (row >= vd0.row && row < vd0.row + vd0.rows) {
-      setCell(grid, row, vd0.col, D_MT, fg); // single-V meets double-H from below (top T)
+      setCell(grid, row, vd0.col, '\u256A', fg); // ╪ double-H × single-V (crossing)
     }
     if (row >= vd1.row && row < vd1.row + vd1.rows) {
-      setCell(grid, row, vd1.col, D_MT, fg);
+      setCell(grid, row, vd1.col, '\u256A', fg); // ╪ double-H × single-V (crossing)
+    }
+    if (vDiv2 && row >= vDiv2.row && row < vDiv2.row + vDiv2.rows) {
+      setCell(grid, row, vDiv2.col, '\u256A', fg); // ╪ double-H × single-V (crossing)
     }
   }
 
@@ -236,9 +238,9 @@ export function drawBorders(
   // ── 7. vDiv2: narrative | viewer divider in bottom zone ──────────
   if (vDiv2) {
     vLine(grid, vDiv2.col, vDiv2.row, vDiv2.row + vDiv2.rows - 1, S_V, fg);
-    // Junction at hDiv1 (top of bottom zone): single-V hangs down from double-H
-    setCell(grid, hDiv1.row, vDiv2.col, '\u256A', fg); // ╪ double-H × single-V
-    // Junction at hDiv2 (bottom of bottom zone): single-V ends
-    setCell(grid, hDiv2.row, vDiv2.col, '╧', fg);
+    // Junction at hDiv1 (top of bottom zone): vDiv2 starts below → ╤ (single-V goes down from double-H)
+    setCell(grid, hDiv1.row, vDiv2.col, M_SV_DH_T, fg); // ╥
+    // Junction at hDiv2 (bottom of bottom zone): vDiv2 ends above → ╧ (single-V comes from above into double-H)
+    setCell(grid, hDiv2.row, vDiv2.col, M_SV_DH_B, fg); // ╨
   }
 }
