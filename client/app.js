@@ -5244,15 +5244,42 @@ class UnifiedCanvas {
             }
           }
         }
+        const modalRegions = this.modalManager.getStack().map((m) => m.region);
         for (const entry of this.pixelRenderers) {
           const region = this.regions.get(entry.regionName);
-          if (region)
-            this._paintPixelRegion(region, entry.renderer);
+          if (region) {
+            ctx.save();
+            ctx.beginPath();
+            const rpx = region.col * cs.width;
+            const rpy = region.row * cs.height;
+            const rpw = region.cols * cs.width;
+            const rph = region.rows * cs.height;
+            ctx.rect(rpx, rpy, rpw, rph);
+            for (const mr of modalRegions) {
+              ctx.rect(mr.col * cs.width, mr.row * cs.height, mr.cols * cs.width, mr.rows * cs.height);
+            }
+            ctx.clip("evenodd");
+            entry.renderer(ctx, region, cs);
+            ctx.restore();
+          }
         }
         for (const slot of this.offscreenSlots) {
           const region = this.regions.get(slot.regionName);
-          if (region)
+          if (region) {
+            ctx.save();
+            ctx.beginPath();
+            const rpx = region.col * cs.width;
+            const rpy = region.row * cs.height;
+            const rpw = region.cols * cs.width;
+            const rph = region.rows * cs.height;
+            ctx.rect(rpx, rpy, rpw, rph);
+            for (const mr of modalRegions) {
+              ctx.rect(mr.col * cs.width, mr.row * cs.height, mr.cols * cs.width, mr.rows * cs.height);
+            }
+            ctx.clip("evenodd");
             this._blitOffscreen(region, slot.canvas);
+            ctx.restore();
+          }
         }
       }
       this.allDirty = false;
