@@ -10,6 +10,7 @@ import { theme } from '../renderer/theme';
 import { computeRegions } from './region-manager';
 import { drawBorders } from './border-renderer';
 import { HitRegistry } from './hit-registry';
+import { ModalManager } from './modal-manager';
 import type { Region, PanelResult } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -34,6 +35,7 @@ export class UnifiedCanvas {
   readonly canvas: HTMLCanvasElement;
   regions: Map<string, Region>;
   readonly hitRegistry: HitRegistry;
+  readonly modalManager: ModalManager;
   totalCols: number;
   totalRows: number;
 
@@ -73,8 +75,9 @@ export class UnifiedCanvas {
     this.totalRows  = 1;
     this.grid       = [[{ char: ' ', fg: theme.colors.primary }]];
     this.borderGrid = [[{ char: ' ', fg: theme.colors.primary }]];
-    this.regions    = new Map();
-    this.hitRegistry = new HitRegistry();
+    this.regions      = new Map();
+    this.hitRegistry  = new HitRegistry();
+    this.modalManager = new ModalManager(this);
 
     // Bind mouse events
     this.canvas.addEventListener('click',      this._onClick.bind(this));
@@ -264,8 +267,33 @@ export class UnifiedCanvas {
         this._blitOffscreen(region, slot.canvas);
       }
 
+      // Paint modal overlays on top of everything
+      if (this.modalManager.active) {
+        this.modalManager.renderInto(this.grid, this.totalCols, this.totalRows);
+        // Repaint all cells (modal dims backdrop + draws border + content)
+        for (let r = 0; r < this.totalRows; r++) {
+          for (let c = 0; c < this.totalCols; c++) {
+            const cell = this.grid[r][c];
+            // Clear cell area then draw
+            const px = c * cs.width;
+            const py = r * cs.height;
+            ctx.fillStyle = cell.bg || theme.colors.bg;
+            ctx.fillRect(px, py, cs.width, cs.height);
+            if (cell.char !== ' ' || cell.bg) {
+              fillCell(ctx, c, r, cell, cs);
+            }
+          }
+        }
+      }
+
       this.allDirty = false;
       this.dirtySet.clear();
+    } else if (this.modalManager.active) {
+      // When modals are active, force full repaint to handle overlay correctly
+      this.allDirty = true;
+      this.dirtySet.clear();
+      this._paint();
+      return;
     } else {
       // Partial repaint — only dirty regions
       for (const name of this.dirtySet) {
@@ -394,6 +422,12 @@ export class UnifiedCanvas {
 
   private _onWheel(e: WheelEvent): void {
     e.preventDefault();
+    // If a modal is active, scroll it instead of the underlying region
+    if (this.modalManager.active) {
+      const delta = e.deltaY > 0 ? 3 : -3;
+      this.modalManager.scroll(delta);
+      return;
+    }
     const { col, row } = this._pixelToGrid(e.clientX, e.clientY);
     const regionName = this._pointToRegion(col, row);
     if (regionName) {

@@ -1,10 +1,13 @@
 // src/hotkeys.ts
 /** Keyboard bindings — hotkeys for modals. */
 
+import type { ModalManager } from './canvas/modal-manager';
+
 export interface HotkeyRefs {
   invModal: { active: boolean; open: () => void; close: () => void };
   codex: { active: boolean; open: (entityId?: string) => void; close: () => void };
-  npcDialog: { show: (npcName: string, npcRole: string, text: string) => void };
+  npcDialog: { active: boolean; show: (npcName: string, npcRole: string, text: string) => void; dismiss: () => void };
+  modalManager: ModalManager;
 }
 
 export function initHotkeys(refs: HotkeyRefs): void {
@@ -20,8 +23,10 @@ export function initHotkeys(refs: HotkeyRefs): void {
         else refs.codex.open();
         break;
       case 'Escape':
-        if (refs.invModal.active) refs.invModal.close();
-        else if (refs.codex.active) refs.codex.close();
+        // Close the topmost modal
+        if (refs.modalManager.active) {
+          refs.modalManager.closeTopmost();
+        }
         break;
     }
   });

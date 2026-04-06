@@ -21,9 +21,9 @@ import { renderViewport } from './panels/viewport';
 import { renderHeader, type WorldTime } from './ui/header';
 import { renderStatusBar, type StatusState } from './ui/status';
 import { UnifiedCanvas } from './canvas/unified-canvas';
-import { createDialog } from './ui/dialog';
-import { createInventoryModal } from './ui/inventory-modal';
-import { createCodexModal } from './ui/codex-modal';
+import { createDialogController, type DialogController } from './ui/dialog-renderer';
+import { createInventoryController, handleInventoryAction, type InventoryModalController } from './ui/inventory-renderer';
+import { createCodexController, type CodexModalController } from './ui/codex-renderer';
 import { createArtViewer } from './ui/art-viewer';
 import { type OverlayManager, createOverlayManager } from './ui/overlay';
 import { startGame } from './flows/session-flow';
@@ -39,10 +39,10 @@ let narrative: NarrativeController;
 let eventsFeed: NarrativeController;
 let uc: UnifiedCanvas;
 
-let npcDialog: ReturnType<typeof createDialog>;
-let codex: ReturnType<typeof createCodexModal>;
+let npcDialog: DialogController;
+let codex: CodexModalController;
 let artViewer: ReturnType<typeof createArtViewer>;
-let invModal: ReturnType<typeof createInventoryModal>;
+let invModal: InventoryModalController;
 let overlays: OverlayManager;
 
 // --- Header / status state for CharCell renderers ---
@@ -286,10 +286,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Wire click handler for interactive panels
   uc.onClick((region, data) => {
+    // Modal close buttons
+    if (data.modalAction === 'close') {
+      const modal = data.modal as string;
+      if (modal === 'inventory') invModal.close();
+      else if (modal === 'codex') codex.close();
+      else if (modal === 'dialog') npcDialog.dismiss();
+      return;
+    }
+
+    // Inventory item actions
+    if (data.inventoryAction) {
+      handleInventoryAction(data, () => invModal.refresh()).catch(console.error);
+      return;
+    }
+
+    // Codex entity selection
+    if (data.codexSelect) {
+      codex.selectEntity(data.codexSelect as string);
+      return;
+    }
+
+    // Regular panel clicks
     if (data.action) handleAction(data.action as string);
     if (data.questName) {
-      const quest = gameState?.quests.find((q: any) => q.name === data.questName);
-      if (quest) npcDialog.showQuest(quest);
+      const quest = gameState?.quests.find((q: Record<string, unknown>) => q.name === data.questName);
+      if (quest) npcDialog.showQuest(quest as GameState['quests'][0]);
     }
     if (data.entityId) codex.open(data.entityId as string);
     if (data.npcName) {
@@ -350,24 +372,27 @@ document.addEventListener('DOMContentLoaded', () => {
   // Overlay manager
   overlays = createOverlayManager(['char-create', 'death', 'loading', 'intro']);
 
-  // Dialog
-  npcDialog = createDialog();
-  const dialogMount = document.getElementById('dialog-mount')!;
-  dialogMount.parentElement!.replaceChild(npcDialog.el, dialogMount);
+  // Modal manager lives on the unified canvas
+  const mm = uc.modalManager;
 
-  // Inventory modal
-  invModal = createInventoryModal(() => gameState);
-  document.body.appendChild(invModal.el);
+  // Dialog (CharCell overlay)
+  npcDialog = createDialogController(mm);
+
+  // Inventory modal (CharCell overlay)
+  invModal = createInventoryController(mm, () => gameState, renderAllPanels, (text, style) => {
+    eventsFeed.addBlock(text, style);
+  });
   setManageInventoryCallback(() => invModal.open());
 
-  // Art viewer + Codex modal
+  // Art viewer (still DOM — it's a full-screen canvas viewer, not a text modal)
   artViewer = createArtViewer();
   document.body.appendChild(artViewer.el);
-  codex = createCodexModal(() => gameState, () => getSession().playerId, artViewer.open);
-  document.body.appendChild(codex.el);
+
+  // Codex modal (CharCell overlay)
+  codex = createCodexController(mm, () => gameState, () => getSession().playerId);
 
   // Hotkeys
-  initHotkeys({ invModal, codex, npcDialog });
+  initHotkeys({ invModal, codex, npcDialog, modalManager: mm });
 
   // Wire message handler
   const handleMessage = createMessageHandler({
@@ -436,7 +461,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const ph = region.rows * charSize.height;
       ctx.drawImage(narrative.canvas, 0, 0, narrative.canvas.width, narrative.canvas.height, px, py, pw, ph);
     });
-    initHotkeys({ invModal, codex, npcDialog });
+    initHotkeys({ invModal, codex, npcDialog, modalManager: mm });
     (document.getElementById('char-name-input') as HTMLInputElement).focus();
   });
 
