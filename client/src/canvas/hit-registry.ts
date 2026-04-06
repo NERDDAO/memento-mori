@@ -23,6 +23,11 @@ export class HitRegistry {
     }
   }
 
+  /** Clear all hit entries for a specific region at a specific z-layer. */
+  clearRegion(regionName: string, z: number): void {
+    this.entries = this.entries.filter(e => !(e.region === regionName && e.z === z));
+  }
+
   /**
    * Register all local hit regions for a panel, translating their coordinates
    * from panel-local space to global grid space.
