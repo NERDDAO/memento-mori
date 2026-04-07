@@ -873,7 +873,7 @@ class AgentController:
     @staticmethod
     def _extract_summary(concept: str) -> str:
         """Extract a one-line summary from concept crew output."""
-        lines = [l.strip() for l in concept.strip().split("\n") if l.strip()]
+        lines = [ln.strip() for ln in concept.strip().split("\n") if ln.strip()]
         # Skip headers like "Name:", take the first descriptive line
         for line in lines:
             if not line.startswith(("Name:", "**", "#", "---")):

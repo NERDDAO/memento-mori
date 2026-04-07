@@ -36,9 +36,9 @@ def test_tool_labels_all():
 
 
 def test_tool_labels_innate_count():
-    """Innate tools should be 8."""
+    """Innate tools count should match INNATE_TOOLS definition."""
     from memento.tools.tool_labels import INNATE_TOOLS
-    assert len(INNATE_TOOLS) == 8
+    assert len(INNATE_TOOLS) == 10
 
 
 def test_tool_labels_all_labels_defined():
