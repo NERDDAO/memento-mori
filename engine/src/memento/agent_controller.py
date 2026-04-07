@@ -230,39 +230,19 @@ class AgentController:
             tools_section=build_tool_section(npc_labels),
         )
 
-        # Create the Bonfires agent
-        try:
-            client = get_client()
-            result = client.agents.create(
-                name=name,
-                username=username,
-                context=context,
-                platform=self.platform,
-                deployment_config=self._build_deployment_config(),
-                enabled_mcp_tools=["memento-engine"],
-                agent_features={
-                    "maxToolIterations": 5,
-                    "maxParallelToolCalls": 3,
-                },
-                agent_env_vars={
-                    "MEMENTO_GATEWAY_URL": self.gateway_url,
-                    "ENGINE_API_TOKEN": self.engine_api_token,
-                },
-            )
-            agent_id = result.get("_id", result.get("id", ""))
-            logger.info("Spawned NPC agent: %s (%s) → agent %s", name, uuid, agent_id)
-        except Exception:
-            logger.error("Failed to create Bonfires agent for NPC %s", name, exc_info=True)
+        # Create via spawner (handles API create + env vars + Matrix registration)
+        from memento.agent_spawner import AgentSpawner
+        spawner = AgentSpawner()
+        agent_id = spawner.spawn(
+            name=name,
+            username=username,
+            context=context,
+            labels=npc_labels,
+            location=location_name,
+            kg_uuid=uuid,
+        )
+        if not agent_id:
             return None
-
-        # Update KG labels for tool gating
-        if npc_labels:
-            try:
-                from memento.tools.kg import update_entity
-                labels_str = ",".join(npc_labels)
-                update_entity.run(name=name, new_labels=labels_str)
-            except Exception:
-                logger.warning("Failed to set labels for NPC %s", name, exc_info=True)
 
         npc_agent = NPCAgent(
             npc_name=name,
@@ -481,31 +461,18 @@ class AgentController:
         except Exception:
             logger.warning("Failed to create narrator KG entity for %s (non-fatal)", location_name, exc_info=True)
 
-        try:
-            client = get_client()
-            result = client.agents.create(
-                name=f"Narrator: {location_name}",
-                username=username,
-                context=context,
-                platform=self.platform,
-                deployment_config=self._build_deployment_config(),
-                enabled_mcp_tools=["memento-engine"],
-                agent_features={
-                    "maxToolIterations": 5,
-                    "maxParallelToolCalls": 3,
-                },
-                agent_env_vars={
-                    "MEMENTO_GATEWAY_URL": self.gateway_url,
-                    "ENGINE_API_TOKEN": self.engine_api_token,
-                },
-            )
-            agent_id = result.get("_id", result.get("id", ""))
-            logger.info("Spawned room narrator: %s → agent %s", location_name, agent_id)
-        except Exception:
-            logger.error("Failed to spawn narrator for %s", location_name, exc_info=True)
+        from memento.agent_spawner import AgentSpawner
+        spawner = AgentSpawner()
+        agent_id = spawner.spawn(
+            name=f"Narrator: {location_name}",
+            username=username,
+            context=context,
+            labels=["Room"],
+            location=location_name,
+            kg_uuid=narrator_uuid,
+        )
+        if not agent_id:
             return ""
-
-        _register_npc(agent_id, f"Narrator: {location_name}", location_name, narrator_uuid)
 
         # Subscribe to master narrator if provided
         if master_narrator_agent_id and agent_id:
@@ -595,38 +562,21 @@ class AgentController:
         except Exception:
             logger.warning("Failed to create engine KG entity (non-fatal)", exc_info=True)
 
-        try:
-            client = get_client()
-            result = client.agents.create(
-                name="Engine",
-                username="bonfires-engine",
-                context=ENGINE_SYSTEM_PROMPT_TEMPLATE.format(
-                    tools_section=build_tool_section(["Engine"]),
-                ),
-                platform=self.platform,
-                deployment_config=self._build_deployment_config(),
-                enabled_mcp_tools=["memento-engine"],
-                agent_features={
-                    "maxToolIterations": 5,
-                    "maxParallelToolCalls": 3,
-                },
-                chat_config={
-                    "disableStoringGroups": True,
-                    "disableStoringDMs": True,
-                },
-                agent_env_vars={
-                    "MEMENTO_GATEWAY_URL": self.gateway_url,
-                    "ENGINE_API_TOKEN": self.engine_api_token,
-                },
-            )
-            agent_id = result.get("_id", result.get("id", ""))
-            logger.info("Spawned global engine agent: %s", agent_id)
-        except Exception:
-            logger.error("Failed to spawn engine agent", exc_info=True)
-            return ""
-
-        _register_npc(agent_id, "Engine", "", engine_uuid)
-
+        from memento.agent_spawner import AgentSpawner
+        spawner = AgentSpawner()
+        agent_id = spawner.spawn(
+            name="Engine",
+            username="bonfires-engine",
+            context=ENGINE_SYSTEM_PROMPT_TEMPLATE.format(
+                tools_section=build_tool_section(["Engine"]),
+            ),
+            labels=["Engine"],
+            kg_uuid=engine_uuid,
+            chat_config={
+                "disableStoringGroups": True,
+                "disableStoringDMs": True,
+            },
+        )
         return agent_id
 
     def _spawn_from_kg(
@@ -650,28 +600,17 @@ class AgentController:
             tools_section=build_tool_section(labels),
         )
 
-        try:
-            client = get_client()
-            result = client.agents.create(
-                name=npc_name,
-                username=username,
-                context=context,
-                platform=self.platform,
-                deployment_config=self._build_deployment_config(),
-                enabled_mcp_tools=["memento-engine"],
-                agent_features={
-                    "maxToolIterations": 5,
-                    "maxParallelToolCalls": 3,
-                },
-                agent_env_vars={
-                    "MEMENTO_GATEWAY_URL": self.gateway_url,
-                    "ENGINE_API_TOKEN": self.engine_api_token,
-                },
-            )
-            agent_id = result.get("_id", result.get("id", ""))
-            logger.info("Reconciled NPC agent: %s (%s) → agent %s", npc_name, npc_uuid, agent_id)
-        except Exception:
-            logger.error("Failed to spawn agent for NPC %s", npc_name, exc_info=True)
+        from memento.agent_spawner import AgentSpawner
+        spawner = AgentSpawner()
+        agent_id = spawner.spawn(
+            name=npc_name,
+            username=username,
+            context=context,
+            labels=labels,
+            location=location_name,
+            kg_uuid=npc_uuid,
+        )
+        if not agent_id:
             return None
 
         npc_agent = NPCAgent(
