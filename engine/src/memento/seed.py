@@ -368,18 +368,11 @@ def seed_threshold() -> dict:
         if narrator_id:
             world["threshold_narrator_agent_id"] = narrator_id
 
-    engine_id = world.get("threshold_engine_agent_id", "")
+    engine_id = world.get("engine_agent_id", "")
     if not engine_id:
-        engine_id = ctrl.spawn_engine_agent(
-            location_name="The Threshold",
-            location_uuid=uuid,
-            location_description=(
-                "A desolate crossroads tavern at the edge of the known world. "
-                "The Bleeding Lantern serves as a waypoint for weary travelers."
-            ),
-        )
+        engine_id = ctrl.spawn_engine_agent()
         if engine_id:
-            world["threshold_engine_agent_id"] = engine_id
+            world["engine_agent_id"] = engine_id
 
     _save_world(world)
 

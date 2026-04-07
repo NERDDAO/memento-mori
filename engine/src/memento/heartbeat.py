@@ -119,7 +119,7 @@ class HeartbeatRunner:
     def _trigger_room_npc(self, agent_id: str, episode_summary: str) -> bool:
         """Tag the Room NPC narrator in the Matrix room via the engine agent.
 
-        Sends a Matrix message as the engine agent (@bonfires-engine_{slug})
+        Sends a Matrix message as the global engine agent (@bonfires-engine)
         mentioning the narrator (@bonfires-narrator_{slug}). The bonfires-ai
         runtime sees the tag and wakes up the narrator to run its workflow.
         """
@@ -154,7 +154,7 @@ class HeartbeatRunner:
         slug = re.sub(r"[^a-z0-9]", "_", location_name.lower())
         slug = re.sub(r"_+", "_", slug).strip("_")[:30]
 
-        engine_user = f"@bonfires-engine_{slug}:{domain}"
+        engine_user = f"@bonfires-engine:{domain}"
         narrator_tag = f"@bonfires-narrator_{slug}"
 
         # Find the Matrix room for this location

@@ -113,8 +113,8 @@ RULES:
 - Your final text is a brief summary of what you did, not the narration itself
 """
 
-ENGINE_SYSTEM_PROMPT_TEMPLATE = """\
-You are the game engine for {location}. {description}
+ENGINE_SYSTEM_PROMPT = """\
+You are the game engine for Memento Mori.
 
 YOUR JOB:
 You are the invisible referee. You resolve game mechanics when players act.
@@ -566,54 +566,34 @@ class AgentController:
         _register_npc(agent_id, "World Chronicler", "", narrator_uuid)
         return agent_id
 
-    def spawn_engine_agent(
-        self,
-        *,
-        location_name: str,
-        location_uuid: str,
-        location_description: str = "",
-    ) -> str:
-        """Spawn a per-room engine agent that resolves game mechanics.
+    def spawn_engine_agent(self) -> str:
+        """Spawn the global engine agent that resolves game mechanics.
 
         The engine agent is a stateless referee — it processes player actions
-        via MCP tools but does NOT save to stack (disableStoring). Only the
-        Room NPC accumulates scene history for episode extraction.
-
-        Args:
-            location_name: Display name of the location
-            location_uuid: KG UUID of the location
-            location_description: Atmosphere/purpose of this location
+        via MCP tools but does NOT save to stack (disableStoring). One instance
+        serves all rooms (it gets joined to rooms as needed by the bridge).
 
         Returns:
             The created agent's ID, or empty string on failure.
         """
-        slug = self._name_to_username(location_name)
-        username = f"engine_{slug}"
-
-        context = ENGINE_SYSTEM_PROMPT_TEMPLATE.format(
-            location=location_name,
-            description=location_description or "A location in the world of Memento Mori.",
-        )
-
         # Create KG entity for the engine agent (tool access label gating)
         engine_uuid = ""
         try:
             client = get_client()
-            engine_name = f"Engine: {location_name}"
             engine_uuid = client.kg.create_entity(
-                engine_name, ["Engine"],
-                {"summary": f"Game engine for {location_name}"},
+                "Engine", ["Engine"],
+                {"summary": "Global game engine for Memento Mori"},
             )
-            logger.info("Created engine KG entity: %s → %s", engine_name, engine_uuid)
+            logger.info("Created engine KG entity: Engine → %s", engine_uuid)
         except Exception:
-            logger.warning("Failed to create engine KG entity for %s (non-fatal)", location_name, exc_info=True)
+            logger.warning("Failed to create engine KG entity (non-fatal)", exc_info=True)
 
         try:
             client = get_client()
             result = client.agents.create(
-                name=f"Engine: {location_name}",
-                username=username,
-                context=context,
+                name="Engine",
+                username="engine",
+                context=ENGINE_SYSTEM_PROMPT,
                 platform=self.platform,
                 deployment_config=self._build_deployment_config(),
                 enabled_mcp_tools=["memento-engine"],
@@ -631,15 +611,12 @@ class AgentController:
                 },
             )
             agent_id = result.get("_id", result.get("id", ""))
-            logger.info("Spawned engine agent: %s → agent %s", location_name, agent_id)
+            logger.info("Spawned global engine agent: %s", agent_id)
         except Exception:
-            logger.error("Failed to spawn engine agent for %s", location_name, exc_info=True)
+            logger.error("Failed to spawn engine agent", exc_info=True)
             return ""
 
-        _register_npc(agent_id, f"Engine: {location_name}", location_name, engine_uuid)
-
-        # Join the engine bot to the location's Matrix room
-        self.ensure_in_room(location_name)
+        _register_npc(agent_id, "Engine", "", engine_uuid)
 
         return agent_id
 

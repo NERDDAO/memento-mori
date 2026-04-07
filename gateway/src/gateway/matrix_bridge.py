@@ -263,8 +263,7 @@ class MatrixBridge:
             npc_username = sender.split(":")[0].lstrip("@")  # "bonfires-roric"
 
             # Engine agent response — emit "ready" phase, don't render as narrative
-            bare_name = npc_username.replace("bonfires-", "")
-            if bare_name.startswith("engine_"):
+            if sender.startswith("@bonfires-engine:"):
                 if location:
                     await self.ws_hub.broadcast_to_location(location, {
                         "type": "phase",
@@ -496,12 +495,8 @@ class MatrixBridge:
             if name in text_lower:
                 return action_text  # NPC addressed — no auto-tag needed
 
-        # No NPC mentioned — tag the engine agent
-        import re
-        slug = re.sub(r"[^a-z0-9]", "_", location.lower())
-        slug = re.sub(r"_+", "_", slug).strip("_")[:30]
-        engine_tag = f"@engine_{slug}"
-        return f"{action_text} {engine_tag}"
+        # No NPC mentioned — tag the global engine agent
+        return f"{action_text} @engine"
 
     async def send_action(self, room_id: str, player_id: str, action_text: str) -> None:
         """Send a player action to a Matrix room using the player's token.
