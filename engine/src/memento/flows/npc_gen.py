@@ -135,7 +135,7 @@ class NPCGenerationFlow(Flow[NPCGenState]):
                     mechanics=mechanized,
                     finalization_result=result.raw,
                     location_name=self.state.location_name,
-                    npc_labels=["Combat", "Memory", "Trade"],
+                    npc_labels=["NPC"],
                 )
             except Exception:
                 import logging

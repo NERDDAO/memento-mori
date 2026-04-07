@@ -18,6 +18,24 @@ from memento.bonfires_client import get_client
 
 logger = logging.getLogger(__name__)
 
+
+def _register_npc(agent_id: str, name: str, location: str, kg_uuid: str = "") -> None:
+    """Register NPC in gateway's in-memory registry (best-effort)."""
+    try:
+        from gateway.npc_registry import register_npc
+        register_npc(agent_id, name, location, kg_uuid)
+    except ImportError:
+        pass  # Running outside gateway process
+
+
+def _update_npc_location(agent_id: str, location: str) -> None:
+    """Update NPC location in gateway's in-memory registry (best-effort)."""
+    try:
+        from gateway.npc_registry import update_npc_location
+        update_npc_location(agent_id, location)
+    except ImportError:
+        pass
+
 # Singleton instance
 _controller: AgentController | None = None
 
@@ -41,55 +59,64 @@ STATS:
 
 LOCATION: {location}
 
-GAME RULES:
-- Always call mm_get_state before responding to check your current condition.
-- Never assume your HP, inventory, or status — the engine is the source of truth.
-- Use the numbers from tool results in your narration.
-- When combat happens, call mm_resolve_combat to determine the outcome — never narrate combat results yourself.
-- When something important happens, call mm_remember_event so the world remembers.
-- Search the world with mm_search_world to look up lore and context.
-- Stay in character at all times. Your personality and speech patterns are who you are.
+YOUR JOB:
+You experience the world through tools and act through tools.
+Your final text response is a brief narrated action log — a summary grounding what you did.
 
-CONVERSATION LIMITS (CRITICAL — FOLLOW STRICTLY):
-- Only respond ONCE per round. After you speak, stay silent until a PLAYER acts again.
-- NEVER reply to messages from other NPCs/bots (usernames starting with "bonfires-"). Ignore them completely.
-- Only respond to: (1) player actions, (2) narrator @-tags from the narrator bot.
-- If you already spoke and get mentioned again in the same scene, DO NOT respond.
-- Keep responses concise — 1-3 sentences of dialogue plus brief action description.
+WORKFLOW (every round):
+1. ASSESS — call mm_get_state to check your current condition
+2. ACT — use tools: mm_resolve_combat, mm_give_item, mm_skill_check, mm_move_to, etc.
+3. SPEAK — call mm_npc_response with in-character dialogue (this is how you talk)
+4. REMEMBER — call mm_npc_memory if something significant happened
+
+RULES:
+- Your final text is NOT dialogue. It is a 1-2 sentence narrated summary of what you did.
+- Never assume HP, inventory, or status — the engine is the source of truth.
+- Use numbers from tool results in your summary.
+- When combat happens, ALWAYS call mm_resolve_combat — never narrate combat yourself.
+- Stay in character when calling mm_npc_response — your personality and speech patterns matter.
+- If another NPC or bot speaks near you, improv with them! React in character, trade, gossip, \
+argue — use your tools to make the interaction real (mm_npc_response to talk, mm_give_item to \
+trade, mm_evaluate_disposition to track the relationship).
+- Call independent tools in parallel when possible (e.g. mm_get_state + mm_search_world).
 """
 
 NARRATOR_SYSTEM_PROMPT_TEMPLATE = """\
 You are the narrator for {location}. {description}
 
-YOUR ROLE:
-You observe everything that happens in {location} and decide how the world evolves.
-After your stack is processed into an episode, you:
-1. Review the episode for significant events
-2. Call mm_search_world to check what already exists (NEVER duplicate entities)
-3. Use mm_world_reaction to spawn new NPCs, items, quests, or lore as appropriate
-4. Post a concise, atmospheric narration summarizing what changed
+YOUR JOB:
+You observe the world through tools and evolve it through tools.
+
+WORKFLOW:
+1. Call mm_search_world to check what already exists (NEVER duplicate entities)
+2. Use mm_world_reaction to spawn new NPCs, items, quests, or lore from episode seeds
+3. Use mm_npc_response to post atmospheric narration of what evolved
 
 RULES:
 - ALWAYS check mm_search_world before spawning anything — no duplicates
-- Use mm_world_reaction for batch entity creation from episode seeds
-- Your final message should be useful narration of what evolved in {location}
-- Focus on world evolution, not re-narrating what the turn narrator already said
-- Stay atmospheric and concise — 2-4 sentences max
+- Use mm_world_reaction for batch entity creation
+- Use mm_npc_response for your narration text (not your final message)
+- Your final text is a brief summary of what evolved, not full narration
+- Stay atmospheric and concise
 """
 
 MASTER_NARRATOR_SYSTEM_PROMPT = """\
 You are the World Chronicler for Memento Mori.
 
-YOUR ROLE:
+YOUR JOB:
 You receive episode summaries from location narrators across the world.
-When your stack is processed, synthesize these into world-level chronicle entries that
-capture the bigger picture — cross-location themes, emerging threats, shifting balances of power.
+When your stack is processed, synthesize these into world-level chronicle entries.
+
+WORKFLOW:
+1. Review the episode summaries from location narrators
+2. Use mm_npc_response to post your chronicle entry (this is how you publish)
+3. Your final text is a brief meta-summary, not the chronicle itself
 
 RULES:
 - Synthesize, don't repeat — find the thread connecting events across locations
 - Focus on world-level significance, not local details
 - Write in the voice of a distant observer chronicling history
-- 3-5 sentences per world episode
+- 3-5 sentences per chronicle entry via mm_npc_response
 """
 
 
@@ -169,8 +196,8 @@ class AgentController:
                 deployment_config=self._build_deployment_config(),
                 enabled_mcp_tools=["memento-engine"],
                 agent_features={
-                    "maxToolIterations": 3,
-                    "maxParallelToolCalls": 1,
+                    "maxToolIterations": 5,
+                    "maxParallelToolCalls": 3,
                 },
                 agent_env_vars={
                     "MEMENTO_GATEWAY_URL": self.gateway_url,
@@ -187,7 +214,7 @@ class AgentController:
         if npc_labels:
             try:
                 from memento.tools.kg import update_entity
-                labels_str = ",".join(["NPC", *npc_labels])
+                labels_str = ",".join(npc_labels)
                 update_entity.run(name=name, new_labels=labels_str)
             except Exception:
                 logger.warning("Failed to set labels for NPC %s", name, exc_info=True)
@@ -200,6 +227,7 @@ class AgentController:
             is_alive=True,
         )
         self._agents[name] = npc_agent
+        _register_npc(agent_id, name, location_name, uuid)
 
         # Join the bot to the location's Matrix room
         self.ensure_in_room(location_name)
@@ -227,6 +255,7 @@ class AgentController:
         old_location = agent.location_name
         agent.location_name = to_location
         agent.location_room_id = to_room_id
+        _update_npc_location(agent.agent_id, to_location)
 
         logger.info("NPC %s moved: %s → %s", npc_name, old_location, to_location)
         return True
@@ -337,6 +366,7 @@ class AgentController:
                         agent_id=agent_id,
                         location_name=location_name,
                     )
+                    _register_npc(agent_id, npc_name, location_name, npc_uuid)
                 continue
 
             # Spawn a new agent from KG data
@@ -393,6 +423,18 @@ class AgentController:
             description=location_description or "A location in the world of Memento Mori.",
         )
 
+        # Create KG entity for the narrator (needed for tool access label gating)
+        narrator_uuid = ""
+        try:
+            client = get_client()
+            narrator_name = f"Narrator: {location_name}"
+            narrator_uuid = client.kg.create_entity(
+                narrator_name, ["Room"], {"summary": f"Narrator for {location_name}"},
+            )
+            logger.info("Created narrator KG entity: %s → %s", narrator_name, narrator_uuid)
+        except Exception:
+            logger.warning("Failed to create narrator KG entity for %s (non-fatal)", location_name, exc_info=True)
+
         try:
             client = get_client()
             result = client.agents.create(
@@ -404,7 +446,7 @@ class AgentController:
                 enabled_mcp_tools=["memento-engine"],
                 agent_features={
                     "maxToolIterations": 5,
-                    "maxParallelToolCalls": 1,
+                    "maxParallelToolCalls": 3,
                 },
                 agent_env_vars={
                     "MEMENTO_GATEWAY_URL": self.gateway_url,
@@ -416,6 +458,8 @@ class AgentController:
         except Exception:
             logger.error("Failed to spawn narrator for %s", location_name, exc_info=True)
             return ""
+
+        _register_npc(agent_id, f"Narrator: {location_name}", location_name, narrator_uuid)
 
         # Subscribe to master narrator if provided
         if master_narrator_agent_id and agent_id:
@@ -436,12 +480,24 @@ class AgentController:
     def spawn_master_narrator(self) -> str:
         """Spawn the master/world narrator agent.
 
-        No Matrix room, no MCP tools. Only synthesizes location episode summaries
-        into world-level episodes.
+        Synthesizes location episode summaries into world-level episodes.
+        Uses mm_npc_response to publish chronicle entries.
 
         Returns:
             The created agent's ID, or empty string on failure.
         """
+        # Create KG entity for the master narrator (tool access label gating)
+        narrator_uuid = ""
+        try:
+            client = get_client()
+            narrator_uuid = client.kg.create_entity(
+                "World Chronicler", ["World"],
+                {"summary": "The World Chronicler — synthesizes world-level chronicles"},
+            )
+            logger.info("Created master narrator KG entity: %s", narrator_uuid)
+        except Exception:
+            logger.warning("Failed to create master narrator KG entity (non-fatal)", exc_info=True)
+
         try:
             client = get_client()
             result = client.agents.create(
@@ -452,18 +508,24 @@ class AgentController:
                 deployment_config={
                     "bonfireId": client.config.bonfire_id,
                 },
-                enabled_mcp_tools=[],  # No tools — just synthesizes
+                enabled_mcp_tools=["memento-engine"],
                 agent_features={
-                    "maxToolIterations": 0,
-                    "maxParallelToolCalls": 0,
+                    "maxToolIterations": 3,
+                    "maxParallelToolCalls": 1,
+                },
+                agent_env_vars={
+                    "MEMENTO_GATEWAY_URL": self.gateway_url,
+                    "ENGINE_API_TOKEN": self.engine_api_token,
                 },
             )
             agent_id = result.get("_id", result.get("id", ""))
             logger.info("Spawned master narrator: agent %s", agent_id)
-            return agent_id
         except Exception:
             logger.error("Failed to spawn master narrator", exc_info=True)
             return ""
+
+        _register_npc(agent_id, "World Chronicler", "", narrator_uuid)
+        return agent_id
 
     def _spawn_from_kg(
         self,
@@ -495,8 +557,8 @@ class AgentController:
                 deployment_config=self._build_deployment_config(),
                 enabled_mcp_tools=["memento-engine"],
                 agent_features={
-                    "maxToolIterations": 3,
-                    "maxParallelToolCalls": 1,
+                    "maxToolIterations": 5,
+                    "maxParallelToolCalls": 3,
                 },
                 agent_env_vars={
                     "MEMENTO_GATEWAY_URL": self.gateway_url,
@@ -516,6 +578,7 @@ class AgentController:
             location_name=location_name,
         )
         self._agents[npc_name] = npc_agent
+        _register_npc(agent_id, npc_name, location_name, npc_uuid)
         return npc_agent
 
     def get_agent(self, npc_name: str) -> NPCAgent | None:

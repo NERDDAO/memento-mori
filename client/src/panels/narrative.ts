@@ -65,6 +65,8 @@ const BLOCK_TYPE_COLORS: Record<string, string> = {
   'npc-name':       theme.colors.npc,
   'npc-dialogue':   theme.colors.npc,
   'npc-status':     theme.colors.system,
+  'tool-badge':     theme.colors.dim,
+  'npc-log':        theme.colors.dim,
 };
 
 const ENTITY_TYPE_COLORS: Record<string, string> = {

@@ -428,6 +428,27 @@ function syncEntityField(gs, entityId, updates) {
 }
 
 // src/message-handler.ts
+function formatToolBadge(msg) {
+  const s = msg.summary || "";
+  switch (msg.tool) {
+    case "mm_resolve_combat":
+      return `⚔️ ${s}`;
+    case "mm_give_item":
+      return `\uD83C\uDF81 ${s}`;
+    case "mm_skill_check":
+      return `\uD83C\uDFB2 ${s}`;
+    case "mm_give_quest":
+      return `\uD83D\uDCDC ${s}`;
+    case "mm_move_to":
+      return `\uD83D\uDEB6 ${s}`;
+    case "mm_create_npc":
+      return `✨ ${s}`;
+    case "mm_create_item":
+      return `✨ ${s}`;
+    default:
+      return s;
+  }
+}
 var lastNpcMessages = new Map;
 function getLastNpcMessage(npcName) {
   return lastNpcMessages.get(npcName) || "";
@@ -444,11 +465,9 @@ function createMessageHandler(refs) {
         } else if (channel === "ooc") {
           refs.eventsFeed.addBlock(msg.text || "", "ooc");
         } else if (msg.npc) {
-          lastNpcMessages.set(msg.npc, msg.text || "");
           const npcKey = msg.npc_username || msg.npc.toLowerCase().replace(/\s+/g, "-");
           refs.narrative.removeBlockById(`npc-status-${npcKey}`);
-          refs.narrative.addBlock(`${msg.npc}`, "npc-name");
-          refs.narrative.addBlock(msg.text || "", "npc-dialogue");
+          refs.eventsFeed.addBlock(`[${msg.npc}] ${msg.text || ""}`, "npc-log");
         } else {
           refs.narrative.addBlock(msg.text || "", "narrative");
         }
@@ -469,19 +488,19 @@ function createMessageHandler(refs) {
             if (events.combat) {
               const c = events.combat;
               if (c.damage_dealt != null) {
-                refs.eventsFeed.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ""}`, "event-combat");
+                refs.narrative.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ""}`, "event-combat");
               }
               if (c.xp_gained) {
-                refs.eventsFeed.addBlock(`[+${c.xp_gained} XP]`, "event-xp");
+                refs.narrative.addBlock(`[+${c.xp_gained} XP]`, "event-xp");
               }
               if (c.target_dead) {
-                refs.eventsFeed.addBlock(`${c.target_name || "Target"} has been slain.`, "event-death");
+                refs.narrative.addBlock(`${c.target_name || "Target"} has been slain.`, "event-death");
               }
             }
             if (events.inventory_changes) {
               for (const inv of events.inventory_changes) {
                 const prefix = inv.event_type === "DROP" ? "-" : "+";
-                refs.eventsFeed.addBlock(`[${prefix}${inv.item_name}]`, "event-item");
+                refs.narrative.addBlock(`[${prefix}${inv.item_name}]`, "event-item");
               }
             }
           }
@@ -612,6 +631,20 @@ function createMessageHandler(refs) {
       case "room_items_changed": {
         if (refs.invModal.active)
           refs.invModal.refresh();
+        break;
+      }
+      case "tool_event": {
+        if (msg.tool === "mm_npc_response") {
+          if (msg.npc) {
+            lastNpcMessages.set(msg.npc, msg.summary || "");
+            const npcKey = msg.npc.toLowerCase().replace(/\s+/g, "-");
+            refs.narrative.removeBlockById(`npc-status-${npcKey}`);
+            refs.narrative.addBlock(msg.npc, "npc-name");
+            refs.narrative.addBlock(msg.summary || "", "npc-dialogue");
+          }
+        } else {
+          refs.narrative.addBlock(`[${formatToolBadge(msg)}]`, "tool-badge");
+        }
         break;
       }
       case "episode_feed": {
@@ -3066,7 +3099,9 @@ var BLOCK_TYPE_COLORS = {
   "scene-art": theme.colors.dim,
   "npc-name": theme.colors.npc,
   "npc-dialogue": theme.colors.npc,
-  "npc-status": theme.colors.system
+  "npc-status": theme.colors.system,
+  "tool-badge": theme.colors.dim,
+  "npc-log": theme.colors.dim
 };
 var ENTITY_TYPE_COLORS = {
   npc: theme.colors.npc,

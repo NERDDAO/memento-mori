@@ -23,6 +23,7 @@ round_manager: RoundManager | None = None
 async def lifespan(app: FastAPI):
     global bridge, ws_hub, round_manager
     ws_hub = WebSocketHub()
+    app.state.ws_hub = ws_hub
     round_manager = RoundManager(window_seconds=20)
     # Matrix bridge connects on startup if env vars are set
     import os
@@ -31,8 +32,14 @@ async def lifespan(app: FastAPI):
     if homeserver and token:
         bridge = MatrixBridge(homeserver, token, ws_hub)
         await bridge.connect()
+        app.state.narrator_registry = bridge._narrator_agents
         round_manager.on_round_close(make_round_callback(bridge, ws_hub))
         round_manager.on_action(make_action_callback(ws_hub))
+
+    # Seed NPC registry from MongoDB + world.json
+    from gateway.npc_registry import seed_from_db
+    npc_count = seed_from_db()
+    logger.info("NPC registry seeded: %d agents", npc_count)
 
     # Seed ontology types on Delve for this bonfire
     _seed_ontology()

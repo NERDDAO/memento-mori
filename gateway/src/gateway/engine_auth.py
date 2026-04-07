@@ -23,7 +23,7 @@ async def verify_engine_token(authorization: str = Header("")) -> None:
 async def check_tool_access(npc_id: str, tool_name: str) -> None:
     """Check if this NPC can call this tool based on its KG labels.
 
-    Fetches the NPC's entity from KG, reads labels, maps to allowed tools.
+    Resolves agent ID → KG UUID via npc_registry, then fetches labels from KG.
     Raises 403 if the tool is not in the NPC's allowed set.
     """
     from memento.tools.tool_labels import get_allowed_tools, INNATE_TOOLS
@@ -36,11 +36,18 @@ async def check_tool_access(npc_id: str, tool_name: str) -> None:
     if not npc_id:
         return
 
+    # Resolve agent ID → KG entity UUID via registry
+    from gateway.npc_registry import resolve_npc_kg_uuid
+    kg_uuid = resolve_npc_kg_uuid(npc_id)
+
+    # No KG UUID in registry — try using npc_id directly (legacy/fallback)
+    entity_id = kg_uuid or npc_id
+
     # Fetch NPC labels from KG
     try:
         from memento.bonfires_client import get_client
         client = await asyncio.to_thread(get_client)
-        entity = await asyncio.to_thread(client.kg.get_entity, npc_id)
+        entity = await asyncio.to_thread(client.kg.get_entity, entity_id)
         if isinstance(entity, dict) and "entity" in entity:
             entity = entity["entity"]
         labels = entity.get("labels", []) if isinstance(entity, dict) else []

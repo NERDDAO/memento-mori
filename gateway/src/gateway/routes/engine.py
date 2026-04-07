@@ -5,15 +5,85 @@ import asyncio
 import os
 import threading
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from gateway.engine_auth import verify_engine_token, check_tool_access
+from gateway.npc_registry import resolve_npc_name, resolve_npc_location
 
 router = APIRouter(dependencies=[Depends(verify_engine_token)])
 
+# ── Logging ──
+from gateway.log import get_logger
+logger = get_logger(__name__)
+
 # Reuse the turn lock from matrix_listener for crew-powered endpoints
 _engine_lock = threading.Lock()
+
+
+# ── Tool Event Broadcasting ──
+
+async def broadcast_tool_event(
+    request: Request,
+    tool: str,
+    npc_id: str,
+    summary: str,
+    data: dict | None = None,
+) -> None:
+    """Push a tool_event to all players at the NPC's location."""
+    ws_hub = getattr(request.app.state, "ws_hub", None)
+    if not ws_hub:
+        return
+    npc = resolve_npc_name(npc_id)
+    location = resolve_npc_location(npc_id)
+    msg = {
+        "type": "tool_event",
+        "tool": tool,
+        "npc": npc,
+        "summary": summary,
+        "data": data or {},
+        "location": location,
+        "channel": "narrative",
+    }
+    if location:
+        await ws_hub.broadcast_to_location(location, msg)
+    else:
+        await ws_hub.broadcast_all(msg)
+
+
+def push_to_stack(text: str, npc_name: str, location: str, narrator_registry: dict | None = None) -> None:
+    """Push NPC dialogue to the narrator agent stack (fire-and-forget).
+
+    Routes to the per-room narrator if available, otherwise falls back to global narrator.
+    """
+    if not text or not text.strip():
+        return
+    try:
+        from memento.bonfires_client import get_client
+        from datetime import datetime, UTC
+        client = get_client()
+
+        # Route to per-room narrator if available, else global narrator
+        agent_id = client.config.agent_id
+        if narrator_registry and location:
+            agent_id = narrator_registry.get(location) or agent_id
+
+        from bonfires.sdk.http import _post
+        _post(
+            client.config,
+            f"/agents/{agent_id}/stack/add",
+            body={
+                "messages": [{
+                    "text": f"[{location}] {npc_name}: {text[:2000]}",
+                    "userId": npc_name,
+                    "chatId": location or "unknown",
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "role": "user",
+                }],
+            },
+        )
+    except Exception:
+        logger.debug("push_to_stack failed for %s", npc_name, exc_info=True)
 
 
 # ── Request/Response Models ──
@@ -194,17 +264,21 @@ async def get_entity(req: EntityRequest):
 
 
 @router.post("/engine/skill-check")
-async def skill_check(req: SkillCheckRequest):
+async def skill_check(req: SkillCheckRequest, request: Request):
     """Roll a skill check. Pure math, instant."""
-    from memento.tools.mechanics import roll_skill_check
+    from memento.tools.mechanics import roll_skill_check as _rsc; roll_skill_check = _rsc.func
     result = roll_skill_check(str(req.skill_level), str(req.difficulty), str(req.modifiers))
+    await broadcast_tool_event(
+        request, tool="mm_skill_check", npc_id=req.npc_id,
+        summary=f"Skill check (DC {req.difficulty}): {result}",
+    )
     return {"result": result}
 
 
 @router.post("/engine/damage")
 async def calculate_damage(req: DamageRequest):
     """Calculate damage. Pure math, instant."""
-    from memento.tools.mechanics import calculate_damage as calc
+    from memento.tools.mechanics import calculate_damage as _calc; calc = _calc.func
     result = calc(str(req.weapon_damage), str(req.attacker_strength), str(req.defender_armor))
     return {"result": result}
 
@@ -212,7 +286,7 @@ async def calculate_damage(req: DamageRequest):
 @router.post("/engine/disposition")
 async def evaluate_disposition(req: DispositionRequest):
     """Evaluate disposition shift. Pure math, instant."""
-    from memento.tools.mechanics import evaluate_disposition as eval_disp
+    from memento.tools.mechanics import evaluate_disposition as _ed; eval_disp = _ed.func
     result = eval_disp(str(req.current_friendship), str(req.current_trust), req.interaction_type)
     return {"result": result}
 
@@ -265,7 +339,7 @@ class GossipRequest(BaseModel):
 async def remember_event(req: RememberRequest):
     """Record a significant event to episodic memory."""
     await check_tool_access(req.npc_id, "mm_remember_event")
-    from memento.tools.kg import remember_event as _remember
+    from memento.tools.kg import remember_event as _remember_tool; _remember = _remember_tool.func
     result = await asyncio.to_thread(_remember, req.summary)
     return {"result": result}
 
@@ -274,28 +348,33 @@ async def remember_event(req: RememberRequest):
 async def update_entity(req: UpdateEntityRequest):
     """Update an entity's summary or labels."""
     await check_tool_access(req.npc_id, "mm_update_entity")
-    from memento.tools.kg import update_entity as _update
+    from memento.tools.kg import update_entity as _update_tool; _update = _update_tool.func
     result = await asyncio.to_thread(_update, req.name, req.new_summary, req.new_labels)
     return {"result": result}
 
 
 @router.post("/engine/world/give-item")
-async def give_item(req: GiveItemRequest):
+async def give_item(req: GiveItemRequest, request: Request):
     """Transfer item ownership between entities."""
     await check_tool_access(req.npc_id, "mm_give_item")
-    from memento.tools.kg import create_edge
+    from memento.tools.kg import create_edge as _ce_tool; create_edge = _ce_tool.func
     result = await asyncio.to_thread(
         create_edge, req.item_name, req.to_entity, "OWNED_BY",
         f"Transferred from {req.from_entity} to {req.to_entity}",
+    )
+    await broadcast_tool_event(
+        request, tool="mm_give_item", npc_id=req.npc_id,
+        summary=f"{req.from_entity} gave {req.item_name} to {req.to_entity}",
     )
     return {"result": result}
 
 
 @router.post("/engine/world/give-quest")
-async def give_quest(req: GiveQuestRequest):
+async def give_quest(req: GiveQuestRequest, request: Request):
     """Create a quest and assign it to a player."""
     await check_tool_access(req.npc_id, "mm_give_quest")
-    from memento.tools.kg import create_entity, create_edge
+    from memento.tools.kg import create_entity as _cen, create_edge as _ced
+    create_entity = _cen.func; create_edge = _ced.func
     uuid = await asyncio.to_thread(create_entity, req.quest_name, "Quest", req.description)
     await asyncio.to_thread(
         create_edge, req.quest_name, req.player_name, "ASSIGNED_TO",
@@ -304,32 +383,46 @@ async def give_quest(req: GiveQuestRequest):
     await asyncio.to_thread(
         create_edge, req.quest_name, req.giver_name, "GIVEN_BY", "",
     )
+    await broadcast_tool_event(
+        request, tool="mm_give_quest", npc_id=req.npc_id,
+        summary=f"{req.giver_name} gave quest '{req.quest_name}' to {req.player_name}",
+    )
     return {"uuid": uuid, "quest_name": req.quest_name, "assigned_to": req.player_name}
 
 
 @router.post("/engine/world/create-npc")
-async def create_npc(req: CreateEntityRequest):
+async def create_npc(req: CreateEntityRequest, request: Request):
     """Create a new NPC entity in the KG."""
     await check_tool_access(req.npc_id, "mm_create_npc")
-    from memento.tools.kg import create_entity, create_edge
+    from memento.tools.kg import create_entity as _cen, create_edge as _ced
+    create_entity = _cen.func; create_edge = _ced.func
     uuid = await asyncio.to_thread(create_entity, req.name, "NPC", req.summary)
     if req.location_name:
         await asyncio.to_thread(
             create_edge, req.name, req.location_name, "LOCATED_IN", "",
         )
+    await broadcast_tool_event(
+        request, tool="mm_create_npc", npc_id=req.npc_id,
+        summary=f"New NPC: {req.name}",
+    )
     return {"uuid": uuid, "name": req.name, "entity_type": "NPC"}
 
 
 @router.post("/engine/world/create-item")
-async def create_item(req: CreateEntityRequest):
+async def create_item(req: CreateEntityRequest, request: Request):
     """Create a new item entity in the KG."""
     await check_tool_access(req.npc_id, "mm_create_item")
-    from memento.tools.kg import create_entity, create_edge
+    from memento.tools.kg import create_entity as _cen, create_edge as _ced
+    create_entity = _cen.func; create_edge = _ced.func
     uuid = await asyncio.to_thread(create_entity, req.name, "Item", req.summary)
     if req.location_name:
         await asyncio.to_thread(
             create_edge, req.name, req.location_name, "LOCATED_IN", "",
         )
+    await broadcast_tool_event(
+        request, tool="mm_create_item", npc_id=req.npc_id,
+        summary=f"New item: {req.name}",
+    )
     return {"uuid": uuid, "name": req.name, "entity_type": "Item"}
 
 
@@ -337,16 +430,17 @@ async def create_item(req: CreateEntityRequest):
 async def create_location(req: CreateEntityRequest):
     """Create a new location entity in the KG."""
     await check_tool_access(req.npc_id, "mm_create_location")
-    from memento.tools.kg import create_entity
+    from memento.tools.kg import create_entity as _cen
+    create_entity = _cen.func
     uuid = await asyncio.to_thread(create_entity, req.name, "Location", req.summary)
     return {"uuid": uuid, "name": req.name, "entity_type": "Location"}
 
 
 @router.post("/engine/world/move")
-async def move_entity(req: MoveRequest):
+async def move_entity(req: MoveRequest, request: Request):
     """Move an NPC to a different location."""
     await check_tool_access(req.npc_id, "mm_move_to")
-    from memento.tools.kg import create_edge
+    from memento.tools.kg import create_edge as _ce_tool; create_edge = _ce_tool.func
     result = await asyncio.to_thread(
         create_edge, req.entity_name, req.destination, "LOCATED_IN",
         f"{req.entity_name} moved to {req.destination}",
@@ -358,6 +452,10 @@ async def move_entity(req: MoveRequest):
         controller.move_npc_agent(req.entity_name, to_location=req.destination)
     except Exception:
         pass  # Non-fatal — agent may not exist
+    await broadcast_tool_event(
+        request, tool="mm_move_to", npc_id=req.npc_id,
+        summary=f"{req.entity_name} moved to {req.destination}",
+    )
     return {"result": result, "entity": req.entity_name, "destination": req.destination}
 
 
@@ -366,7 +464,7 @@ async def send_gossip(req: GossipRequest):
     """Send a message to another NPC via Matrix."""
     # This could post to the target NPC's Matrix room
     # For now, just record it as an event
-    from memento.tools.kg import remember_event as _remember
+    from memento.tools.kg import remember_event as _remember_tool; _remember = _remember_tool.func
     summary = f"{req.from_npc} told {req.to_npc}: {req.message}"
     result = await asyncio.to_thread(_remember, summary)
     return {"result": result, "from": req.from_npc, "to": req.to_npc}
@@ -437,7 +535,7 @@ def _locked(fn):
 
 
 @router.post("/engine/combat/resolve")
-async def resolve_combat(req: CombatResolveRequest):
+async def resolve_combat(req: CombatResolveRequest, request: Request):
     """Full combat pipeline: assess -> resolve -> consequences -> death check."""
     await check_tool_access(req.npc_id, "mm_resolve_combat")
 
@@ -454,6 +552,13 @@ async def resolve_combat(req: CombatResolveRequest):
             return flow.state
 
     state = await asyncio.to_thread(_run)
+    summary = f"{req.attacker} vs {req.target}: {state.resolution or state.action_type}"
+    if state.target_dead:
+        summary += f" — {req.target} slain!"
+    await broadcast_tool_event(
+        request, tool="mm_resolve_combat", npc_id=req.npc_id,
+        summary=summary,
+    )
     return {
         "outcome": {
             "action_type": state.action_type,
@@ -612,9 +717,142 @@ async def detect_events(req: BaseModel):
 async def npc_memory(req: RememberRequest):
     """Record an NPC's first-person memory of a scene."""
     await check_tool_access(req.npc_id, "mm_npc_memory")
-    from memento.tools.kg import remember_event as _remember
+    from memento.tools.kg import remember_event as _remember_tool; _remember = _remember_tool.func
     result = await asyncio.to_thread(_remember, req.summary)
     return {"result": result}
+
+
+# ── NPC Response (tool-first dialogue) ──
+
+class NpcResponseRequest(BaseModel):
+    dialogue: str = Field(..., max_length=2000)
+    emotion: str = Field("", max_length=50)
+    target: str = Field("", max_length=200)
+    npc_id: str = Field("", max_length=64)
+
+
+@router.post("/engine/npc-response")
+async def npc_response(req: NpcResponseRequest, request: Request):
+    """NPC speaks in-character — broadcasts to WS hub + pushes to Delve stack."""
+    npc_name = resolve_npc_name(req.npc_id)
+    location = resolve_npc_location(req.npc_id)
+
+    await broadcast_tool_event(
+        request,
+        tool="mm_npc_response",
+        npc_id=req.npc_id,
+        summary=req.dialogue,
+        data={"emotion": req.emotion, "target": req.target},
+    )
+
+    # Push to narrator stack so heartbeat/narrator see the dialogue
+    narrator_registry = getattr(request.app.state, "narrator_registry", None)
+    push_to_stack(req.dialogue, npc_name, location, narrator_registry)
+
+    return {"status": "ok"}
+
+
+# ── NPC Intra-Room Movement ──
+
+class MoveWithinRequest(BaseModel):
+    target_x: int = Field(..., ge=0, description="Target x coordinate in the room grid")
+    target_y: int = Field(..., ge=0, description="Target y coordinate in the room grid")
+    npc_id: str = Field("", max_length=64)
+
+
+@router.post("/engine/move-within")
+async def move_within(req: MoveWithinRequest, request: Request):
+    """Move an NPC to a different position within the current room.
+
+    Validates walkability, updates KG position, and broadcasts position_update to clients.
+    """
+    from gateway.npc_registry import resolve_npc_kg_uuid
+
+    npc_name = resolve_npc_name(req.npc_id)
+    location = resolve_npc_location(req.npc_id)
+    npc_uuid = resolve_npc_kg_uuid(req.npc_id)
+
+    if not npc_uuid:
+        return {"success": False, "error": "Cannot resolve NPC UUID"}
+
+    # Get current position + room map
+    from memento.bonfires_client import get_client
+    client = await asyncio.to_thread(get_client)
+
+    entity = await asyncio.to_thread(client.kg.get_entity, npc_uuid)
+    if isinstance(entity, dict) and "entity" in entity:
+        entity = entity["entity"]
+
+    # Find location UUID from edges
+    location_uuid = ""
+    try:
+        edges = await asyncio.to_thread(
+            client.kg.get_edges, npc_uuid,
+            direction="outgoing", edge_type="LOCATED_IN",
+        )
+        if edges:
+            target = edges[0].get("target", {})
+            location_uuid = target.get("uuid", target.get("id", ""))
+    except Exception:
+        pass
+
+    # Get current position from room manifest
+    current_x, current_y = 0, 0
+    room_width, room_height = 35, 18
+    tiles = []
+    if location_uuid:
+        try:
+            from memento.room_manifest import get_room_manifest
+            manifest = await asyncio.to_thread(get_room_manifest, location_uuid)
+            room_width = manifest.get("width", 35)
+            room_height = manifest.get("height", 18)
+            tiles = manifest.get("tiles", [])
+            npc_lower = npc_name.lower()
+            for npc in manifest.get("npcs", []):
+                if npc.get("name", "").lower() == npc_lower:
+                    current_x, current_y = npc.get("x", 0), npc.get("y", 0)
+                    break
+        except Exception:
+            pass
+
+    # Validate range (Manhattan distance <= 5)
+    distance = abs(req.target_x - current_x) + abs(req.target_y - current_y)
+    if distance > 5:
+        return {"success": False, "error": f"Too far: {distance} tiles (max 5)"}
+
+    # Validate bounds
+    if req.target_x >= room_width or req.target_y >= room_height:
+        return {"success": False, "error": f"Out of bounds ({room_width}x{room_height})"}
+
+    # Validate walkability
+    if tiles:
+        idx = req.target_y * room_width + req.target_x
+        tile = tiles[idx] if idx < len(tiles) else "#"
+        if tile in ("#", " "):
+            return {"success": False, "error": f"Tile ({req.target_x},{req.target_y}) is blocked"}
+
+    # Broadcast position_update to clients
+    ws_hub = getattr(request.app.state, "ws_hub", None)
+    if ws_hub and location:
+        await ws_hub.broadcast_to_location(location, {
+            "type": "position_update",
+            "entity_id": npc_uuid,
+            "x": req.target_x,
+            "y": req.target_y,
+        })
+
+    # Also broadcast as tool_event badge
+    await broadcast_tool_event(
+        request, tool="mm_move_within", npc_id=req.npc_id,
+        summary=f"{npc_name} moved to ({req.target_x},{req.target_y})",
+    )
+
+    return {
+        "success": True,
+        "from": {"x": current_x, "y": current_y},
+        "to": {"x": req.target_x, "y": req.target_y},
+        "distance": distance,
+    }
 
 
 class RoomManifestRequest(BaseModel):
@@ -654,7 +892,7 @@ async def get_entity_inventory(req: InventoryQueryRequest):
 
 
 @router.post("/engine/inventory/transfer")
-async def transfer_item(req: InventoryTransferRequest):
+async def transfer_item(req: InventoryTransferRequest, request: Request):
     """Transfer an item between entities. Used for NPC trade resolution."""
     await check_tool_access(req.npc_id, "mm_inventory_transfer")
 
@@ -694,6 +932,10 @@ async def transfer_item(req: InventoryTransferRequest):
     # Chain update
     _chain.transfer_item(req.item_id, req.to_entity)
 
+    await broadcast_tool_event(
+        request, tool="mm_inventory_transfer", npc_id=req.npc_id,
+        summary=f"Item traded (id: {req.item_id[:8]}...)",
+    )
     return {"status": "ok", "item_id": req.item_id,
             "from": req.from_entity, "to": req.to_entity}
 

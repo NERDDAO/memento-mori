@@ -319,6 +319,26 @@ def seed_threshold() -> dict:
     except Exception:
         logger.debug("Terrain packing failed for Threshold", exc_info=True)
 
+    # Fix any edges with null episodes (Neo4j sometimes drops empty lists)
+    try:
+        from neo4j import GraphDatabase as _Neo4jDriver
+        import os
+        neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_pass = os.getenv("NEO4J_PASSWORD", "")
+        if neo4j_pass:
+            _driver = _Neo4jDriver.driver(neo4j_uri, auth=(neo4j_user, neo4j_pass))
+            with _driver.session() as _sess:
+                result = _sess.run(
+                    "MATCH ()-[r]->() WHERE r.episodes IS NULL SET r.episodes = [] RETURN count(r) as cnt"
+                )
+                fixed = result.single()["cnt"]
+                if fixed:
+                    logger.info("Fixed %d edges with null episodes", fixed)
+            _driver.close()
+    except Exception:
+        logger.debug("Neo4j episodes fix skipped", exc_info=True)
+
     # Save all UUIDs to world.json for future lookups
     world["threshold_uuid"] = uuid
     world["npcs"] = {n["name"]: n["id"] for n in npc_entries}

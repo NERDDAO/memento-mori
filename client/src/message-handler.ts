@@ -7,7 +7,7 @@
 import { applyStateUpdate, syncEntityField, type GameState } from './state/game-state';
 import { getSession } from './state/session';
 import { updateRoundState, type PhaseMessage as RoundPhaseMessage } from './state/round-state';
-import type { WsMessage } from './types/ws-messages';
+import type { WsMessage, ToolEventMessage } from './types/ws-messages';
 import type { NarrativeController } from './panels/narrative';
 import type { WorldTime } from './ui/header';
 
@@ -26,6 +26,21 @@ export interface AppRefs {
   fetchPlayerWorldMap: () => Promise<void>;
   showDeathScreen: (cause: string) => void;
   setViewportScene?: (lines: string[]) => void;
+}
+
+/** Format a tool event into a compact badge string. */
+function formatToolBadge(msg: ToolEventMessage): string {
+  const s = msg.summary || '';
+  switch (msg.tool) {
+    case 'mm_resolve_combat': return `\u2694\uFE0F ${s}`;
+    case 'mm_give_item':      return `\uD83C\uDF81 ${s}`;
+    case 'mm_skill_check':    return `\uD83C\uDFB2 ${s}`;
+    case 'mm_give_quest':     return `\uD83D\uDCDC ${s}`;
+    case 'mm_move_to':        return `\uD83D\uDEB6 ${s}`;
+    case 'mm_create_npc':     return `\u2728 ${s}`;
+    case 'mm_create_item':    return `\u2728 ${s}`;
+    default:                  return s;
+  }
 }
 
 /** Tracks the last dialogue message from each NPC (keyed by display name). */
@@ -52,12 +67,11 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
         } else if (channel === 'ooc') {
           refs.eventsFeed.addBlock(msg.text || '', 'ooc');
         } else if (msg.npc) {
-          // NPC dialogue — remove thinking indicator and show with name header
-          lastNpcMessages.set(msg.npc, msg.text || '');
+          // NPC final message (narrated log) — route to events feed, not main narrative.
+          // Real dialogue comes through tool_event (mm_npc_response).
           const npcKey = msg.npc_username || msg.npc.toLowerCase().replace(/\s+/g, '-');
           refs.narrative.removeBlockById(`npc-status-${npcKey}`);
-          refs.narrative.addBlock(`${msg.npc}`, 'npc-name');
-          refs.narrative.addBlock(msg.text || '', 'npc-dialogue');
+          refs.eventsFeed.addBlock(`[${msg.npc}] ${msg.text || ''}`, 'npc-log');
         } else {
           refs.narrative.addBlock(msg.text || '', 'narrative');
         }
@@ -76,25 +90,25 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
           refs.renderAllPanels();
           refs.fetchPlayerWorldMap();
 
-          // Display event notifications in the events feed
+          // Display event notifications in the main narrative feed (alongside tool badges)
           if (msg.state_update.events) {
             const events = msg.state_update.events;
             if (events.combat) {
               const c = events.combat;
               if (c.damage_dealt != null) {
-                refs.eventsFeed.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ''}`, 'event-combat');
+                refs.narrative.addBlock(`[-${c.damage_dealt} HP] ${c.target_name || ''}`, 'event-combat');
               }
               if (c.xp_gained) {
-                refs.eventsFeed.addBlock(`[+${c.xp_gained} XP]`, 'event-xp');
+                refs.narrative.addBlock(`[+${c.xp_gained} XP]`, 'event-xp');
               }
               if (c.target_dead) {
-                refs.eventsFeed.addBlock(`${c.target_name || 'Target'} has been slain.`, 'event-death');
+                refs.narrative.addBlock(`${c.target_name || 'Target'} has been slain.`, 'event-death');
               }
             }
             if (events.inventory_changes) {
               for (const inv of events.inventory_changes) {
                 const prefix = inv.event_type === 'DROP' ? '-' : '+';
-                refs.eventsFeed.addBlock(`[${prefix}${inv.item_name}]`, 'event-item');
+                refs.narrative.addBlock(`[${prefix}${inv.item_name}]`, 'event-item');
               }
             }
           }
@@ -234,6 +248,22 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
       }
       case 'room_items_changed': {
         if (refs.invModal.active) refs.invModal.refresh();
+        break;
+      }
+      case 'tool_event': {
+        if (msg.tool === 'mm_npc_response') {
+          // NPC dialogue via tool — render as name + dialogue
+          if (msg.npc) {
+            lastNpcMessages.set(msg.npc, msg.summary || '');
+            const npcKey = msg.npc.toLowerCase().replace(/\s+/g, '-');
+            refs.narrative.removeBlockById(`npc-status-${npcKey}`);
+            refs.narrative.addBlock(msg.npc, 'npc-name');
+            refs.narrative.addBlock(msg.summary || '', 'npc-dialogue');
+          }
+        } else {
+          // Mechanical tool event — show as inline badge
+          refs.narrative.addBlock(`[${formatToolBadge(msg)}]`, 'tool-badge');
+        }
         break;
       }
       case 'episode_feed': {

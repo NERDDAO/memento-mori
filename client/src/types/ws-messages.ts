@@ -118,6 +118,15 @@ export interface EpisodeFeedMessage {
   timestamp: string;
 }
 
+export interface ToolEventMessage {
+  type: 'tool_event';
+  tool: string;
+  npc?: string;
+  summary: string;
+  data?: Record<string, unknown>;
+  location: string;
+}
+
 export type WsMessage =
   | NarrativeMessage
   | DeathFeedMessage
@@ -135,4 +144,5 @@ export type WsMessage =
   | NpcLeftMessage
   | NpcJoinedMessage
   | PositionUpdateMessage
-  | EpisodeFeedMessage;
+  | EpisodeFeedMessage
+  | ToolEventMessage;
