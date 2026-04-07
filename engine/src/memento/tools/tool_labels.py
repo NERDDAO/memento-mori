@@ -71,12 +71,17 @@ KITS: dict[str, set[str]] = {
         "mm_move_within",
         "mm_update_entity",
         "mm_remember_event",
+        "mm_narrate",
+        "mm_design_quest",
+        "mm_give_quest",
+        "mm_trigger_npc",
     },
     # Room narrator — world evolution, entity creation, design, narration
     "Room": {
         "mm_world_reaction",
         "mm_heartbeat",
         "mm_narrate",
+        "mm_trigger_npc",
         "mm_remember_event",
         "mm_update_entity",
         "mm_create_npc",
@@ -138,3 +143,17 @@ def get_allowed_tools(labels: list[str]) -> set[str]:
         if label in LABEL_TOOLS:
             allowed |= LABEL_TOOLS[label]
     return allowed
+
+
+def build_tool_section(labels: list[str]) -> str:
+    """Build a formatted tools section for a system prompt based on agent labels.
+
+    Returns a string like:
+    YOUR TOOLS: mm_get_state, mm_move_to, mm_resolve_combat, ...
+    Only use these tools. Do not attempt to call tools not in this list.
+    """
+    tools = sorted(get_allowed_tools(labels))
+    return (
+        f"YOUR TOOLS: {', '.join(tools)}\n"
+        "Only use these tools. Do not attempt to call tools not in this list."
+    )

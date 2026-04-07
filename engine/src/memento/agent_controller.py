@@ -15,6 +15,7 @@ from typing import Any, Callable
 import requests as _requests
 
 from memento.bonfires_client import get_client
+from memento.tools.tool_labels import build_tool_section
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +70,15 @@ STATS:
 
 LOCATION: {location}
 
+{tools_section}
+
 YOUR JOB:
 You experience the world through tools and act through tools.
 Your final text response is a brief narrated action log — a summary grounding what you did.
 
 WORKFLOW (every round):
 1. ASSESS — call mm_get_state to check your current condition
-2. ACT — use tools: mm_resolve_combat, mm_give_item, mm_skill_check, mm_move_to, etc.
+2. ACT — use your tools to resolve the situation
 3. SPEAK — call mm_npc_response with in-character dialogue (this is how you talk)
 4. REMEMBER — call mm_npc_memory if something significant happened
 
@@ -94,6 +97,8 @@ trade, mm_evaluate_disposition to track the relationship).
 NARRATOR_SYSTEM_PROMPT_TEMPLATE = """\
 You are the narrator for {location}. {description}
 
+{tools_section}
+
 YOUR JOB:
 You observe the world through tools, narrate what happens, and evolve the world.
 
@@ -101,42 +106,41 @@ WORKFLOW (every round):
 1. OBSERVE — call mm_search_world to check what exists at this location and recent events
 2. NARRATE — call mm_narrate with the player action, your search context, and any events you detected
 3. EVOLVE — if the scene warrants it, use mm_world_reaction to spawn new NPCs, items, quests, or lore
-4. ATMOSPHERE — use mm_npc_response for brief atmospheric flavor on top of narration (optional)
+4. TRIGGER — call mm_trigger_npc for any NPC that should react to the scene
 
 RULES:
 - ALWAYS call mm_search_world first — your context informs the narration
 - Pass your search results as the `context` parameter to mm_narrate
 - NEVER write NPC dialogue — NPCs speak for themselves via their own agents
-- DO tag NPCs with @username in your narration context so they get cued to respond
+- Use mm_trigger_npc to activate NPCs — do NOT mention NPC names in your final text
 - ALWAYS check mm_search_world before spawning anything — no duplicates
-- Use mm_world_reaction for batch entity creation
 - Your final text is a brief summary of what you did, not the narration itself
 """
 
-ENGINE_SYSTEM_PROMPT = """\
+ENGINE_SYSTEM_PROMPT_TEMPLATE = """\
 You are the game engine for Memento Mori.
+
+{tools_section}
 
 YOUR JOB:
 You are the invisible referee. You resolve game mechanics when players act.
-You NEVER narrate, describe atmosphere, or write prose. You only resolve mechanics.
+All output goes through tool calls — your final text is just "Done." or a brief status.
 
 WORKFLOW (when a player acts):
 1. ASSESS — call mm_get_state to check relevant entity states
 2. CHECK — call mm_check_plausibility if the action seems questionable
-3. RESOLVE — use the appropriate tool:
-   - Combat: mm_resolve_combat (full resolution) or mm_assess_combat (evaluation only)
-   - Movement: mm_move_to (between locations) or mm_move_within (within a room)
-   - Items: mm_inventory, mm_inventory_transfer, mm_give_item
-   - Checks: mm_skill_check, mm_calculate_damage
-   - Social: mm_evaluate_disposition
-4. RECORD — call mm_remember_event if something significant happened
+3. RESOLVE — use the appropriate tool for the action
+4. NARRATE — call mm_narrate to describe what happened (environment only)
+5. TRIGGER — call mm_trigger_npc for any NPC that should react
+6. RECORD — call mm_remember_event if something significant happened
 
 RULES:
-- Your response is a brief mechanical summary: "Combat resolved: 12 damage to Roric. HP: 23/35."
-- NEVER write narrative prose, dialogue, or atmospheric description
+- ALL output goes through tool calls. Your final text response MUST be just "Done."
+- NEVER mention NPC names in your final text — use mm_trigger_npc instead
+- NEVER write narrative prose in your final text — use mm_narrate instead
 - NEVER speak in character — you are a system, not a persona
 - Call independent tools in parallel when possible
-- Trust tool results as authoritative — don't second-guess the engine
+- Trust tool results as authoritative
 """
 
 MASTER_NARRATOR_SYSTEM_PROMPT = """\
@@ -216,12 +220,14 @@ class AgentController:
 
         # Build system prompt from crew outputs
         summary = self._extract_summary(concept)
+        npc_labels = npc_labels or ["NPC"]
         context = NPC_SYSTEM_PROMPT_TEMPLATE.format(
             name=name,
             summary=summary,
             concept=concept[:1500],
             mechanics=mechanics[:800],
             location=location_name,
+            tools_section=build_tool_section(npc_labels),
         )
 
         # Create the Bonfires agent
@@ -460,6 +466,7 @@ class AgentController:
         context = NARRATOR_SYSTEM_PROMPT_TEMPLATE.format(
             location=location_name,
             description=location_description or "A location in the world of Memento Mori.",
+            tools_section=build_tool_section(["Room"]),
         )
 
         # Create KG entity for the narrator (needed for tool access label gating)
@@ -593,7 +600,9 @@ class AgentController:
             result = client.agents.create(
                 name="Engine",
                 username="bonfires-engine",
-                context=ENGINE_SYSTEM_PROMPT,
+                context=ENGINE_SYSTEM_PROMPT_TEMPLATE.format(
+                    tools_section=build_tool_section(["Engine"]),
+                ),
                 platform=self.platform,
                 deployment_config=self._build_deployment_config(),
                 enabled_mcp_tools=["memento-engine"],
@@ -638,6 +647,7 @@ class AgentController:
             concept=f"Labels: {', '.join(labels)}\n{summary}",
             mechanics="(Stats unknown — call mm_get_state to check)",
             location=location_name,
+            tools_section=build_tool_section(labels),
         )
 
         try:

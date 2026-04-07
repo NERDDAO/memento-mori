@@ -874,6 +874,95 @@ async def npc_response(req: NpcResponseRequest, request: Request):
     return {"status": "ok"}
 
 
+# ── NPC Trigger (explicit activation via Matrix @tag) ──
+
+class TriggerNpcRequest(BaseModel):
+    npc_name: str = Field(..., max_length=200, description="Name of the NPC to trigger")
+    context: str = Field("", max_length=2000, description="What happened that the NPC should react to")
+    npc_id: str = Field("", max_length=64)
+
+
+@router.post("/engine/trigger-npc")
+async def trigger_npc(req: TriggerNpcRequest, request: Request):
+    """Trigger a specific NPC by sending a @tagged Matrix message.
+
+    The engine or narrator calls this to explicitly activate an NPC.
+    Sends a Matrix message as the calling agent, tagging the target NPC.
+    """
+    await check_tool_access(req.npc_id, "mm_trigger_npc")
+
+    import re
+
+    # Resolve target NPC username from name
+    from gateway.npc_registry import _registry
+    target_username = ""
+    for entry in _registry.values():
+        if entry.name.lower() == req.npc_name.lower():
+            clean = re.sub(r"[^a-z0-9]", "_", entry.name.lower())
+            clean = re.sub(r"_+", "_", clean).strip("_")[:30]
+            target_username = f"bonfires-{clean}"
+            break
+
+    if not target_username:
+        return {"error": f"NPC '{req.npc_name}' not found in registry"}
+
+    # Send Matrix message as the calling agent, tagging the target
+    caller_location = resolve_npc_location(req.npc_id)
+    if not caller_location:
+        return {"error": "Could not determine caller location"}
+
+    import os
+    import uuid as _uuid
+    homeserver = os.getenv("MATRIX_HOMESERVER", "http://localhost:8008")
+    as_token = os.getenv("MATRIX_AS_TOKEN", "")
+    domain = os.getenv("MATRIX_DOMAIN", "localhost")
+
+    if not as_token:
+        return {"error": "No MATRIX_AS_TOKEN configured"}
+
+    # Resolve room ID for the location
+    bridge = getattr(request.app.state, "bridge", None)
+    if not bridge:
+        ws_hub = getattr(request.app.state, "ws_hub", None)
+        # Fallback: try to find bridge from app
+        from gateway.app import bridge as _bridge
+        bridge = _bridge
+
+    room_id = ""
+    if bridge and hasattr(bridge, "location_to_room"):
+        room_id = bridge.location_to_room.get(caller_location, "")
+
+    if not room_id:
+        return {"error": f"No Matrix room for location '{caller_location}'"}
+
+    # Determine sender identity
+    caller_name = resolve_npc_name(req.npc_id)
+    if caller_name.startswith("Engine"):
+        sender_user = f"@bonfires-engine:{domain}"
+    else:
+        caller_clean = re.sub(r"[^a-z0-9]", "_", caller_name.lower())
+        caller_clean = re.sub(r"_+", "_", caller_clean).strip("_")[:30]
+        sender_user = f"@bonfires-{caller_clean}:{domain}"
+
+    # Send the tagged message
+    tag = f"@{target_username}"
+    message_text = f"{tag} {req.context}" if req.context else f"{tag} React to the scene."
+    txn_id = str(_uuid.uuid4())
+
+    import aiohttp
+    async with aiohttp.ClientSession() as session:
+        resp = await session.put(
+            f"{homeserver}/_matrix/client/v3/rooms/{room_id}/send/m.room.message/{txn_id}",
+            params={"access_token": as_token, "user_id": sender_user},
+            json={"msgtype": "m.text", "body": message_text},
+        )
+        if resp.status == 200:
+            return {"status": "ok", "triggered": req.npc_name, "tag": tag}
+        else:
+            text = await resp.text()
+            return {"error": f"Matrix send failed ({resp.status}): {text[:200]}"}
+
+
 # ── NPC Intra-Room Movement ──
 
 class MoveWithinRequest(BaseModel):
