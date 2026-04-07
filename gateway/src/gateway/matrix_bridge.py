@@ -262,14 +262,41 @@ class MatrixBridge:
             location = self.room_to_location.get(room.room_id, "")
             npc_username = sender.split(":")[0].lstrip("@")  # "bonfires-roric"
 
-            # Engine agent response — emit "ready" phase, don't render as narrative
+            # Engine agent — forward status/thinking as npc_status, final message as "ready"
             if sender.startswith("@bonfires-engine:"):
-                if location:
-                    await self.ws_hub.broadcast_to_location(location, {
-                        "type": "phase",
-                        "phase": "ready",
-                        "channel": "events",
-                    })
+                is_status = content.get("com.bonfires.status", False)
+                relates_to = content.get("m.relates_to", {})
+                is_replace = relates_to.get("rel_type") == "m.replace"
+
+                if is_status or is_replace:
+                    # Thinking/tool status — show in client
+                    new_content = content.get("m.new_content", {})
+                    text = new_content.get("body", event.body) if is_replace else event.body
+                    if location and text:
+                        await self.ws_hub.broadcast_to_location(location, {
+                            "type": "npc_status",
+                            "text": text,
+                            "npc": "Engine",
+                            "npc_username": "bonfires-engine",
+                            "location": location,
+                            "channel": "narrative",
+                        })
+                else:
+                    # Final response — show in narrative log, then emit "ready"
+                    if location and event.body:
+                        await self.ws_hub.broadcast_to_location(location, {
+                            "type": "narrative",
+                            "text": event.body,
+                            "npc": "Engine",
+                            "npc_username": "bonfires-engine",
+                            "location": location,
+                            "channel": "narrative",
+                        })
+                        await self.ws_hub.broadcast_to_location(location, {
+                            "type": "phase",
+                            "phase": "ready",
+                            "channel": "events",
+                        })
                 return
 
             npc_name = npc_username.replace("bonfires-", "").replace("_", " ").title()
@@ -496,7 +523,7 @@ class MatrixBridge:
                 return action_text  # NPC addressed — no auto-tag needed
 
         # No NPC mentioned — tag the global engine agent
-        return f"{action_text} @engine"
+        return f"{action_text} @bonfires-engine"
 
     async def send_action(self, room_id: str, player_id: str, action_text: str) -> None:
         """Send a player action to a Matrix room using the player's token.
@@ -517,6 +544,8 @@ class MatrixBridge:
         location = self.room_to_location.get(room_id, "")
         original_text = action_text
         action_text = self._auto_tag_engine(action_text, location)
+        if action_text != original_text:
+            logger.info("Auto-tagged engine: '%s'", action_text)
 
         # If engine was auto-tagged, emit "resolving" phase to lock client input
         if action_text != original_text and location:

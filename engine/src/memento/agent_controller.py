@@ -592,7 +592,7 @@ class AgentController:
             client = get_client()
             result = client.agents.create(
                 name="Engine",
-                username="engine",
+                username="bonfires-engine",
                 context=ENGINE_SYSTEM_PROMPT,
                 platform=self.platform,
                 deployment_config=self._build_deployment_config(),
