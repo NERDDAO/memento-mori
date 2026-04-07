@@ -10,7 +10,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import requests as _requests
 
@@ -19,22 +19,32 @@ from memento.bonfires_client import get_client
 logger = logging.getLogger(__name__)
 
 
+# Registry hooks — set by the gateway at startup, no-ops otherwise.
+# This keeps the dependency direction clean: gateway → engine, never engine → gateway.
+_on_npc_registered: Callable[[str, str, str, str], None] | None = None
+_on_npc_moved: Callable[[str, str], None] | None = None
+
+
+def set_registry_hooks(
+    on_register: Callable[[str, str, str, str], None],
+    on_move: Callable[[str, str], None],
+) -> None:
+    """Called by the gateway at startup to wire NPC registry callbacks."""
+    global _on_npc_registered, _on_npc_moved
+    _on_npc_registered = on_register
+    _on_npc_moved = on_move
+
+
 def _register_npc(agent_id: str, name: str, location: str, kg_uuid: str = "") -> None:
-    """Register NPC in gateway's in-memory registry (best-effort)."""
-    try:
-        from gateway.npc_registry import register_npc
-        register_npc(agent_id, name, location, kg_uuid=kg_uuid)
-    except ImportError:
-        pass  # Running outside gateway process
+    """Notify the registry hook that an NPC was spawned (best-effort)."""
+    if _on_npc_registered:
+        _on_npc_registered(agent_id, name, location, kg_uuid)
 
 
 def _update_npc_location(agent_id: str, location: str) -> None:
-    """Update NPC location in gateway's in-memory registry (best-effort)."""
-    try:
-        from gateway.npc_registry import update_npc_location
-        update_npc_location(agent_id, location)
-    except ImportError:
-        pass
+    """Notify the registry hook that an NPC moved (best-effort)."""
+    if _on_npc_moved:
+        _on_npc_moved(agent_id, location)
 
 # Singleton instance
 _controller: AgentController | None = None

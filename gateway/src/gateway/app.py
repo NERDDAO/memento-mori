@@ -37,9 +37,13 @@ async def lifespan(app: FastAPI):
         round_manager.on_action(make_action_callback(ws_hub))
 
     # Seed NPC registry from MongoDB + world.json
-    from gateway.npc_registry import seed_from_db
+    from gateway.npc_registry import seed_from_db, register_npc, update_npc_location
     npc_count = seed_from_db()
     logger.info("NPC registry seeded: %d agents", npc_count)
+
+    # Wire engine → gateway registry hooks (breaks the circular import)
+    from memento.agent_controller import set_registry_hooks
+    set_registry_hooks(on_register=register_npc, on_move=update_npc_location)
 
     # Seed ontology types on Delve for this bonfire
     _seed_ontology()
