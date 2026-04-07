@@ -132,38 +132,17 @@ class EngineMatrixListener:
         msg_type = rpg_meta.get("type", "")
 
         if msg_type == "player-action-batch":
-            # Batch turn — multiple actions from RoundManager
-            actions = rpg_meta.get("actions", [])
+            # Batch metadata — reconcile NPCs at this location (lazy spawn).
+            # The engine agent now handles mechanics via agent messaging,
+            # so we no longer run RoundController here.
             location_name = rpg_meta.get("location", room.display_name or "Unknown")
-            logger.info("Batch turn at %s: %d actions", location_name, len(actions))
-
-            # Reconcile NPCs at this location (lazy — only spawns missing ones)
+            actions = rpg_meta.get("actions", [])
+            logger.info("Batch at %s: %d actions (engine-agent driven)", location_name, len(actions))
             await asyncio.to_thread(self._reconcile_single_location, location_name)
 
-            narrative, state_update = await asyncio.to_thread(
-                self._run_batch_turn, location_name, actions,
-                self.client, room.room_id, asyncio.get_event_loop()
-            )
-
-            if self.client and narrative:
-                await self.client.room_send(
-                    room.room_id,
-                    "m.room.message",
-                    {
-                        "msgtype": "m.text",
-                        "body": narrative,
-                        "com.bonfires.rpg": {
-                            "type": "narrative",
-                            "location": location_name,
-                            "state_update": state_update,
-                        },
-                    },
-                )
-
         elif msg_type == "player-action":
-            # Individual player messages are for NPC agents to see — not for engine processing.
-            # The engine only processes batches (player-action-batch).
-            logger.debug("Ignoring individual player-action (engine uses batches): %s", event.body[:80])
+            # Individual player actions flow to NPC/engine agents via Matrix.
+            logger.debug("Player action for agents: %s", event.body[:80])
 
     @staticmethod
     def _run_turn(player_id: str, location_name: str, action: str,

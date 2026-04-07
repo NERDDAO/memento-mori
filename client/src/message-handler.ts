@@ -260,6 +260,9 @@ export function createMessageHandler(refs: AppRefs): (msg: WsMessage) => void {
             refs.narrative.addBlock(msg.npc, 'npc-name');
             refs.narrative.addBlock(msg.summary || '', 'npc-dialogue');
           }
+        } else if (msg.tool === 'mm_narrate') {
+          // Room narrator narration — render as full narrative prose
+          refs.narrative.addBlock(msg.summary || '', 'narrator');
         } else {
           // Mechanical tool event — show as inline badge
           refs.narrative.addBlock(`[${formatToolBadge(msg)}]`, 'tool-badge');

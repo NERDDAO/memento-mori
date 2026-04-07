@@ -56,10 +56,27 @@ KITS: dict[str, set[str]] = {
         "mm_move_within",
         "mm_remember_event",
     },
-    # Room narrator — world evolution, entity creation, design
+    # Engine agent — stateless referee, resolves game mechanics
+    "Engine": {
+        "mm_check_plausibility",
+        "mm_resolve_combat",
+        "mm_assess_combat",
+        "mm_skill_check",
+        "mm_calculate_damage",
+        "mm_evaluate_disposition",
+        "mm_inventory",
+        "mm_inventory_transfer",
+        "mm_give_item",
+        "mm_move_to",
+        "mm_move_within",
+        "mm_update_entity",
+        "mm_remember_event",
+    },
+    # Room narrator — world evolution, entity creation, design, narration
     "Room": {
         "mm_world_reaction",
         "mm_heartbeat",
+        "mm_narrate",
         "mm_remember_event",
         "mm_update_entity",
         "mm_create_npc",

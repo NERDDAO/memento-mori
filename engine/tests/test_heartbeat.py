@@ -42,12 +42,30 @@ def test_processes_and_returns_summary():
         "edges": [],
     }
     mock_client.config.agent_id = "test-agent"
+    mock_client.agents.get.return_value = {"name": "Narrator: The Threshold"}
 
-    with patch("memento.bonfires_client.get_client", return_value=mock_client):
+    env_patch = {
+        "MATRIX_AS_TOKEN": "test-token",
+        "MATRIX_HOMESERVER": "http://localhost:8008",
+        "MATRIX_DOMAIN": "localhost",
+        "MEMENTO_GATEWAY_URL": "http://localhost:8080",
+    }
+    with patch("memento.bonfires_client.get_client", return_value=mock_client), \
+         patch("memento.heartbeat._requests") as mock_requests, \
+         patch.dict("os.environ", env_patch):
+        # Mock the Matrix trigger (PUT to homeserver) and room lookup (GET)
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_requests.put.return_value = mock_resp
+        mock_requests.get.return_value = MagicMock(
+            status_code=200, json=MagicMock(return_value={"room_id": "!test:localhost"})
+        )
+
         runner = HeartbeatRunner(agent_id="test-agent")
         result = runner.run()
         assert result["processed"] is True
         assert result["episode_uuid"] == "ep-456"
+        assert result["triggered"] is True
 
 
 def test_handles_job_timeout():

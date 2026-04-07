@@ -54,6 +54,15 @@ def resolve_npc_kg_uuid(agent_id: str) -> str:
     return entry.kg_uuid if entry else ""
 
 
+def get_npc_names_at_location(location: str) -> set[str]:
+    """Return lowercase NPC names at a location (excludes Engine/Narrator agents)."""
+    names: set[str] = set()
+    for entry in _registry.values():
+        if entry.location == location and not entry.name.startswith(("Engine:", "Narrator:")):
+            names.add(entry.name.lower())
+    return names
+
+
 def seed_from_db() -> int:
     """Populate registry from MongoDB agentconfigs + world.json on startup.
 

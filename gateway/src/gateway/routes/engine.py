@@ -525,6 +525,13 @@ class DesignRegionRequest(BaseModel):
     player_level: int = Field(1, ge=1, le=50)
     npc_id: str = Field("", max_length=64)
 
+class NarrateRequest(BaseModel):
+    action: str = Field(..., max_length=2000, description="Player action(s) to narrate")
+    context: str = Field("", max_length=4000, description="Scene context from world search")
+    events: str = Field("", max_length=2000, description="Detected events summary")
+    mode: str = Field("action", max_length=20, description="Narration mode: action, intro, rejection")
+    npc_id: str = Field("", max_length=64)
+
 
 def _locked(fn):
     """Run a function inside the engine lock."""
@@ -697,6 +704,121 @@ async def design_region(req: DesignRegionRequest):
 
     result = await asyncio.to_thread(_run)
     return {"region_design": result}
+
+
+@router.post("/engine/narrate")
+async def narrate(req: NarrateRequest, request: Request):
+    """Run the narration crew, broadcast the result, and enrich episode lore stubs.
+
+    The room narrator agent calls this after gathering context via mm_search_world.
+    After narration, enriches entities at the agent's location so lore stubs from
+    the latest episode become full KG entities with attributes and art.
+    """
+    await check_tool_access(req.npc_id, "mm_narrate")
+
+    def _run():
+        from memento.crews.narrative.narration import make_narration_crew
+        with _engine_lock:
+            crew = make_narration_crew(
+                action=req.action,
+                context=req.context,
+                events=req.events,
+                mode=req.mode,
+            )
+            return crew.kickoff().raw
+
+    narrative = await asyncio.to_thread(_run)
+
+    # Broadcast as narrative channel event
+    await broadcast_tool_event(
+        request,
+        tool="mm_narrate",
+        npc_id=req.npc_id,
+        summary=narrative,
+    )
+
+    # Enrich lore stubs from the latest episode — runs in background thread
+    # Pulls the specific episode entities that match our game ontology types
+    # (NewEntitySeed, QuestSeed, LocationChange, LoreSeed) and enriches those.
+    if req.npc_id:
+        import threading
+
+        def _enrich_episode_stubs():
+            try:
+                from memento.bonfires_client import get_client
+                from memento.rpg_types import RPG_ENTITY_TYPES
+                from memento.flows.enrichment import enrich_entity
+                from memento.models.attributes import needs_enrichment
+                import json
+                import logging
+                _log = logging.getLogger(__name__)
+
+                client = get_client()
+
+                # Resolve the Room NPC's agent_id to get its latest episode
+                agent_id = req.npc_id
+                episode = client.kg.get_latest_episode(agent_id)
+                if not episode:
+                    return
+
+                # Extract entities from episode that match our ontology
+                stubs: list[dict] = []
+                for entity in episode.get("entities", []):
+                    labels = entity.get("labels", [])
+                    for label in labels:
+                        if label in RPG_ENTITY_TYPES:
+                            stubs.append(entity)
+                            break
+
+                # Also check edges for typed targets
+                for edge in episode.get("edges", []):
+                    node = edge.get("target", {})
+                    labels = node.get("labels", [])
+                    for label in labels:
+                        if label in RPG_ENTITY_TYPES:
+                            stubs.append(node)
+                            break
+
+                if not stubs:
+                    return
+
+                _log.info("Enriching %d episode stubs after narration", len(stubs))
+                for stub in stubs:
+                    entity_uuid = stub.get("uuid", "")
+                    if not entity_uuid:
+                        continue
+                    try:
+                        entity = client.kg.get_entity(entity_uuid)
+                        attrs = entity.get("attributes", {})
+                        if isinstance(attrs, str):
+                            attrs = json.loads(attrs) if attrs else {}
+                        summary = entity.get("summary", "")
+                        entity_name = entity.get("name", "")
+                        entity_labels = entity.get("labels", [])
+
+                        # Determine entity type for enrichment
+                        entity_type = "npc"
+                        for label in entity_labels:
+                            if label in ("Item",):
+                                entity_type = "item"
+                            elif label in ("Location",):
+                                entity_type = "location"
+                            elif label in ("Quest",):
+                                entity_type = "quest"
+
+                        missing = needs_enrichment(entity_type, attrs)
+                        if missing:
+                            enrich_entity(entity_uuid, entity_name, entity_type, summary, attrs, missing)
+                    except Exception:
+                        _log.debug("Enrichment skipped for stub %s", entity_uuid, exc_info=True)
+
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning("Episode stub enrichment failed", exc_info=True)
+
+        threading.Thread(target=_enrich_episode_stubs, daemon=True).start()
+
+    return {"narrative": narrative}
 
 
 @router.post("/engine/reputation")

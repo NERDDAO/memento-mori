@@ -261,6 +261,18 @@ class MatrixBridge:
         if sender.startswith("@bonfires-") and not rpg_meta:
             location = self.room_to_location.get(room.room_id, "")
             npc_username = sender.split(":")[0].lstrip("@")  # "bonfires-roric"
+
+            # Engine agent response — emit "ready" phase, don't render as narrative
+            bare_name = npc_username.replace("bonfires-", "")
+            if bare_name.startswith("engine_"):
+                if location:
+                    await self.ws_hub.broadcast_to_location(location, {
+                        "type": "phase",
+                        "phase": "ready",
+                        "channel": "events",
+                    })
+                return
+
             npc_name = npc_username.replace("bonfires-", "").replace("_", " ").title()
 
             # Detect if this is an edit (m.replace) — used for status/thinking updates
@@ -466,8 +478,37 @@ class MatrixBridge:
 
         return None
 
+    def _auto_tag_engine(self, action_text: str, location: str) -> str:
+        """Append @engine tag if no NPC is mentioned in the action text.
+
+        Uses the NPC registry to check if any NPC name appears in the text.
+        If none found, appends the engine agent's @username so the bonfires-ai
+        runtime routes the message to the engine agent.
+        """
+        if not location:
+            return action_text
+
+        from gateway.npc_registry import get_npc_names_at_location
+        npc_names = get_npc_names_at_location(location)
+
+        text_lower = action_text.lower()
+        for name in npc_names:
+            if name in text_lower:
+                return action_text  # NPC addressed — no auto-tag needed
+
+        # No NPC mentioned — tag the engine agent
+        import re
+        slug = re.sub(r"[^a-z0-9]", "_", location.lower())
+        slug = re.sub(r"_+", "_", slug).strip("_")[:30]
+        engine_tag = f"@engine_{slug}"
+        return f"{action_text} {engine_tag}"
+
     async def send_action(self, room_id: str, player_id: str, action_text: str) -> None:
-        """Send a player action to a Matrix room using the player's token."""
+        """Send a player action to a Matrix room using the player's token.
+
+        If no NPC is mentioned in the action text, auto-tags the engine agent
+        so it picks up the message via the bonfires-ai "should I respond?" logic.
+        """
         token = self.player_tokens.get(player_id)
         if not token:
             logger.info("No token for player %s, registering...", player_id)
@@ -476,6 +517,20 @@ class MatrixBridge:
         if not token:
             logger.error("Cannot send action — no player token for %s", player_id)
             return
+
+        # Auto-tag engine agent if no NPC is addressed
+        location = self.room_to_location.get(room_id, "")
+        original_text = action_text
+        action_text = self._auto_tag_engine(action_text, location)
+
+        # If engine was auto-tagged, emit "resolving" phase to lock client input
+        if action_text != original_text and location:
+            await self.ws_hub.broadcast_to_location(location, {
+                "type": "phase",
+                "phase": "resolving",
+                "crew": "engine",
+                "channel": "events",
+            })
 
         # Invite player to the room (as narrator), then join as player
         username = f"player_{player_id[:8]}"

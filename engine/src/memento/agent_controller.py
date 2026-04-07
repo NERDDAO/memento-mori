@@ -23,7 +23,7 @@ def _register_npc(agent_id: str, name: str, location: str, kg_uuid: str = "") ->
     """Register NPC in gateway's in-memory registry (best-effort)."""
     try:
         from gateway.npc_registry import register_npc
-        register_npc(agent_id, name, location, kg_uuid)
+        register_npc(agent_id, name, location, kg_uuid=kg_uuid)
     except ImportError:
         pass  # Running outside gateway process
 
@@ -85,19 +85,48 @@ NARRATOR_SYSTEM_PROMPT_TEMPLATE = """\
 You are the narrator for {location}. {description}
 
 YOUR JOB:
-You observe the world through tools and evolve it through tools.
+You observe the world through tools, narrate what happens, and evolve the world.
 
-WORKFLOW:
-1. Call mm_search_world to check what already exists (NEVER duplicate entities)
-2. Use mm_world_reaction to spawn new NPCs, items, quests, or lore from episode seeds
-3. Use mm_npc_response to post atmospheric narration of what evolved
+WORKFLOW (every round):
+1. OBSERVE — call mm_search_world to check what exists at this location and recent events
+2. NARRATE — call mm_narrate with the player action, your search context, and any events you detected
+3. EVOLVE — if the scene warrants it, use mm_world_reaction to spawn new NPCs, items, quests, or lore
+4. ATMOSPHERE — use mm_npc_response for brief atmospheric flavor on top of narration (optional)
 
 RULES:
+- ALWAYS call mm_search_world first — your context informs the narration
+- Pass your search results as the `context` parameter to mm_narrate
+- NEVER write NPC dialogue — NPCs speak for themselves via their own agents
+- DO tag NPCs with @username in your narration context so they get cued to respond
 - ALWAYS check mm_search_world before spawning anything — no duplicates
 - Use mm_world_reaction for batch entity creation
-- Use mm_npc_response for your narration text (not your final message)
-- Your final text is a brief summary of what evolved, not full narration
-- Stay atmospheric and concise
+- Your final text is a brief summary of what you did, not the narration itself
+"""
+
+ENGINE_SYSTEM_PROMPT_TEMPLATE = """\
+You are the game engine for {location}. {description}
+
+YOUR JOB:
+You are the invisible referee. You resolve game mechanics when players act.
+You NEVER narrate, describe atmosphere, or write prose. You only resolve mechanics.
+
+WORKFLOW (when a player acts):
+1. ASSESS — call mm_get_state to check relevant entity states
+2. CHECK — call mm_check_plausibility if the action seems questionable
+3. RESOLVE — use the appropriate tool:
+   - Combat: mm_resolve_combat (full resolution) or mm_assess_combat (evaluation only)
+   - Movement: mm_move_to (between locations) or mm_move_within (within a room)
+   - Items: mm_inventory, mm_inventory_transfer, mm_give_item
+   - Checks: mm_skill_check, mm_calculate_damage
+   - Social: mm_evaluate_disposition
+4. RECORD — call mm_remember_event if something significant happened
+
+RULES:
+- Your response is a brief mechanical summary: "Combat resolved: 12 damage to Roric. HP: 23/35."
+- NEVER write narrative prose, dialogue, or atmospheric description
+- NEVER speak in character — you are a system, not a persona
+- Call independent tools in parallel when possible
+- Trust tool results as authoritative — don't second-guess the engine
 """
 
 MASTER_NARRATOR_SYSTEM_PROMPT = """\
@@ -525,6 +554,83 @@ class AgentController:
             return ""
 
         _register_npc(agent_id, "World Chronicler", "", narrator_uuid)
+        return agent_id
+
+    def spawn_engine_agent(
+        self,
+        *,
+        location_name: str,
+        location_uuid: str,
+        location_description: str = "",
+    ) -> str:
+        """Spawn a per-room engine agent that resolves game mechanics.
+
+        The engine agent is a stateless referee — it processes player actions
+        via MCP tools but does NOT save to stack (disableStoring). Only the
+        Room NPC accumulates scene history for episode extraction.
+
+        Args:
+            location_name: Display name of the location
+            location_uuid: KG UUID of the location
+            location_description: Atmosphere/purpose of this location
+
+        Returns:
+            The created agent's ID, or empty string on failure.
+        """
+        slug = self._name_to_username(location_name)
+        username = f"engine_{slug}"
+
+        context = ENGINE_SYSTEM_PROMPT_TEMPLATE.format(
+            location=location_name,
+            description=location_description or "A location in the world of Memento Mori.",
+        )
+
+        # Create KG entity for the engine agent (tool access label gating)
+        engine_uuid = ""
+        try:
+            client = get_client()
+            engine_name = f"Engine: {location_name}"
+            engine_uuid = client.kg.create_entity(
+                engine_name, ["Engine"],
+                {"summary": f"Game engine for {location_name}"},
+            )
+            logger.info("Created engine KG entity: %s → %s", engine_name, engine_uuid)
+        except Exception:
+            logger.warning("Failed to create engine KG entity for %s (non-fatal)", location_name, exc_info=True)
+
+        try:
+            client = get_client()
+            result = client.agents.create(
+                name=f"Engine: {location_name}",
+                username=username,
+                context=context,
+                platform=self.platform,
+                deployment_config=self._build_deployment_config(),
+                enabled_mcp_tools=["memento-engine"],
+                agent_features={
+                    "maxToolIterations": 5,
+                    "maxParallelToolCalls": 3,
+                },
+                chat_config={
+                    "disableStoringGroups": True,
+                    "disableStoringDMs": True,
+                },
+                agent_env_vars={
+                    "MEMENTO_GATEWAY_URL": self.gateway_url,
+                    "ENGINE_API_TOKEN": self.engine_api_token,
+                },
+            )
+            agent_id = result.get("_id", result.get("id", ""))
+            logger.info("Spawned engine agent: %s → agent %s", location_name, agent_id)
+        except Exception:
+            logger.error("Failed to spawn engine agent for %s", location_name, exc_info=True)
+            return ""
+
+        _register_npc(agent_id, f"Engine: {location_name}", location_name, engine_uuid)
+
+        # Join the engine bot to the location's Matrix room
+        self.ensure_in_room(location_name)
+
         return agent_id
 
     def _spawn_from_kg(

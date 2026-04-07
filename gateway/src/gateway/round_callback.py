@@ -1,4 +1,4 @@
-"""Round close callback — sends player actions to Matrix, then triggers engine."""
+"""Round close callback — sends player actions to Matrix for agent processing."""
 
 from __future__ import annotations
 
@@ -17,10 +17,9 @@ logger = get_logger(__name__)
 def make_round_callback(bridge: MatrixBridge, ws_hub: WebSocketHub):
     """Create an async callback for RoundManager.on_round_close.
 
-    When a round closes:
-    1. Send each player action as a readable message from the player's Matrix user
-       (so NPC agents can see and respond to them)
-    2. Send a batch metadata message for the engine to process
+    When a round closes, send each player action as a readable message from
+    the player's Matrix user. NPC agents and the engine agent see these and
+    respond directly — no batch metadata needed.
     """
 
     async def on_round_close(location: str, actions: list[PlayerAction]) -> None:
@@ -30,42 +29,18 @@ def make_round_callback(bridge: MatrixBridge, ws_hub: WebSocketHub):
 
         room_id = await bridge.get_or_create_room(location)
 
-        # Step 0: Ensure all kicked NPCs are back in the room + reset budgets
+        # Ensure all kicked NPCs are back in the room + reset budgets
         try:
             await bridge.ensure_npcs_in_room(room_id)
         except Exception:
             logger.debug("NPC rejoin failed for %s", location, exc_info=True)
 
-        # Step 1: Send each player action as a readable message from the player
-        # NPC agents see these and can respond
+        # Send each player action — engine agent and NPC agents pick these up
+        # via the bonfires-ai runtime's @tag-based routing
         for a in actions:
             await bridge.send_action(room_id, a.player_id, a.action)
 
-        # Step 2: Send batch metadata for the engine listener
-        action_list = [
-            {
-                "player_id": a.player_id,
-                "player_name": a.player_name,
-                "action": a.action,
-            }
-            for a in actions
-        ]
-
-        content = {
-            "msgtype": "m.text",
-            "body": f"[engine:batch] {len(actions)} actions at {location}",
-            "com.bonfires.rpg": {
-                "type": "player-action-batch",
-                "batch": True,
-                "location": location,
-                "actions": action_list,
-                "channel": "events",
-            },
-        }
-
-        if bridge.client:
-            await bridge.client.room_send(room_id, "m.room.message", content)
-            logger.info("Batch sent to %s: %d actions", location, len(actions))
+        logger.info("Round closed at %s: %d actions sent to agents", location, len(actions))
 
     return on_round_close
 

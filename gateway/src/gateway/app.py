@@ -104,6 +104,14 @@ async def health():
     return {"status": "ok", "matrix_connected": bridge is not None and bridge.connected}
 
 
+@app.get("/api/room-id/{location_name}")
+async def get_room_id(location_name: str):
+    """Look up Matrix room_id for a location name."""
+    if bridge and location_name in bridge.location_to_room:
+        return {"room_id": bridge.location_to_room[location_name]}
+    return {"room_id": ""}
+
+
 # Include routes
 from gateway.routes import action, session, state, entity, chain, engine, inventory, codex, chronicle
 app.include_router(action.router, prefix="/api")
