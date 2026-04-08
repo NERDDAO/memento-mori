@@ -88,6 +88,11 @@ class AgentSpawner:
             deployment_config["matrixAsToken"] = self.matrix_as_token
             deployment_config["matrixHsToken"] = self.matrix_hs_token
 
+        # Default chat config: NPCs disable group storing (room stack is the narrator's),
+        # keep DM storing for personal episodic memory from player conversations.
+        if chat_config is None and "NPC" in labels:
+            chat_config = {"disableStoringGroups": True, "disableStoringDMs": False}
+
         try:
             result = client.agents.create(
                 name=name,
