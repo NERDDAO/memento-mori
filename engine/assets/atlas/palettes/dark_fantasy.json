@@ -1,0 +1,50 @@
+{
+  "biomes": {
+    "crypt": {
+      "primary": ["#2d2d3f", "#4a4a5e", "#3a3a4d"],
+      "accent": ["#8b0000", "#556b2f", "#4a0e0e"],
+      "light": ["#daa520", "#cd853f", "#b8860b"],
+      "wall": "#4a4a5e",
+      "floor": "#2d2d3f",
+      "water": "#1a1a4e"
+    },
+    "forest": {
+      "primary": ["#1a3d1a", "#2d5a2d", "#3a6b3a"],
+      "accent": ["#8b4513", "#556b2f", "#6b4423"],
+      "light": ["#90ee90", "#98fb98", "#7ccd7c"],
+      "wall": "#2d5a2d",
+      "floor": "#1a3d1a",
+      "water": "#1a4a6e"
+    },
+    "village": {
+      "primary": ["#5a4a3a", "#6b5a4a", "#7c6b5a"],
+      "accent": ["#8b4513", "#a0522d", "#cd853f"],
+      "light": ["#deb887", "#d2b48c", "#f5deb3"],
+      "wall": "#6b5a4a",
+      "floor": "#5a4a3a",
+      "water": "#4a7a9e"
+    },
+    "ruins": {
+      "primary": ["#3a3a3a", "#4a4a4a", "#5a5a5a"],
+      "accent": ["#6b8e23", "#556b2f", "#8b8b00"],
+      "light": ["#b0b0b0", "#c0c0c0", "#d0d0d0"],
+      "wall": "#5a5a5a",
+      "floor": "#3a3a3a",
+      "water": "#2a4a5a"
+    },
+    "default": {
+      "primary": ["#2d2d3f", "#3a3a4d", "#4a4a5e"],
+      "accent": ["#8b0000", "#556b2f", "#8b4513"],
+      "light": ["#daa520", "#cd853f", "#b8860b"],
+      "wall": "#4a4a5e",
+      "floor": "#2d2d3f",
+      "water": "#1a1a4e"
+    }
+  },
+  "mood_modifiers": {
+    "dark": {"brightness": -0.2},
+    "eerie": {"brightness": -0.1, "saturation": -0.2},
+    "peaceful": {"brightness": 0.1, "saturation": 0.1},
+    "hostile": {"brightness": -0.1, "saturation": 0.2}
+  }
+}
