@@ -1,0 +1,30 @@
+{
+  "origin": ["#build#. #face#. #distinguishing#."],
+  "build": [
+    "A #height# figure with #body_type# frame",
+    "#height# and #body_type#, with #posture# posture",
+    "Of #height# stature, #body_type# beneath #clothing#"
+  ],
+  "height": ["tall", "short", "average-height", "towering", "diminutive", "broad"],
+  "body_type": ["wiry", "stocky", "gaunt", "muscular", "heavyset", "lean", "weathered"],
+  "posture": ["stooped", "rigid", "relaxed", "hunched", "proud", "guarded"],
+  "clothing": ["a tattered cloak", "worn leather armor", "heavy robes", "a stained apron", "patched travelling clothes", "faded livery"],
+  "face": [
+    "#eyes# eyes peer from a #face_shape# face",
+    "A #face_shape# face dominated by #facial_feature#",
+    "#eyes# eyes and #facial_feature# mark a #face_shape# face"
+  ],
+  "eyes": ["Sharp", "Sunken", "Bright", "Weary", "Cold", "Keen", "Hollow", "Dark"],
+  "face_shape": ["angular", "round", "scarred", "weathered", "gaunt", "broad", "narrow"],
+  "facial_feature": ["a crooked nose", "a thick beard", "ritual scarring", "a missing ear", "a jagged scar", "deep laugh lines", "burn marks"],
+  "distinguishing": [
+    "They carry #carried_item#",
+    "A #trinket# hangs from their #trinket_location#",
+    "#habit# betrays their #background#"
+  ],
+  "carried_item": ["a gnarled walking stick", "a sheathed blade of unusual make", "a bundle of dried herbs", "a heavy ledger", "a lantern that never seems to go out"],
+  "trinket": ["tarnished locket", "bone charm", "holy symbol", "signet ring", "faded ribbon"],
+  "trinket_location": ["neck", "belt", "wrist", "ear"],
+  "habit": ["A nervous twitch", "Calloused hands", "An accent from the eastern provinces", "The way they watch doorways", "Ink-stained fingers"],
+  "background": ["military service", "years at the forge", "a life of hardship", "noble upbringing", "time in the mines", "a scholarly past"]
+}
