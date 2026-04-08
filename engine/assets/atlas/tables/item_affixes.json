@@ -1,0 +1,16 @@
+{
+  "prefixes": {
+    "common": ["Worn", "Simple", "Crude", "Old", "Battered", "Rusty"],
+    "uncommon": ["Sturdy", "Fine", "Sharp", "Tempered", "Reinforced"],
+    "rare": ["Enchanted", "Masterwork", "Blessed", "Gleaming", "Runic"],
+    "epic": ["Soulforged", "Abyssal", "Radiant", "Void-touched", "Mythral"],
+    "legendary": ["Primordial", "Godslayer", "Worldbreaker", "Eternal", "Doomforged"]
+  },
+  "suffixes": {
+    "weapon": ["of Rending", "of the Hunt", "of Wrath", "of Precision", "of Cleaving"],
+    "armor": ["of Warding", "of the Sentinel", "of Thorns", "of Resilience", "of the Bulwark"],
+    "accessory": ["of Insight", "of Haste", "of Fortune", "of Shadows", "of the Wanderer"],
+    "ring": ["of Power", "of Protection", "of the Serpent", "of Binding", "of Vitality"],
+    "consumable": ["of Restoration", "of Clarity", "of Vigor", "of Haste"]
+  }
+}

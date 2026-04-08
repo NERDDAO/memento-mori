@@ -1,0 +1,82 @@
+{
+  "warrior": {
+    "stat_priority": ["STR", "CON", "DEX", "WIS", "INT", "CHA"],
+    "stat_range": {"primary": [14, 18], "secondary": [10, 14], "dump": [6, 10]},
+    "skills": ["melee_combat", "intimidation", "athletics"],
+    "ability_pool": [
+      {"name": "Cleave", "type": "combat", "desc": "Strike multiple adjacent foes"},
+      {"name": "Battle Cry", "type": "combat", "desc": "Inspire fear in nearby enemies"},
+      {"name": "Shield Wall", "type": "defense", "desc": "Reduce incoming damage for a turn"}
+    ]
+  },
+  "scholar": {
+    "stat_priority": ["INT", "WIS", "CHA", "DEX", "CON", "STR"],
+    "stat_range": {"primary": [14, 18], "secondary": [10, 14], "dump": [6, 10]},
+    "skills": ["lore", "perception", "persuasion"],
+    "ability_pool": [
+      {"name": "Arcane Insight", "type": "social", "desc": "Identify magical properties of objects"},
+      {"name": "Counsel", "type": "social", "desc": "Offer advice that grants a temporary buff"},
+      {"name": "Ward", "type": "defense", "desc": "Create a protective barrier"}
+    ]
+  },
+  "merchant": {
+    "stat_priority": ["CHA", "INT", "WIS", "DEX", "CON", "STR"],
+    "stat_range": {"primary": [14, 18], "secondary": [10, 14], "dump": [6, 10]},
+    "skills": ["persuasion", "appraisal", "deception"],
+    "ability_pool": [
+      {"name": "Haggle", "type": "social", "desc": "Negotiate better prices"},
+      {"name": "Appraise", "type": "utility", "desc": "Determine true value of items"},
+      {"name": "Silver Tongue", "type": "social", "desc": "Convince NPCs to reveal information"}
+    ]
+  },
+  "rogue": {
+    "stat_priority": ["DEX", "CHA", "INT", "WIS", "CON", "STR"],
+    "stat_range": {"primary": [14, 18], "secondary": [10, 14], "dump": [6, 10]},
+    "skills": ["stealth", "lockpicking", "sleight_of_hand"],
+    "ability_pool": [
+      {"name": "Backstab", "type": "combat", "desc": "Extra damage from stealth"},
+      {"name": "Shadowstep", "type": "movement", "desc": "Teleport short distance in darkness"},
+      {"name": "Disarm Trap", "type": "utility", "desc": "Safely disable mechanical traps"}
+    ]
+  },
+  "healer": {
+    "stat_priority": ["WIS", "CHA", "CON", "INT", "DEX", "STR"],
+    "stat_range": {"primary": [14, 18], "secondary": [10, 14], "dump": [6, 10]},
+    "skills": ["medicine", "herbalism", "empathy"],
+    "ability_pool": [
+      {"name": "Mend", "type": "healing", "desc": "Restore health to a target"},
+      {"name": "Purify", "type": "healing", "desc": "Remove poison or disease"},
+      {"name": "Sanctuary", "type": "defense", "desc": "Create a zone where combat is suppressed"}
+    ]
+  },
+  "guard": {
+    "stat_priority": ["CON", "STR", "WIS", "DEX", "CHA", "INT"],
+    "stat_range": {"primary": [14, 18], "secondary": [10, 14], "dump": [6, 10]},
+    "skills": ["perception", "melee_combat", "intimidation"],
+    "ability_pool": [
+      {"name": "Stand Firm", "type": "defense", "desc": "Cannot be moved or knocked down"},
+      {"name": "Detain", "type": "combat", "desc": "Restrain a target for one turn"},
+      {"name": "Alert", "type": "utility", "desc": "Call for reinforcements"}
+    ]
+  },
+  "innkeeper": {
+    "stat_priority": ["CHA", "WIS", "CON", "INT", "DEX", "STR"],
+    "stat_range": {"primary": [12, 16], "secondary": [10, 14], "dump": [8, 12]},
+    "skills": ["persuasion", "cooking", "gossip"],
+    "ability_pool": [
+      {"name": "Hearty Meal", "type": "healing", "desc": "Restore health through a warm meal"},
+      {"name": "Rumour Mill", "type": "social", "desc": "Share local gossip and quest hooks"},
+      {"name": "Barkeep's Eye", "type": "utility", "desc": "Spot trouble before it starts"}
+    ]
+  },
+  "default": {
+    "stat_priority": ["CON", "WIS", "CHA", "STR", "DEX", "INT"],
+    "stat_range": {"primary": [12, 16], "secondary": [10, 14], "dump": [8, 12]},
+    "skills": ["perception", "survival", "persuasion"],
+    "ability_pool": [
+      {"name": "Endure", "type": "defense", "desc": "Resist one negative effect"},
+      {"name": "Barter", "type": "social", "desc": "Trade items at fair value"},
+      {"name": "Keen Senses", "type": "utility", "desc": "Detect hidden objects or passages"}
+    ]
+  }
+}
