@@ -17,10 +17,22 @@ export interface LocationExit {
 }
 
 export interface LocationEntity {
-  name: string;
   id: string;
+  name: string;
   role?: string;
   ascii_art?: string;  // cached ASCII art
+  // Art department attributes
+  scene_art?: string;
+  scene_art_w?: number;
+  scene_art_h?: number;
+  portrait_sprite?: string;  // base64 PNG
+  portrait_w?: number;
+  portrait_h?: number;
+  icon_sprite?: string;      // base64 PNG
+  icon_w?: number;
+  icon_h?: number;
+  tile_glyph?: string;
+  tile_fg?: string;
   x?: number;
   y?: number;
 }
@@ -136,13 +148,24 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
   if (update.exits) state.location.exits = update.exits as LocationExit[];
   if (update.npcs) {
     state.location.npcs = update.npcs.map((n: EntityRefUpdate) => {
-      // Preserve cached ascii_art from previous state if not in update
+      // Preserve cached ascii_art and art attributes from previous state if not in update
       const existing = state.location.npcs.find(e => e.id === n.id);
       return {
         name: n.name || '',
         id: n.id || '',
         role: n.role || '',
         ascii_art: existing?.ascii_art,
+        scene_art: existing?.scene_art,
+        scene_art_w: existing?.scene_art_w,
+        scene_art_h: existing?.scene_art_h,
+        portrait_sprite: existing?.portrait_sprite,
+        portrait_w: existing?.portrait_w,
+        portrait_h: existing?.portrait_h,
+        icon_sprite: existing?.icon_sprite,
+        icon_w: existing?.icon_w,
+        icon_h: existing?.icon_h,
+        tile_glyph: existing?.tile_glyph,
+        tile_fg: existing?.tile_fg,
         x: n.x,
         y: n.y,
       };
@@ -156,6 +179,17 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
         id: i.id || '',
         role: i.role || '',
         ascii_art: existing?.ascii_art,
+        scene_art: existing?.scene_art,
+        scene_art_w: existing?.scene_art_w,
+        scene_art_h: existing?.scene_art_h,
+        portrait_sprite: existing?.portrait_sprite,
+        portrait_w: existing?.portrait_w,
+        portrait_h: existing?.portrait_h,
+        icon_sprite: existing?.icon_sprite,
+        icon_w: existing?.icon_w,
+        icon_h: existing?.icon_h,
+        tile_glyph: existing?.tile_glyph,
+        tile_fg: existing?.tile_fg,
         x: i.x,
         y: i.y,
       };
@@ -194,6 +228,17 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
           id: n.id || '',
           role: n.role || '',
           ascii_art: existing?.ascii_art,
+          scene_art: existing?.scene_art,
+          scene_art_w: existing?.scene_art_w,
+          scene_art_h: existing?.scene_art_h,
+          portrait_sprite: existing?.portrait_sprite,
+          portrait_w: existing?.portrait_w,
+          portrait_h: existing?.portrait_h,
+          icon_sprite: existing?.icon_sprite,
+          icon_w: existing?.icon_w,
+          icon_h: existing?.icon_h,
+          tile_glyph: existing?.tile_glyph,
+          tile_fg: existing?.tile_fg,
           x: n.x,
           y: n.y,
         };
@@ -206,6 +251,17 @@ export function applyStateUpdate(state: GameState, update: StateUpdate): void {
           name: i.name || '',
           id: i.id || '',
           ascii_art: existing?.ascii_art,
+          scene_art: existing?.scene_art,
+          scene_art_w: existing?.scene_art_w,
+          scene_art_h: existing?.scene_art_h,
+          portrait_sprite: existing?.portrait_sprite,
+          portrait_w: existing?.portrait_w,
+          portrait_h: existing?.portrait_h,
+          icon_sprite: existing?.icon_sprite,
+          icon_w: existing?.icon_w,
+          icon_h: existing?.icon_h,
+          tile_glyph: existing?.tile_glyph,
+          tile_fg: existing?.tile_fg,
           x: i.x,
           y: i.y,
         };

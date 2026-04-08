@@ -6,6 +6,7 @@
 
 import { prepare, layout } from '@chenglou/pretext';
 import type { EntityCardData } from './entity-card';
+import { drawSpriteCentered } from '../ui/sprite-renderer';
 
 const CARD_FONT = '13px monospace';
 const CARD_BOLD_FONT = 'bold 14px monospace';
@@ -44,6 +45,7 @@ export interface CardContent {
   labels: string[];
   summary: string;
   hint?: string;
+  portrait_sprite?: string;
   // Player-specific
   health?: number;
   maxHealth?: number;
@@ -125,6 +127,13 @@ export function drawCard(
       curY += LINE_H;
     }
     curY += LINE_H * 0.5; // half-line spacing
+  }
+
+  // Portrait sprite
+  if (content.portrait_sprite) {
+    curY += 4;
+    const spriteH = drawSpriteCentered(ctx, x, CARD_W, curY, content.portrait_sprite, 2);
+    if (spriteH > 0) curY += spriteH + 4;
   }
 
   // Health bar
