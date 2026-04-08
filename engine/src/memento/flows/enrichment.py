@@ -148,14 +148,26 @@ def enrich_entity_art(
     existing_summary: str,
     existing_attributes: dict,
 ) -> str | None:
-    """Generate ASCII art for a single entity. Returns art text or None on failure."""
-    from memento.models.attributes import needs_art
+    """Generate art for a single entity via the art department dispatcher.
 
+    Fallback for entities that missed art during NPC/item/world gen.
+    Returns art text (for ASCII scene art) or None.
+    """
     if entity_uuid in _art_enriched:
         return None
     _art_enriched.add(entity_uuid)
 
-    if not needs_art(existing_attributes):
+    attrs = existing_attributes or {}
+
+    # Check if art already exists (new attributes from art department)
+    if entity_type == "location" and attrs.get("scene_art"):
+        return None
+    if entity_type == "npc" and attrs.get("portrait_sprite"):
+        return None
+    if entity_type == "item" and attrs.get("icon_sprite"):
+        return None
+    # Legacy check
+    if attrs.get("ascii_art"):
         return None
 
     logger.info("Generating art for %s '%s'", entity_type, entity_name)
@@ -163,7 +175,7 @@ def enrich_entity_art(
     # Build a description from summary + key attributes
     desc_parts = [existing_summary or ""]
     for key in ("description", "personality", "atmosphere", "backstory"):
-        val = existing_attributes.get(key)
+        val = attrs.get(key)
         if val and isinstance(val, str):
             desc_parts.append(val)
     description = " ".join(p for p in desc_parts if p)[:500]
@@ -172,32 +184,25 @@ def enrich_entity_art(
         description = f"A {entity_type} named {entity_name}"
 
     try:
-        if entity_type == "location":
-            from memento.crews.ascii_art.crew import make_scene_art_crew
-            crew = make_scene_art_crew(entity_name, description, "dark fantasy", 35, 20)
-        else:
-            from memento.crews.ascii_art.crew import make_entity_art_crew
-            crew = make_entity_art_crew(entity_name, entity_type, description, 20, 12)
+        from memento.flows.art_gen import generate_entity_art
 
-        result = crew.kickoff()
-        art_text = (result.raw if hasattr(result, "raw") else str(result)).strip()
+        # Infer labels from entity type
+        label_map = {"location": ["Location"], "npc": ["NPC"], "item": ["Item"]}
+        labels = label_map.get(entity_type, [entity_type.capitalize()])
+        biome = attrs.get("biome", "default")
+        mood = attrs.get("mood", "dark")
 
-        if not art_text:
-            return None
-
-        # Persist to KG
-        merged = {**existing_attributes, "ascii_art": art_text}
-        client = get_client()
-        try:
-            current = client.kg.get_entity(entity_uuid)
-            labels = current.get("labels", [])
-        except Exception:
-            labels = []
-        client.kg.update_entity(
-            entity_uuid, entity_name, labels, existing_summary, attributes=merged,
+        generate_entity_art(
+            entity_uid=entity_uuid,
+            name=entity_name,
+            entity_type=entity_type,
+            description=description,
+            labels=labels,
+            biome=biome,
+            mood=mood,
         )
         logger.info("Generated art for %s '%s'", entity_type, entity_name)
-        return art_text
+        return "dispatched"
 
     except Exception:
         logger.warning("Art generation failed for %s '%s'", entity_type, entity_name, exc_info=True)
