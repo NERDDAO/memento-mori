@@ -21,6 +21,7 @@ from memento.core import LLM
 from memento.crews.context import make_context_crew
 from memento.crews.faction.reputation import make_reputation_crew
 from memento.crews.narrative.narration import make_narration_crew
+from memento.tools.procgen.text_gen import generate_narration_scaffold
 from memento.flows.combat import CombatFlow
 from memento.flows.episodic_memory import EpisodicMemoryFlow
 from memento.flows.event_detection import EventDetectionFlow
@@ -416,11 +417,13 @@ class RoundController:
             if mode == "action"
             else f"Action rejected: {self.rejection_reason}"
         )
+        narr_scaffold = generate_narration_scaffold()
         crew = make_narration_crew(
             action=self.combined_action,
             context=self.context,
             events=events_str,
             mode=mode,
+            scaffold=narr_scaffold,
         )
         result = crew.kickoff()
         self.narrative = result.raw

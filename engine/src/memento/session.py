@@ -7,6 +7,7 @@ import json
 from memento.bonfires_client import get_client
 from memento.config.archetypes import get_archetype
 from memento.crews.narrative.narration import make_narration_crew
+from memento.tools.procgen.text_gen import generate_narration_scaffold
 from memento.log import get_logger
 
 logger = get_logger(__name__)
@@ -337,11 +338,13 @@ class SessionManager:
     def _generate_opening(self, player_name: str, location_name: str) -> str:
         """Generate opening narration for a new player."""
         try:
+            narr_scaffold = generate_narration_scaffold()
             crew = make_narration_crew(
                 action="arrive for the first time",
                 context=f"Player '{player_name}' is entering '{location_name}' for the first time.",
                 events="New player arrival. First moments in the world.",
                 mode="intro",
+                scaffold=narr_scaffold,
             )
             result = crew.kickoff()
             return result.raw

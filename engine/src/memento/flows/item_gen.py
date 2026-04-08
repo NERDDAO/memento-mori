@@ -1,5 +1,6 @@
 """Item generation flow — creates items for a location."""
 
+import json as _json
 import logging
 import re
 
@@ -9,6 +10,7 @@ from pydantic import BaseModel
 from memento.crews.item_gen.concept import make_item_concept_crew
 from memento.crews.item_gen.mechanics import make_item_mechanics_crew
 from memento.crews.item_gen.balance import make_balance_review_crew
+from memento.tools.procgen.stat_roller import roll_loot
 
 _logger = logging.getLogger(__name__)
 
@@ -25,10 +27,17 @@ class ItemGenState(BaseModel):
 class ItemGenerationFlow(Flow[ItemGenState]):
     @start()
     def concept_items(self):
+        loot_scaffold = roll_loot(
+            rarity_budget=self.state.rarity_budget,
+            num_items=self.state.num_items,
+        )
+        scaffold_text = "Pre-rolled items (refine names, add lore, adjust as needed):\n"
+        scaffold_text += _json.dumps(loot_scaffold, indent=2)
         crew = make_item_concept_crew(
             location_name=self.state.location_name,
             rarity_budget=self.state.rarity_budget,
             num_items=self.state.num_items,
+            scaffold=scaffold_text,
         )
         result = crew.kickoff()
         self.state.item_concepts = result.raw
@@ -36,7 +45,10 @@ class ItemGenerationFlow(Flow[ItemGenState]):
 
     @listen(concept_items)
     def mechanize_items(self, concepts):
-        crew = make_item_mechanics_crew(item_concept=concepts)
+        crew = make_item_mechanics_crew(
+            item_concept=concepts,
+            scaffold="Stats were pre-rolled in the concept scaffold. Refine as needed.",
+        )
         result = crew.kickoff()
         self.state.items_mechanized = result.raw
         return result.raw

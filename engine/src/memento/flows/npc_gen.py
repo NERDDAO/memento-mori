@@ -11,6 +11,8 @@ from memento.crews.npc_gen.planning import make_npc_planning_crew
 from memento.crews.npc_gen.concept import make_concept_crew
 from memento.crews.npc_gen.mechanics import make_mechanics_crew
 from memento.crews.npc_gen.finalization import make_finalization_crew
+from memento.tools.procgen.text_gen import generate_npc_scaffold
+from memento.tools.procgen.stat_roller import roll_npc_stats
 
 _logger = logging.getLogger(__name__)
 
@@ -84,15 +86,30 @@ class NPCGenerationFlow(Flow[NPCGenState]):
         # We'll generate 2 NPCs from the plan
         for i in range(2):
             # Concept
+            npc_scaffold = generate_npc_scaffold(
+                role=f"NPC {i+1} from this plan:\n{roles}",
+                location=self.state.location_name,
+            )
             concept_crew = make_concept_crew(
                 npc_role=f"NPC {i+1} from this plan:\n{roles}",
                 location_name=self.state.location_name,
                 region_context=self.state.region_context,
+                scaffold=npc_scaffold,
             )
             concept = concept_crew.kickoff().raw
 
             # Mechanics
-            mech_crew = make_mechanics_crew(npc_concept=concept)
+            archetype = "default"
+            for arch_name in ("warrior", "scholar", "merchant", "rogue", "healer", "guard", "innkeeper"):
+                if arch_name in concept.lower():
+                    archetype = arch_name
+                    break
+            stat_scaffold = roll_npc_stats(archetype)
+            stat_text = json.dumps(stat_scaffold, indent=2)
+            mech_crew = make_mechanics_crew(
+                npc_concept=concept,
+                scaffold=f"Pre-rolled stats (adjust as needed):\n{stat_text}",
+            )
             mechanized = mech_crew.kickoff().raw
 
             # Finalization — write to KG

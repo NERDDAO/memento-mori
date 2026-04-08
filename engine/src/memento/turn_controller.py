@@ -122,11 +122,14 @@ class TurnController:
             logger.debug("Could not read latest episode for narration context", exc_info=True)
 
         from memento.crews.narrative.narration import make_narration_crew
+        from memento.tools.procgen.text_gen import generate_narration_scaffold
+        narr_scaffold = generate_narration_scaffold()
         crew = make_narration_crew(
             action=self.combined_action,
             context=context,
             events="",
             mode="action",
+            scaffold=narr_scaffold,
         )
         result = crew.kickoff()
         return result.raw

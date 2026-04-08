@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from memento.crews.world_gen.region_design import make_region_design_crew
 from memento.crews.world_gen.location_planning import make_location_planning_crew
+from memento.tools.procgen.text_gen import generate_location_scaffold
 from memento.crews.world_gen.location import make_location_crew
 from memento.crews.world_gen.exit_connection import make_exit_connection_crew
 from memento.flows.npc_gen import NPCGenerationFlow
@@ -39,9 +40,11 @@ class WorldGenState(BaseModel):
 class WorldGenFlow(Flow[WorldGenState]):
     @start()
     def design_region(self):
+        region_scaffold = generate_location_scaffold()
         crew = make_region_design_crew(
             theme=self.state.theme,
             player_level=self.state.player_level,
+            scaffold=f"Terrain sketch (use as inspiration):\n{region_scaffold}",
         )
         result = crew.kickoff()
         self.state.region_concept = result.raw
@@ -51,7 +54,11 @@ class WorldGenFlow(Flow[WorldGenState]):
 
     @listen(design_region)
     def plan_locations(self, region_concept):
-        crew = make_location_planning_crew(region_concept=region_concept)
+        loc_scaffolds = "\n---\n".join(generate_location_scaffold() for _ in range(3))
+        crew = make_location_planning_crew(
+            region_concept=region_concept,
+            scaffold=f"Location atmosphere seeds:\n{loc_scaffolds}",
+        )
         result = crew.kickoff()
         self.state.location_plans = result.raw
         return result.raw
