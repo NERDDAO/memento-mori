@@ -1,0 +1,130 @@
+{
+  "origin": [
+    "#prefix# #base#"
+  ],
+  "prefix": [
+    "#common_prefix#"
+  ],
+  "common_prefix": [
+    "Worn",
+    "Simple",
+    "Crude",
+    "Old",
+    "Battered",
+    "Rusty",
+    "Cracked",
+    "Dull"
+  ],
+  "uncommon_prefix": [
+    "Sturdy",
+    "Fine",
+    "Sharp",
+    "Tempered",
+    "Reinforced",
+    "Polished",
+    "Hardened"
+  ],
+  "rare_prefix": [
+    "Enchanted",
+    "Masterwork",
+    "Blessed",
+    "Gleaming",
+    "Runic",
+    "Warden's"
+  ],
+  "epic_prefix": [
+    "Soulforged",
+    "Abyssal",
+    "Radiant",
+    "Void-touched",
+    "Mythral",
+    "Primeval"
+  ],
+  "legendary_prefix": [
+    "Primordial",
+    "Godslayer",
+    "Worldbreaker",
+    "Eternal",
+    "Doomforged"
+  ],
+  "base": [
+    "#weapon_base#"
+  ],
+  "weapon_base": [
+    "Sword",
+    "Axe",
+    "Dagger",
+    "Mace",
+    "Spear",
+    "Bow",
+    "Staff",
+    "Hammer",
+    "Blade",
+    "Halberd"
+  ],
+  "armor_base": [
+    "Shield",
+    "Helm",
+    "Breastplate",
+    "Greaves",
+    "Gauntlets",
+    "Chainmail",
+    "Buckler",
+    "Pauldrons"
+  ],
+  "accessory_base": [
+    "Amulet",
+    "Cloak",
+    "Belt",
+    "Boots",
+    "Bracers",
+    "Circlet",
+    "Talisman",
+    "Pendant"
+  ],
+  "ring_base": [
+    "Ring",
+    "Band",
+    "Signet",
+    "Loop"
+  ],
+  "consumable_base": [
+    "Potion",
+    "Elixir",
+    "Salve",
+    "Tonic",
+    "Draught",
+    "Vial",
+    "Flask"
+  ],
+  "weapon_suffix": [
+    "of Rending",
+    "of the Hunt",
+    "of Wrath",
+    "of Precision",
+    "of Cleaving",
+    "of the Viper"
+  ],
+  "armor_suffix": [
+    "of Warding",
+    "of the Sentinel",
+    "of Thorns",
+    "of Resilience",
+    "of the Bulwark"
+  ],
+  "accessory_suffix": [
+    "of Insight",
+    "of Haste",
+    "of Fortune",
+    "of Shadows",
+    "of the Wanderer"
+  ],
+  "ring_suffix": [
+    "of Power",
+    "of Protection",
+    "of the Serpent",
+    "of Binding",
+    "of Vitality"
+  ],
+  "consumable_suffix": []
+}

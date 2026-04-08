@@ -117,13 +117,28 @@ def update_grammar(
 
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
-    # Clear grammar cache if it's a grammar file
+    # Clear grammar cache and update TrimTab index if available
+    grammar_name = file_path.split("/")[-1]
     try:
-        from memento.tools.procgen.text_gen import _GRAMMAR_CACHE
-        grammar_name = file_path.split("/")[-1]
+        from memento.tools.procgen.text_gen import _GRAMMAR_CACHE, _TRIMTAB_CACHE
         _GRAMMAR_CACHE.pop(grammar_name, None)
+        _TRIMTAB_CACHE.pop(grammar_name, None)
     except ImportError:
         pass
+
+    # If this is a grammar file and has a .sg index, add to TrimTab directly
+    if file_path.startswith("grammars/") and mode == "append":
+        sg_dir = path.parent / f"{grammar_name}.sg"
+        if sg_dir.exists():
+            try:
+                from trimtab import SmartGrammar
+                sg = SmartGrammar.load(str(sg_dir))
+                # key_path is the rule name for grammar files
+                sg.add(key_path, value)
+                sg.save(str(sg_dir))
+                logger.info("TrimTab index updated for %s.%s", grammar_name, key_path)
+            except Exception:
+                logger.debug("TrimTab index update skipped for %s", grammar_name)
 
     logger.info("Updated %s at key '%s' (mode=%s)", file_path, key_path, mode)
     return f"Updated {file_path} at '{key_path}'"
