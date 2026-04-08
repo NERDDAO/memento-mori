@@ -47,7 +47,7 @@ def create_entity(name: str, entity_type: str, summary: str) -> str:
     Returns the UUID of the created entity."""
     client = get_client()
     labels = [_sanitize_label(entity_type)]
-    uuid = client.kg.create_entity(name, labels, {"summary": summary})
+    uuid = client.kg.create_entity(name, labels, {}, summary=summary)
     # Chain dual-write (Characters + Items only — locations/events are offchain)
     if _chain.is_enabled():
         entity_type_lower = entity_type.lower()
