@@ -164,4 +164,24 @@ class WorldGenFlow(Flow[WorldGenState]):
                     logger.info("Persisted room_map for %s", loc_info.name)
         except Exception:
             logger.warning("Failed to persist room_maps", exc_info=True)
+
+        # Generate art for each location in background
+        import threading
+        from memento.flows.art_gen import generate_entity_art
+        for loc_info in self.state.locations:
+            if loc_info.uuid:
+                threading.Thread(
+                    target=generate_entity_art,
+                    args=(
+                        loc_info.uuid,
+                        loc_info.name,
+                        "location",
+                        loc_info.description,
+                        ["Location"],
+                        "default",
+                        "dark",
+                    ),
+                    daemon=True,
+                ).start()
+
         return "done"

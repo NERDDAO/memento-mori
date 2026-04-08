@@ -109,18 +109,18 @@ class NPCGenerationFlow(Flow[NPCGenState]):
             except Exception:
                 _logger.debug("Attribute persistence skipped for NPC at %s", self.state.location_name)
 
-            # Generate ASCII art for the new NPC in background
+            # Generate art for the new NPC in background
             try:
                 npc_uuid = re.search(r"UUID:\s*([a-f0-9-]+)", result.raw, re.IGNORECASE)
                 if npc_uuid:
                     import threading
-                    from memento.flows.enrichment import enrich_entity_art
+                    from memento.flows.art_gen import generate_entity_art
                     _uid = npc_uuid.group(1)
                     _name = concept[:50]
                     _desc = concept[:500]
                     threading.Thread(
-                        target=enrich_entity_art,
-                        args=(_uid, _name, "npc", _desc, {}),
+                        target=generate_entity_art,
+                        args=(_uid, _name, "npc", _desc, ["NPC"], "default", "dark"),
                         daemon=True,
                     ).start()
             except Exception:
