@@ -17,6 +17,7 @@ dependencies = [
     "Pillow>=10.0",
     "numpy>=1.24",
     "tracery>=0.1.1",
+    "trimtab>=0.1.0",
 ]
 
 [project.optional-dependencies]
