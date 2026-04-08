@@ -9,6 +9,7 @@ def make_region_design_crew(
     theme: str,
     adjacent_regions: str = "",
     player_level: int = 1,
+    scaffold: str = "",
 ) -> Crew:
     """Build a crew that designs a full region and persists it to the KG."""
     model = get_model_for_crew("region_design")
@@ -64,6 +65,11 @@ def make_region_design_crew(
         ),
         agent=geographer,
     )
+    if scaffold:
+        geographer_task.description += (
+            "\n\nSCAFFOLD (use as starting point, modify freely, or discard if it doesn't fit):\n"
+            + scaffold
+        )
 
     cultural_designer_task = Task(
         description=(

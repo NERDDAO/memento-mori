@@ -5,7 +5,7 @@ from memento.config import get_model_for_crew
 from memento.tools.mechanics import roll_skill_check
 
 
-def make_mechanics_crew(npc_concept: str) -> Crew:
+def make_mechanics_crew(npc_concept: str, scaffold: str = "") -> Crew:
     """Build a crew that assigns balanced attributes, skills, and abilities to an NPC."""
     model = get_model_for_crew("npc_mechanics")
 
@@ -49,6 +49,11 @@ def make_mechanics_crew(npc_concept: str) -> Crew:
         ),
         agent=stat_builder,
     )
+    if scaffold:
+        stat_task.description += (
+            "\n\nSCAFFOLD (use as starting point, modify freely, or discard if it doesn't fit):\n"
+            + scaffold
+        )
 
     ability_task = Task(
         description=(

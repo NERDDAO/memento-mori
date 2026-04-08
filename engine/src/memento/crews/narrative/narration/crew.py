@@ -7,7 +7,7 @@ from memento.tools.kg import search_world
 
 
 def make_narration_crew(
-    action: str, context: str, events: str, mode: str = "action"
+    action: str, context: str, events: str, mode: str = "action", scaffold: str = ""
 ) -> Crew:
     """Build a narration crew.
 
@@ -64,6 +64,11 @@ def make_narration_crew(
         ),
         agent=narrator,
     )
+    if scaffold:
+        narrate_task.description += (
+            "\n\nSCAFFOLD (use as starting point, modify freely, or discard if it doesn't fit):\n"
+            + scaffold
+        )
 
     filter_task = Task(
         description=(

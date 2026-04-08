@@ -5,7 +5,7 @@ from memento.config import get_model_for_crew
 from memento.tools.kg import create_edge, search_world
 
 
-def make_exit_connection_crew(locations: str, region_name: str) -> Crew:
+def make_exit_connection_crew(locations: str, region_name: str, scaffold: str = "") -> Crew:
     """Build a crew that connects locations with EXIT_TO edges in the KG."""
     model = get_model_for_crew("exit_connection")
 
@@ -38,6 +38,11 @@ def make_exit_connection_crew(locations: str, region_name: str) -> Crew:
         ),
         agent=exit_connector,
     )
+    if scaffold:
+        connection_task.description += (
+            "\n\nSCAFFOLD (use as starting point, modify freely, or discard if it doesn't fit):\n"
+            + scaffold
+        )
 
     return Crew(
         agents=[exit_connector],

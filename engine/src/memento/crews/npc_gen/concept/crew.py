@@ -9,6 +9,7 @@ def make_concept_crew(
     npc_role: str,
     location_name: str,
     region_context: str = "",
+    scaffold: str = "",
 ) -> Crew:
     """Build a crew that fleshes out an NPC's concept and personality."""
     model = get_model_for_crew("npc_concept")
@@ -49,6 +50,11 @@ def make_concept_crew(
         ),
         agent=concept_artist,
     )
+    if scaffold:
+        concept_task.description += (
+            "\n\nSCAFFOLD (use as starting point, modify freely, or discard if it doesn't fit):\n"
+            + scaffold
+        )
 
     personality_task = Task(
         description=(

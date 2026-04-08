@@ -10,6 +10,7 @@ def make_item_concept_crew(
     location_name: str,
     rarity_budget: str = "common",
     num_items: int = 3,
+    scaffold: str = "",
 ) -> Crew:
     """Build an item concept crew for a given location."""
     model = get_model_for_crew("item_concept")
@@ -45,6 +46,11 @@ def make_item_concept_crew(
         ),
         agent=item_concepter,
     )
+    if scaffold:
+        concept_task.description += (
+            "\n\nSCAFFOLD (use as starting point, modify freely, or discard if it doesn't fit):\n"
+            + scaffold
+        )
 
     return Crew(
         agents=[item_concepter],
