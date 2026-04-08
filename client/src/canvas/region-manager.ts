@@ -148,11 +148,39 @@ export function computeRegions(totalCols: number, totalRows: number): Map<string
     scrollOffset: 0,
   });
 
+  // Split viewport into map (offscreen canvas) and cards (CharCell grid)
+  const CARDS_COLS = 52; // enough for 2 NPC cards side-by-side with title-inset borders
+  const cardsCols = Math.min(CARDS_COLS, Math.floor(viewportCols * 0.55));
+  const mapCols = viewportCols - cardsCols - 1; // -1 for vDiv between map and cards
+  const colCards = colViewport + mapCols + 1; // after map + vDiv
+  const colMapVDiv = colViewport + mapCols; // vertical divider between map and cards
+
   add({
-    name: 'viewport',
+    name: 'map',
     col: colViewport,
     row: rowTopStart,
-    cols: viewportCols,
+    cols: mapCols,
+    rows: topZoneRows,
+    type: 'grid',
+    scrollOffset: 0,
+  });
+
+  add({
+    name: 'cards',
+    col: colCards,
+    row: rowTopStart,
+    cols: cardsCols,
+    rows: topZoneRows,
+    type: 'grid',
+    scrollOffset: 0,
+  });
+
+  // Vertical divider between map and cards
+  add({
+    name: '_vDivMap',
+    col: colMapVDiv,
+    row: rowTopStart,
+    cols: 1,
     rows: topZoneRows,
     type: 'grid',
     scrollOffset: 0,

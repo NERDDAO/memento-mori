@@ -76,6 +76,7 @@ export function drawBorders(
   const sDiv1 = regions.get('_sDiv1');
 
   const vDiv2 = regions.get('_vDiv2');
+  const vDivMap = regions.get('_vDivMap');
 
   if (!hDiv0 || !hDiv1 || !hDiv2 || !hDiv3 || !vDiv0 || !vDiv1 || !sDiv0 || !sDiv1) {
     console.warn('[border-renderer] Missing divider metadata regions — skipping border draw');
@@ -127,6 +128,9 @@ export function drawBorders(
     }
     if (vDiv2 && row >= vDiv2.row && row < vDiv2.row + vDiv2.rows) {
       setCell(grid, row, vDiv2.col, '\u256A', fg); // ╪ double-H × single-V (crossing)
+    }
+    if (vDivMap && row >= vDivMap.row && row < vDivMap.row + vDivMap.rows) {
+      setCell(grid, row, vDivMap.col, '\u256A', fg); // ╪ double-H × single-V (crossing)
     }
   }
 
@@ -235,7 +239,16 @@ export function drawBorders(
   // However, hDivs DO span the full inner width and cross double-V columns at col 0/lastCol
   // — already handled by D_ML/D_MR in drawHDiv().
 
-  // ── 7. vDiv2: narrative | viewer divider in bottom zone ──────────
+  // ── 7. vDivMap: map | cards divider in top zone ───────────────────
+  if (vDivMap) {
+    vLine(grid, vDivMap.col, vDivMap.row, vDivMap.row + vDivMap.rows - 1, S_V, fg);
+    // Junction at hDiv0 (above top zone): single-V goes down from double-H
+    setCell(grid, hDiv0.row, vDivMap.col, M_SV_DH_T, fg); // ╥
+    // Junction at hDiv1 (below top zone): single-V comes from above
+    setCell(grid, hDiv1.row, vDivMap.col, '╧', fg); // ╧
+  }
+
+  // ── 8. vDiv2: narrative | viewer divider in bottom zone ──────────
   if (vDiv2) {
     vLine(grid, vDiv2.col, vDiv2.row, vDiv2.row + vDiv2.rows - 1, S_V, fg);
     // Junction at hDiv1 (top of bottom zone): vDiv2 starts below → ╤ (single-V goes down from double-H)

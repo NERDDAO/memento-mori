@@ -1,16 +1,19 @@
 // src/panels/viewer.ts
 /**
- * ASCII art viewer panel — displays scene art or entity art in the
- * bottom-center region of the unified canvas.
+ * ASCII art viewer panel — renders scene/entity art onto an offscreen canvas
+ * that scales to fit the region, avoiding cropping.
  */
 
-import type { PanelResult } from '../canvas/types';
-import type { CharCell } from '../renderer/canvas-text';
 import { theme } from '../renderer/theme';
-import { ATTR_BOLD } from '../renderer/canvas-text';
+
+const ART_FONT = '13px monospace';
+const ART_LINE_HEIGHT = 16;
+const ART_CHAR_WIDTH = 8; // approximate monospace char width at 13px
 
 let currentArt: string[] | null = null;
 let currentLabel: string = '';
+let offscreen: HTMLCanvasElement | null = null;
+let offscreenCtx: CanvasRenderingContext2D | null = null;
 
 /** Set the art to display. Pass null to clear. */
 export function setViewerArt(lines: string[] | null, label?: string): void {
@@ -23,74 +26,51 @@ export function getViewerArt(): string[] | null {
   return currentArt;
 }
 
-/** Render the viewer panel as CharCell[][]. */
-export function renderViewer(cols: number, rows: number): PanelResult {
-  const cells: CharCell[][] = [];
-  const dim = theme.colors.dim;
-  const primary = theme.colors.primary;
+/** Render the viewer art onto an offscreen canvas. Returns null if no art. */
+export function renderViewerCanvas(): HTMLCanvasElement | null {
+  if (!currentArt || currentArt.length === 0) return null;
 
-  if (!currentArt || currentArt.length === 0) {
-    // Empty state — show dim placeholder
-    for (let r = 0; r < rows; r++) {
-      const row: CharCell[] = [];
-      for (let c = 0; c < cols; c++) {
-        row.push({ char: ' ', fg: dim });
-      }
-      cells.push(row);
-    }
-    // Center a dim label
-    const label = '~ no scene ~';
-    const startCol = Math.max(0, Math.floor((cols - label.length) / 2));
-    const midRow = Math.floor(rows / 2);
-    if (midRow < rows) {
-      for (let i = 0; i < label.length && startCol + i < cols; i++) {
-        cells[midRow][startCol + i] = { char: label[i], fg: dim };
-      }
-    }
-    return { cells };
+  if (!offscreen) {
+    offscreen = document.createElement('canvas');
+    offscreenCtx = offscreen.getContext('2d')!;
   }
 
-  // Render art lines
-  let artRow = 0;
+  const ctx = offscreenCtx!;
+  const lines = currentArt;
 
-  // Title row if label exists
+  // Measure content size
+  const maxLineLen = Math.max(...lines.map(l => l.length));
+  const labelHeight = currentLabel ? ART_LINE_HEIGHT + 4 : 0;
+  const artW = maxLineLen * ART_CHAR_WIDTH + 16; // padding
+  const artH = lines.length * ART_LINE_HEIGHT + labelHeight + 8; // padding
+
+  offscreen.width = artW;
+  offscreen.height = artH;
+
+  // Clear
+  ctx.fillStyle = theme.colors.bg;
+  ctx.fillRect(0, 0, artW, artH);
+
+  let curY = 4;
+
+  // Label
   if (currentLabel) {
-    const row: CharCell[] = [];
-    const title = currentLabel.slice(0, cols);
-    for (let c = 0; c < cols; c++) {
-      if (c < title.length) {
-        row.push({ char: title[c], fg: theme.colors.npc, attrs: ATTR_BOLD });
-      } else {
-        row.push({ char: ' ', fg: dim });
-      }
-    }
-    cells.push(row);
-    artRow++;
+    ctx.font = 'bold 14px monospace';
+    ctx.fillStyle = theme.colors.npc;
+    ctx.textAlign = 'left';
+    ctx.fillText(currentLabel, 8, curY + ART_LINE_HEIGHT * 0.8);
+    curY += ART_LINE_HEIGHT + 4;
   }
 
   // Art lines
-  for (const line of currentArt) {
-    if (artRow >= rows) break;
-    const row: CharCell[] = [];
-    for (let c = 0; c < cols; c++) {
-      if (c < line.length) {
-        row.push({ char: line[c], fg: primary });
-      } else {
-        row.push({ char: ' ', fg: dim });
-      }
-    }
-    cells.push(row);
-    artRow++;
+  ctx.font = ART_FONT;
+  ctx.fillStyle = theme.colors.primary;
+  ctx.textAlign = 'left';
+
+  for (const line of lines) {
+    curY += ART_LINE_HEIGHT;
+    ctx.fillText(line, 8, curY - 2);
   }
 
-  // Fill remaining rows
-  while (cells.length < rows) {
-    const row: CharCell[] = [];
-    for (let c = 0; c < cols; c++) {
-      row.push({ char: ' ', fg: dim });
-    }
-    cells.push(row);
-  }
-
-  return { cells };
+  return offscreen;
 }

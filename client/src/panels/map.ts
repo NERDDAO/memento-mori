@@ -2,7 +2,7 @@
 import type { GameState } from '../state/game-state';
 import type { RoomMap } from '../map/types';
 import type { EntityCardData } from '../map/entity-card';
-import type { CardContent } from '../map/card-renderer';
+import type { CardContent } from '../map/card-renderer';  // still used for viewportCallback type
 import { MapRenderer } from '../map/renderer';
 import { PlayerController, setupMapInput, type RoomNpc, type RoomItem, type RoomExit } from '../map/movement';
 
@@ -124,15 +124,13 @@ export function updateMap(
               summary: data.summary || '',
               hint: hints[type!] || '[Enter] Interact',
             };
-            renderer!.setCard(card);
             viewportCallback?.(card);
             if (mapRef.current && controller) {
               renderer!.render(mapRef.current, controller.x, controller.y);
             }
           });
         } else {
-          // Nothing nearby — show player card
-          showPlayerCard(state);
+          viewportCallback?.(null);
         }
       },
     );
@@ -143,56 +141,6 @@ export function updateMap(
     controller.loadMap(map);
   }
 
-  // Build card stack: player + all NPCs
-  buildCardStack(state);
   renderer.render(map, controller.x, controller.y);
 }
 
-function buildCardStack(state: GameState): void {
-  if (!renderer) return;
-
-  const cards: CardContent[] = [];
-
-  // Player card first
-  cards.push({
-    type: 'player',
-    name: state.player.name,
-    labels: [`Lv ${state.player.level}`, state.player.archetype || 'Wanderer'],
-    summary: state.location.name,
-    health: state.player.health,
-    maxHealth: state.player.maxHealth,
-    level: state.player.level,
-    xp: state.player.xp,
-    xpThreshold: state.player.xpThreshold,
-  });
-
-  // NPC cards
-  for (const npc of state.location.npcs) {
-    cards.push({
-      type: 'entity',
-      name: npc.name,
-      labels: npc.role ? [npc.role] : ['NPC'],
-      summary: '',
-    });
-  }
-
-  renderer.setCards(cards);
-  viewportCallback?.(cards[0]);
-}
-
-function showPlayerCard(state: GameState): void {
-  if (!renderer) return;
-  const card: CardContent = {
-    type: 'player',
-    name: state.player.name,
-    labels: ['Player'],
-    summary: state.location.name,
-    health: state.player.health,
-    maxHealth: state.player.maxHealth,
-    level: state.player.level,
-    xp: state.player.xp,
-    xpThreshold: state.player.xpThreshold,
-  };
-  renderer.setCard(card);
-  viewportCallback?.(card);
-}

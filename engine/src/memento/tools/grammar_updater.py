@@ -117,28 +117,26 @@ def update_grammar(
 
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
-    # Clear grammar cache and update TrimTab index if available
+    # Clear in-process grammar cache so the next read picks up the JSON update.
     grammar_name = file_path.split("/")[-1]
     try:
-        from memento.tools.procgen.text_gen import _GRAMMAR_CACHE, _TRIMTAB_CACHE
+        from memento.tools.procgen.text_gen import _GRAMMAR_CACHE
         _GRAMMAR_CACHE.pop(grammar_name, None)
-        _TRIMTAB_CACHE.pop(grammar_name, None)
     except ImportError:
         pass
 
-    # If this is a grammar file and has a .sg index, add to TrimTab directly
+    # If this is a grammar file being appended to, push the new expansion
+    # to delve via the Bonfires SDK so the in-memory TrimTabDB stays in
+    # sync with the JSON. Best-effort — failures are logged, not raised.
     if file_path.startswith("grammars/") and mode == "append":
-        sg_dir = path.parent / f"{grammar_name}.sg"
-        if sg_dir.exists():
-            try:
-                from trimtab import SmartGrammar
-                sg = SmartGrammar.load(str(sg_dir))
-                # key_path is the rule name for grammar files
-                sg.add(key_path, value)
-                sg.save(str(sg_dir))
-                logger.info("TrimTab index updated for %s.%s", grammar_name, key_path)
-            except Exception:
-                logger.debug("TrimTab index update skipped for %s", grammar_name)
+        try:
+            from memento.bonfires_client import get_client
+
+            client = get_client()
+            client.trimtab.add(grammar=grammar_name, rule=key_path, text=value)
+            logger.info("TrimTab expansion pushed to delve: %s.%s", grammar_name, key_path)
+        except Exception as e:
+            logger.debug("TrimTab expansion sync skipped for %s: %s", grammar_name, e)
 
     logger.info("Updated %s at key '%s' (mode=%s)", file_path, key_path, mode)
     return f"Updated {file_path} at '{key_path}'"

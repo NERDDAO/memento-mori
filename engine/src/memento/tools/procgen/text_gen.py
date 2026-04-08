@@ -1,8 +1,17 @@
 """Text generation for procgen scaffolds.
 
-Uses TrimTab (cascading embedding search) when indexed grammars are available,
-falls back to Tracery (random expansion) otherwise. TrimTab provides context-aware
-selection — the same grammar produces different output depending on the scene context.
+Two paths:
+
+- **TrimTab via the Bonfires SDK** (``client.trimtab.search`` with no
+  ``rule``, which cascades from origin through the whole grammar tree on
+  delve) when a context string is provided and the SDK path is reachable.
+  This gives context-aware generation — the same grammar produces
+  different output depending on the scene context.
+- **Tracery local random** as a fallback when there's no context, when
+  the grammar isn't on delve, or when the SDK path errors. Keeps mmori
+  working offline.
+
+Zero direct trimtab imports. The SDK is the only boundary.
 """
 
 import json
@@ -15,7 +24,6 @@ from tracery.modifiers import base_english
 
 _GRAMMARS_DIR = Path(__file__).resolve().parents[4] / "assets" / "atlas" / "grammars"
 _GRAMMAR_CACHE: dict[str, dict] = {}
-_TRIMTAB_CACHE: dict[str, object] = {}
 
 logger = logging.getLogger(__name__)
 
@@ -33,22 +41,37 @@ def _load_grammar(name: str) -> dict | None:
     return data
 
 
-def _get_trimtab(name: str):
-    """Load a TrimTab indexed grammar if available. Returns None if not indexed."""
-    if name in _TRIMTAB_CACHE:
-        return _TRIMTAB_CACHE[name]
-    sg_path = _GRAMMARS_DIR / f"{name}.sg"
-    if not sg_path.exists():
-        _TRIMTAB_CACHE[name] = None
-        return None
+def _try_delve_cascade(
+    grammar_name: str,
+    context: str,
+    temperature: float,
+    seed: int | None,
+) -> str | None:
+    """Ask delve to cascade the grammar tree via the Bonfires SDK.
+
+    Returns the generated string on success, ``None`` if the SDK path
+    errors (so the caller can fall back to Tracery). Best-effort —
+    never raises.
+    """
     try:
-        from trimtab import SmartGrammar
-        sg = SmartGrammar.load(str(sg_path))
-        _TRIMTAB_CACHE[name] = sg
-        return sg
-    except Exception:
-        logger.debug("TrimTab not available for %s, using Tracery fallback", name)
-        _TRIMTAB_CACHE[name] = None
+        from memento.bonfires_client import get_client
+
+        client = get_client()
+        # No ``rule`` → delve's search route cascades from origin through
+        # the whole grammar tree and returns a fully-expanded string.
+        response = client.trimtab.search(
+            query=context,
+            grammar=grammar_name,
+            temperature=temperature,
+            seed=seed,
+        )
+        if response.get("mode") == "cascaded":
+            text = response.get("text", "")
+            if text:
+                return text
+        return None
+    except Exception as e:
+        logger.debug("TrimTab cascade via SDK unavailable for %s: %s", grammar_name, e)
         return None
 
 
@@ -61,27 +84,27 @@ def generate_text(
 ) -> str:
     """Generate text from a named grammar file.
 
-    Uses TrimTab (embedding-based selection) if an indexed .sg directory exists,
-    otherwise falls back to Tracery (random expansion).
+    Uses delve's TrimTab cascading walk (via the Bonfires SDK) when a
+    context string is provided and the SDK is reachable. Falls back to
+    Tracery (random expansion) for the no-context case, grammar-override
+    cases, or when the SDK path fails.
 
     Args:
         grammar_name: Name of the grammar file (without .json).
-        overrides: Optional dict of rule overrides (Tracery mode only).
+        overrides: Optional rule-override dict (forces Tracery mode).
         seed: Random seed for deterministic output.
-        context: Context string for TrimTab embedding search.
+        context: Context string for TrimTab cascading walk.
         temperature: TrimTab temperature (0=deterministic, 1=random).
 
     Returns:
         Generated text string, or empty string if grammar not found.
     """
-    # Try TrimTab first (context-aware)
+    # Try delve's cascading walk first (context-aware). Overrides force
+    # Tracery mode because delve doesn't accept per-call rule overrides.
     if context and not overrides:
-        sg = _get_trimtab(grammar_name)
-        if sg is not None:
-            try:
-                return sg.generate(context=context, temperature=temperature, seed=seed)
-            except Exception:
-                logger.debug("TrimTab generation failed, falling back to Tracery")
+        text = _try_delve_cascade(grammar_name, context, temperature, seed)
+        if text:
+            return text
 
     # Fallback: Tracery (random)
     rules = _load_grammar(grammar_name)

@@ -328,6 +328,17 @@ function applyStateUpdate(state2, update) {
         id: n.id || "",
         role: n.role || "",
         ascii_art: existing?.ascii_art,
+        scene_art: existing?.scene_art,
+        scene_art_w: existing?.scene_art_w,
+        scene_art_h: existing?.scene_art_h,
+        portrait_sprite: existing?.portrait_sprite,
+        portrait_w: existing?.portrait_w,
+        portrait_h: existing?.portrait_h,
+        icon_sprite: existing?.icon_sprite,
+        icon_w: existing?.icon_w,
+        icon_h: existing?.icon_h,
+        tile_glyph: existing?.tile_glyph,
+        tile_fg: existing?.tile_fg,
         x: n.x,
         y: n.y
       };
@@ -341,6 +352,17 @@ function applyStateUpdate(state2, update) {
         id: i.id || "",
         role: i.role || "",
         ascii_art: existing?.ascii_art,
+        scene_art: existing?.scene_art,
+        scene_art_w: existing?.scene_art_w,
+        scene_art_h: existing?.scene_art_h,
+        portrait_sprite: existing?.portrait_sprite,
+        portrait_w: existing?.portrait_w,
+        portrait_h: existing?.portrait_h,
+        icon_sprite: existing?.icon_sprite,
+        icon_w: existing?.icon_w,
+        icon_h: existing?.icon_h,
+        tile_glyph: existing?.tile_glyph,
+        tile_fg: existing?.tile_fg,
         x: i.x,
         y: i.y
       };
@@ -380,6 +402,17 @@ function applyStateUpdate(state2, update) {
           id: n.id || "",
           role: n.role || "",
           ascii_art: existing?.ascii_art,
+          scene_art: existing?.scene_art,
+          scene_art_w: existing?.scene_art_w,
+          scene_art_h: existing?.scene_art_h,
+          portrait_sprite: existing?.portrait_sprite,
+          portrait_w: existing?.portrait_w,
+          portrait_h: existing?.portrait_h,
+          icon_sprite: existing?.icon_sprite,
+          icon_w: existing?.icon_w,
+          icon_h: existing?.icon_h,
+          tile_glyph: existing?.tile_glyph,
+          tile_fg: existing?.tile_fg,
           x: n.x,
           y: n.y
         };
@@ -392,6 +425,17 @@ function applyStateUpdate(state2, update) {
           name: i.name || "",
           id: i.id || "",
           ascii_art: existing?.ascii_art,
+          scene_art: existing?.scene_art,
+          scene_art_w: existing?.scene_art_w,
+          scene_art_h: existing?.scene_art_h,
+          portrait_sprite: existing?.portrait_sprite,
+          portrait_w: existing?.portrait_w,
+          portrait_h: existing?.portrait_h,
+          icon_sprite: existing?.icon_sprite,
+          icon_w: existing?.icon_w,
+          icon_h: existing?.icon_h,
+          tile_glyph: existing?.tile_glyph,
+          tile_fg: existing?.tile_fg,
           x: i.x,
           y: i.y
         };
@@ -642,6 +686,8 @@ function createMessageHandler(refs) {
             refs.narrative.addBlock(msg.npc, "npc-name");
             refs.narrative.addBlock(msg.summary || "", "npc-dialogue");
           }
+        } else if (msg.tool === "mm_narrate") {
+          refs.narrative.addBlock(msg.summary || "", "narrator");
         } else {
           refs.narrative.addBlock(`[${formatToolBadge(msg)}]`, "tool-badge");
         }
@@ -2889,12 +2935,35 @@ function prepareInternal(text, font, includeSegments, options) {
 function prepare(text, font, options) {
   return prepareInternal(text, font, false, options);
 }
+function prepareWithSegments(text, font, options) {
+  return prepareInternal(text, font, true, options);
+}
 function getInternalPrepared(prepared) {
   return prepared;
 }
 function layout(prepared, maxWidth, lineHeight) {
   const lineCount = countPreparedLines(getInternalPrepared(prepared), maxWidth);
   return { lineCount, height: lineCount * lineHeight };
+}
+function toLayoutLineRange(line) {
+  return {
+    width: line.width,
+    start: {
+      segmentIndex: line.startSegmentIndex,
+      graphemeIndex: line.startGraphemeIndex
+    },
+    end: {
+      segmentIndex: line.endSegmentIndex,
+      graphemeIndex: line.endGraphemeIndex
+    }
+  };
+}
+function walkLineRanges(prepared, maxWidth, onLine) {
+  if (prepared.widths.length === 0)
+    return 0;
+  return walkPreparedLines(getInternalPrepared(prepared), maxWidth, (line) => {
+    onLine(toLayoutLineRange(line));
+  });
 }
 
 // src/renderer/theme.ts
@@ -3530,168 +3599,15 @@ var ENTITY_COLORS = {
   exit: "#50c8c8"
 };
 
-// src/map/card-renderer.ts
-var CARD_FONT = "13px monospace";
-var CARD_BOLD_FONT = "bold 14px monospace";
-var CARD_DIM_FONT = "11px monospace";
-var CHAR_W = 8.4;
-var LINE_H = 18;
-var CARD_COLS = 28;
-var CARD_W = CARD_COLS * CHAR_W + 16;
-var PAD = 8;
-var BOX = {
-  tl: "╔",
-  tr: "╗",
-  bl: "╚",
-  br: "╝",
-  h: "═",
-  v: "║",
-  ml: "╠",
-  mr: "╣",
-  mh: "═"
-};
-var COLORS = {
-  border: "#2a2a38",
-  bg: "#0e0e15",
-  name: "#d4a574",
-  label: "#5a5a70",
-  text: "#c8c8d0",
-  dim: "#4a4a58",
-  hint: "#5a5a70",
-  hpFull: "#50c878",
-  hpLow: "#e05050",
-  item: "#a335ee",
-  exit: "#50c8c8"
-};
-function drawCard(ctx, x, y, content) {
-  const maxTextW = (CARD_COLS - 2) * CHAR_W;
-  let curY = y;
-  let summaryLines = [];
-  if (content.summary) {
-    const prepared = prepare(content.summary, CARD_FONT);
-    const result = layout(prepared, maxTextW, LINE_H);
-    summaryLines = wrapText(content.summary, CARD_COLS - 4);
-  }
-  const nameLines = wrapText(content.name, CARD_COLS - 4);
-  const hasLabels = content.labels.length > 0;
-  const hasHealth = content.health != null;
-  const hasXp = content.xp != null;
-  const hasHint = !!content.hint;
-  let totalLines = nameLines.length;
-  if (hasLabels)
-    totalLines += 1;
-  totalLines += 1;
-  if (summaryLines.length)
-    totalLines += summaryLines.length + 1;
-  if (hasHealth)
-    totalLines += 1;
-  if (hasXp)
-    totalLines += 1;
-  if (hasHint)
-    totalLines += 2;
-  const cardH = (totalLines + 2) * LINE_H;
-  ctx.fillStyle = COLORS.bg;
-  ctx.fillRect(x, curY, CARD_W, cardH);
-  drawBoxLine(ctx, x, curY, BOX.tl, BOX.h, BOX.tr);
-  curY += LINE_H;
-  ctx.fillStyle = COLORS.name;
-  ctx.font = CARD_BOLD_FONT;
-  for (const line of nameLines) {
-    drawTextLine(ctx, x, curY, line, COLORS.name, CARD_BOLD_FONT);
-    curY += LINE_H;
-  }
-  if (hasLabels) {
-    const labelText = content.labels.join(" · ");
-    drawTextLine(ctx, x, curY, labelText, COLORS.label, CARD_DIM_FONT);
-    curY += LINE_H;
-  }
-  drawBoxLine(ctx, x, curY, BOX.ml, BOX.mh, BOX.mr);
-  curY += LINE_H;
-  if (summaryLines.length) {
-    for (const line of summaryLines) {
-      drawTextLine(ctx, x, curY, line, COLORS.text, CARD_FONT);
-      curY += LINE_H;
-    }
-    curY += LINE_H * 0.5;
-  }
-  if (hasHealth && content.maxHealth) {
-    const pct = content.health / content.maxHealth;
-    const barLen = CARD_COLS - 8;
-    const filled = Math.round(pct * barLen);
-    const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
-    const hpColor = pct > 0.3 ? COLORS.hpFull : COLORS.hpLow;
-    drawTextLine(ctx, x, curY, `HP ${bar} ${content.health}`, hpColor, CARD_FONT);
-    curY += LINE_H;
-  }
-  if (hasXp && content.xpThreshold) {
-    const pct = content.xp / content.xpThreshold;
-    const barLen = CARD_COLS - 8;
-    const filled = Math.round(pct * barLen);
-    const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
-    drawTextLine(ctx, x, curY, `XP ${bar} ${content.xp}`, COLORS.dim, CARD_FONT);
-    curY += LINE_H;
-  }
-  if (hasHint) {
-    curY += LINE_H * 0.5;
-    drawTextLine(ctx, x, curY, content.hint, COLORS.hint, CARD_DIM_FONT);
-    curY += LINE_H;
-  }
-  drawBoxLine(ctx, x, curY, BOX.bl, BOX.h, BOX.br);
-  curY += LINE_H;
-  ctx.fillStyle = COLORS.border;
-  ctx.font = CARD_FONT;
-  const rows = Math.floor((curY - y) / LINE_H);
-  for (let i = 1;i < rows - 1; i++) {
-    const rowY = y + i * LINE_H;
-    ctx.fillText(BOX.v, x + PAD, rowY + LINE_H / 2);
-    ctx.fillText(BOX.v, x + CARD_W - PAD, rowY + LINE_H / 2);
-  }
-  return curY - y;
-}
-function drawBoxLine(ctx, x, y, left, fill, right) {
-  ctx.font = CARD_FONT;
-  ctx.fillStyle = COLORS.border;
-  const line = left + fill.repeat(CARD_COLS - 2) + right;
-  ctx.textAlign = "left";
-  ctx.fillText(line, x + PAD, y + LINE_H / 2);
-  ctx.textAlign = "center";
-}
-function drawTextLine(ctx, x, y, text, color, font) {
-  ctx.font = font;
-  ctx.fillStyle = color;
-  ctx.textAlign = "left";
-  ctx.fillText(text, x + PAD + CHAR_W * 2, y + LINE_H / 2);
-  ctx.textAlign = "center";
-}
-function wrapText(text, maxCols) {
-  const words = text.split(" ");
-  const lines = [];
-  let current = "";
-  for (const word of words) {
-    if (current.length + word.length + 1 > maxCols) {
-      if (current)
-        lines.push(current);
-      current = word;
-    } else {
-      current = current ? current + " " + word : word;
-    }
-  }
-  if (current)
-    lines.push(current);
-  return lines;
-}
-
 // src/map/renderer.ts
 var TILE_W = 14;
 var TILE_H = 18;
 var FONT = "15px monospace";
-var GAP = 8;
 
 class MapRenderer {
   canvas;
   ctx;
   dpr;
-  cards = [];
   constructor(container) {
     this.dpr = Math.min(devicePixelRatio, 2);
     this.canvas = document.createElement("canvas");
@@ -3703,31 +3619,17 @@ class MapRenderer {
   get element() {
     return this.canvas;
   }
-  setCard(content) {
-    if (content) {
-      this.cards = [content, ...this.cards.slice(1)];
-    } else {
-      this.cards = this.cards.slice(1);
-    }
-  }
-  setCards(cards) {
-    this.cards = cards;
-  }
   render(map, playerX, playerY) {
     const mapW = map.width * TILE_W;
     const mapH = map.height * TILE_H;
-    const hasCards = this.cards.length > 0;
-    const totalW = mapW + (hasCards ? GAP + CARD_W : 0);
-    const cardStackH = this.cards.length * 120;
-    const totalH = Math.max(mapH, hasCards ? cardStackH : 0);
-    this.canvas.width = totalW * this.dpr;
-    this.canvas.height = totalH * this.dpr;
-    this.canvas.style.width = `${totalW}px`;
-    this.canvas.style.height = `${totalH}px`;
+    this.canvas.width = mapW * this.dpr;
+    this.canvas.height = mapH * this.dpr;
+    this.canvas.style.width = `${mapW}px`;
+    this.canvas.style.height = `${mapH}px`;
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = "#0a0a0f";
-    ctx.fillRect(0, 0, totalW, totalH);
+    ctx.fillRect(0, 0, mapW, mapH);
     ctx.font = FONT;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -3753,13 +3655,6 @@ class MapRenderer {
       this.drawEntity(npc.x, npc.y, npc.ch, ENTITY_COLORS.npc);
     }
     this.drawEntity(playerX, playerY, "@", ENTITY_COLORS.player);
-    if (hasCards) {
-      let cardY = 8;
-      for (const card of this.cards) {
-        const h = drawCard(ctx, mapW + GAP, cardY, card);
-        cardY += h + 6;
-      }
-    }
   }
   drawEntity(x, y, ch, color) {
     const ctx = this.ctx;
@@ -4014,14 +3909,13 @@ function updateMap(state2, onAction) {
             summary: data.summary || "",
             hint: hints[type] || "[Enter] Interact"
           };
-          renderer.setCard(card);
           viewportCallback?.(card);
           if (mapRef.current && controller) {
             renderer.render(mapRef.current, controller.x, controller.y);
           }
         });
       } else {
-        showPlayerCard(state2);
+        viewportCallback?.(null);
       }
     });
     cleanupInput?.();
@@ -4029,51 +3923,7 @@ function updateMap(state2, onAction) {
   } else {
     controller.loadMap(map);
   }
-  buildCardStack(state2);
   renderer.render(map, controller.x, controller.y);
-}
-function buildCardStack(state2) {
-  if (!renderer)
-    return;
-  const cards = [];
-  cards.push({
-    type: "player",
-    name: state2.player.name,
-    labels: [`Lv ${state2.player.level}`, state2.player.archetype || "Wanderer"],
-    summary: state2.location.name,
-    health: state2.player.health,
-    maxHealth: state2.player.maxHealth,
-    level: state2.player.level,
-    xp: state2.player.xp,
-    xpThreshold: state2.player.xpThreshold
-  });
-  for (const npc of state2.location.npcs) {
-    cards.push({
-      type: "entity",
-      name: npc.name,
-      labels: npc.role ? [npc.role] : ["NPC"],
-      summary: ""
-    });
-  }
-  renderer.setCards(cards);
-  viewportCallback?.(cards[0]);
-}
-function showPlayerCard(state2) {
-  if (!renderer)
-    return;
-  const card = {
-    type: "player",
-    name: state2.player.name,
-    labels: ["Player"],
-    summary: state2.location.name,
-    health: state2.player.health,
-    maxHealth: state2.player.maxHealth,
-    level: state2.player.level,
-    xp: state2.player.xp,
-    xpThreshold: state2.player.xpThreshold
-  };
-  renderer.setCard(card);
-  viewportCallback?.(card);
 }
 
 // src/panels/panel-utils.ts
@@ -4329,171 +4179,231 @@ function renderQuestLogPanel(cols, _rows, quests) {
   return { cells, hitRegions };
 }
 
-// src/panels/viewport.ts
-var BAR_FULL = "█";
-var BAR_EMPTY = "░";
-var BAR_WIDTH = 12;
-function renderViewport(cols, _rows, card, sceneArt) {
-  const cells = [];
-  if (cols < 10)
-    return { cells };
-  if (sceneArt && sceneArt.length > 0) {
-    const artColor = theme.colors.dim;
-    for (const line of sceneArt) {
-      const row = [];
-      for (let c = 0;c < cols; c++) {
-        row.push({ char: line[c] || " ", fg: artColor });
-      }
-      cells.push(row);
+// src/panels/cards.ts
+var NAME_FONT = "bold 13px monospace";
+var LABEL_FONT = "11px monospace";
+var HINT_FONT = "10px monospace";
+var CHAR_W = 8;
+var LINE_H = 16;
+var PAD_X = 8;
+var PAD_Y = 4;
+var CARD_GAP_X = 10;
+var CARD_GAP_Y = 6;
+var BOX = {
+  tl: "╔",
+  tr: "╗",
+  bl: "╚",
+  br: "╝",
+  h: "═",
+  v: "║",
+  ml: "╟",
+  mr: "╢",
+  mh: "─"
+};
+var ROLE_COLORS = {
+  merchant: "#d4a574",
+  shopkeeper: "#d4a574",
+  quest: "#8b5cf6",
+  hostile: "#e05050",
+  guard: "#5a8fba",
+  healer: "#50c878"
+};
+function roleColor(role) {
+  const key = role.toLowerCase();
+  for (const [k, v] of Object.entries(ROLE_COLORS)) {
+    if (key.includes(k))
+      return v;
+  }
+  return theme.colors.npc;
+}
+var offscreen = null;
+var offscreenCtx = null;
+var preparedCache = new Map;
+function getPrepared(text, font) {
+  const key = `${font}::${text}`;
+  let p = preparedCache.get(key);
+  if (!p) {
+    p = prepareWithSegments(text, font);
+    preparedCache.set(key, p);
+  }
+  return p;
+}
+function measureTextWidth(text, font) {
+  const p = getPrepared(text, font);
+  let maxW = 0;
+  walkLineRanges(p, 1e5, (line) => {
+    if (line.width > maxW)
+      maxW = line.width;
+  });
+  return maxW;
+}
+function measureCard(npc, cardW) {
+  const innerH = LINE_H * 3 + PAD_Y * 2;
+  return { width: cardW, height: innerH + LINE_H * 2 };
+}
+function drawCard(ctx, x, y, npc, cardW) {
+  const role = npc.role || "NPC";
+  const borderColor = roleColor(role);
+  const borderDim = borderColor + "88";
+  const nameColor = borderColor;
+  const innerW = cardW - PAD_X * 2;
+  let curY = y;
+  const metrics = measureCard(npc, cardW);
+  ctx.fillStyle = theme.colors.bg;
+  ctx.fillRect(x, curY, cardW, metrics.height);
+  const borderCharW = CHAR_W;
+  const maxNamePx = cardW - borderCharW * 8;
+  let displayName = npc.name;
+  let nameW = measureTextWidth(` ${displayName} `, NAME_FONT);
+  while (nameW > maxNamePx && displayName.length > 3) {
+    displayName = displayName.slice(0, -2) + "…";
+    nameW = measureTextWidth(` ${displayName} `, NAME_FONT);
+  }
+  const nameText = ` ${displayName} `;
+  const leftPrefix = BOX.tl + BOX.h + "[";
+  const rightSuffix = "]";
+  ctx.font = "13px monospace";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const rowMid = curY + LINE_H / 2;
+  ctx.fillStyle = borderDim;
+  ctx.fillText(leftPrefix, x + 1, rowMid);
+  const prefixW = leftPrefix.length * borderCharW;
+  ctx.font = NAME_FONT;
+  ctx.fillStyle = nameColor;
+  ctx.fillText(nameText, x + 1 + prefixW, rowMid);
+  ctx.font = "13px monospace";
+  ctx.fillStyle = borderDim;
+  const afterName = x + 1 + prefixW + nameW;
+  ctx.fillText(rightSuffix, afterName, rowMid);
+  const suffixEndX = afterName + borderCharW;
+  const fillChars = Math.max(0, Math.floor((x + cardW - borderCharW - suffixEndX) / borderCharW));
+  if (fillChars > 0) {
+    ctx.fillText(BOX.h.repeat(fillChars), suffixEndX, rowMid);
+  }
+  ctx.fillText(BOX.tr, x + cardW - borderCharW - 1, rowMid);
+  curY += LINE_H;
+  ctx.fillStyle = borderDim;
+  ctx.font = "13px monospace";
+  ctx.fillText(BOX.v, x + 1, curY + LINE_H / 2);
+  ctx.fillText(BOX.v, x + cardW - borderCharW - 1, curY + LINE_H / 2);
+  ctx.font = LABEL_FONT;
+  ctx.fillStyle = theme.colors.dim;
+  ctx.fillText(role, x + PAD_X + borderCharW, curY + LINE_H / 2);
+  curY += LINE_H;
+  ctx.font = "13px monospace";
+  ctx.fillStyle = borderDim;
+  ctx.fillText(BOX.ml, x + 1, curY + LINE_H / 2);
+  const sepChars = Math.max(0, Math.floor((cardW - borderCharW * 2 - 2) / borderCharW));
+  ctx.fillText(BOX.mh.repeat(sepChars), x + 1 + borderCharW, curY + LINE_H / 2);
+  ctx.fillText(BOX.mr, x + cardW - borderCharW - 1, curY + LINE_H / 2);
+  curY += LINE_H;
+  ctx.fillStyle = borderDim;
+  ctx.font = "13px monospace";
+  ctx.fillText(BOX.v, x + 1, curY + LINE_H / 2);
+  ctx.fillText(BOX.v, x + cardW - borderCharW - 1, curY + LINE_H / 2);
+  ctx.font = HINT_FONT;
+  ctx.fillStyle = theme.colors.dim + "aa";
+  ctx.fillText("[Enter] Talk", x + PAD_X + borderCharW, curY + LINE_H / 2);
+  curY += LINE_H;
+  ctx.font = "13px monospace";
+  ctx.fillStyle = borderDim;
+  ctx.fillText(BOX.bl, x + 1, curY + LINE_H / 2);
+  const botChars = Math.max(0, Math.floor((cardW - borderCharW * 2 - 2) / borderCharW));
+  ctx.fillText(BOX.h.repeat(botChars), x + 1 + borderCharW, curY + LINE_H / 2);
+  ctx.fillText(BOX.br, x + cardW - borderCharW - 1, curY + LINE_H / 2);
+  curY += LINE_H;
+  return curY - y;
+}
+function renderCardsCanvas(state2, regionW, regionH) {
+  const npcs = state2.location.npcs;
+  if (!offscreen) {
+    offscreen = document.createElement("canvas");
+    offscreenCtx = offscreen.getContext("2d");
+  }
+  if (npcs.length === 0) {
+    offscreen.width = Math.max(regionW, 100);
+    offscreen.height = Math.max(regionH, 40);
+    const ctx2 = offscreenCtx;
+    ctx2.fillStyle = theme.colors.bg;
+    ctx2.fillRect(0, 0, offscreen.width, offscreen.height);
+    ctx2.font = "13px monospace";
+    ctx2.fillStyle = theme.colors.dim;
+    ctx2.textAlign = "center";
+    ctx2.textBaseline = "middle";
+    ctx2.fillText("~ no one here ~", offscreen.width / 2, offscreen.height / 2);
+    ctx2.textAlign = "left";
+    return offscreen;
+  }
+  const cardW = Math.floor((regionW - CARD_GAP_X) / 2);
+  let totalH = PAD_Y;
+  for (let i = 0;i < npcs.length; i += 2) {
+    const leftM = measureCard(npcs[i], cardW);
+    const rightM = i + 1 < npcs.length ? measureCard(npcs[i + 1], cardW) : { height: 0 };
+    totalH += Math.max(leftM.height, rightM.height) + CARD_GAP_Y;
+  }
+  offscreen.width = Math.max(regionW, 100);
+  offscreen.height = Math.max(totalH, regionH);
+  const ctx = offscreenCtx;
+  ctx.fillStyle = theme.colors.bg;
+  ctx.fillRect(0, 0, offscreen.width, offscreen.height);
+  let curY = PAD_Y;
+  for (let i = 0;i < npcs.length; i += 2) {
+    const leftH = drawCard(ctx, 0, curY, npcs[i], cardW);
+    let rightH = 0;
+    if (i + 1 < npcs.length) {
+      rightH = drawCard(ctx, cardW + CARD_GAP_X, curY, npcs[i + 1], cardW);
     }
-  } else if (card) {
-    renderCard(cells, cols, card);
-  } else {
-    const msg = "~ nothing in focus ~";
-    const row = [];
-    const pad = Math.max(0, Math.floor((cols - msg.length) / 2));
-    for (let c = 0;c < cols; c++) {
-      const ch = c >= pad && c < pad + msg.length ? msg[c - pad] : " ";
-      row.push({ char: ch, fg: theme.colors.dim });
-    }
-    cells.push(row);
+    curY += Math.max(leftH, rightH) + CARD_GAP_Y;
   }
-  return { cells };
-}
-function renderCard(cells, cols, card) {
-  const { colors } = theme;
-  const nameRow = [];
-  const nameColor = card.type === "player" ? colors.accent : colors.npc;
-  writeText(nameRow, cols, `◆ ${card.name}`, nameColor, ATTR_BOLD);
-  cells.push(nameRow);
-  if (card.labels.length > 0) {
-    const labelRow = [];
-    const labelText = card.labels.map((l) => `[${l}]`).join(" ");
-    writeText(labelRow, cols, `  ${labelText}`, colors.dim);
-    cells.push(labelRow);
-  }
-  if (card.summary) {
-    const maxLen = cols - 2;
-    const summary = card.summary.length > maxLen ? card.summary.slice(0, maxLen - 3) + "..." : card.summary;
-    const summaryRow = [];
-    writeText(summaryRow, cols, `  ${summary}`, colors.primary);
-    cells.push(summaryRow);
-  }
-  if (card.health !== undefined && card.maxHealth !== undefined) {
-    const hpRow = [];
-    const hpPct = Math.max(0, Math.min(1, card.health / card.maxHealth));
-    const hpColor = hpPct > 0.3 ? colors.heal : colors.damage;
-    const filled = Math.round(hpPct * BAR_WIDTH);
-    const barStr = BAR_FULL.repeat(filled) + BAR_EMPTY.repeat(BAR_WIDTH - filled);
-    writeText(hpRow, cols, `  HP `, colors.dim);
-    appendText(hpRow, barStr, hpColor);
-    appendText(hpRow, ` ${card.health}/${card.maxHealth}`, colors.primary);
-    padRow(hpRow, cols);
-    cells.push(hpRow);
-  }
-  if (card.xp !== undefined && card.xpThreshold !== undefined) {
-    const xpRow = [];
-    const xpPct = Math.max(0, Math.min(1, card.xp / card.xpThreshold));
-    const filled = Math.round(xpPct * BAR_WIDTH);
-    const barStr = BAR_FULL.repeat(filled) + BAR_EMPTY.repeat(BAR_WIDTH - filled);
-    writeText(xpRow, cols, `  XP `, colors.dim);
-    appendText(xpRow, barStr, colors.accent);
-    appendText(xpRow, ` ${card.xp}/${card.xpThreshold}`, colors.primary);
-    padRow(xpRow, cols);
-    cells.push(xpRow);
-  }
-  if (card.level !== undefined) {
-    const lvRow = [];
-    writeText(lvRow, cols, `  Lv ${card.level}`, colors.dim);
-    cells.push(lvRow);
-  }
-  if (card.hint) {
-    const hintRow = [];
-    writeText(hintRow, cols, `  ${card.hint}`, colors.dim);
-    cells.push(hintRow);
-  }
-}
-function writeText(row, cols, text, fg, attrs) {
-  for (let i = 0;i < cols; i++) {
-    row.push({ char: text[i] || " ", fg, attrs });
-  }
-}
-function appendText(row, text, fg, attrs) {
-  for (const ch of text) {
-    row.push({ char: ch, fg, attrs });
-  }
-}
-function padRow(row, cols) {
-  while (row.length < cols) {
-    row.push({ char: " ", fg: "#0a0a0f" });
-  }
+  return offscreen;
 }
 
 // src/panels/viewer.ts
+var ART_FONT = "13px monospace";
+var ART_LINE_HEIGHT = 16;
+var ART_CHAR_WIDTH = 8;
 var currentArt = null;
 var currentLabel = "";
+var offscreen2 = null;
+var offscreenCtx2 = null;
 function setViewerArt(lines, label) {
   currentArt = lines;
   currentLabel = label || "";
 }
-function renderViewer(cols, rows) {
-  const cells = [];
-  const dim = theme.colors.dim;
-  const primary = theme.colors.primary;
-  if (!currentArt || currentArt.length === 0) {
-    for (let r = 0;r < rows; r++) {
-      const row = [];
-      for (let c = 0;c < cols; c++) {
-        row.push({ char: " ", fg: dim });
-      }
-      cells.push(row);
-    }
-    const label = "~ no scene ~";
-    const startCol = Math.max(0, Math.floor((cols - label.length) / 2));
-    const midRow = Math.floor(rows / 2);
-    if (midRow < rows) {
-      for (let i = 0;i < label.length && startCol + i < cols; i++) {
-        cells[midRow][startCol + i] = { char: label[i], fg: dim };
-      }
-    }
-    return { cells };
+function renderViewerCanvas() {
+  if (!currentArt || currentArt.length === 0)
+    return null;
+  if (!offscreen2) {
+    offscreen2 = document.createElement("canvas");
+    offscreenCtx2 = offscreen2.getContext("2d");
   }
-  let artRow = 0;
+  const ctx = offscreenCtx2;
+  const lines = currentArt;
+  const maxLineLen = Math.max(...lines.map((l) => l.length));
+  const labelHeight = currentLabel ? ART_LINE_HEIGHT + 4 : 0;
+  const artW = maxLineLen * ART_CHAR_WIDTH + 16;
+  const artH = lines.length * ART_LINE_HEIGHT + labelHeight + 8;
+  offscreen2.width = artW;
+  offscreen2.height = artH;
+  ctx.fillStyle = theme.colors.bg;
+  ctx.fillRect(0, 0, artW, artH);
+  let curY = 4;
   if (currentLabel) {
-    const row = [];
-    const title = currentLabel.slice(0, cols);
-    for (let c = 0;c < cols; c++) {
-      if (c < title.length) {
-        row.push({ char: title[c], fg: theme.colors.npc, attrs: ATTR_BOLD });
-      } else {
-        row.push({ char: " ", fg: dim });
-      }
-    }
-    cells.push(row);
-    artRow++;
+    ctx.font = "bold 14px monospace";
+    ctx.fillStyle = theme.colors.npc;
+    ctx.textAlign = "left";
+    ctx.fillText(currentLabel, 8, curY + ART_LINE_HEIGHT * 0.8);
+    curY += ART_LINE_HEIGHT + 4;
   }
-  for (const line of currentArt) {
-    if (artRow >= rows)
-      break;
-    const row = [];
-    for (let c = 0;c < cols; c++) {
-      if (c < line.length) {
-        row.push({ char: line[c], fg: primary });
-      } else {
-        row.push({ char: " ", fg: dim });
-      }
-    }
-    cells.push(row);
-    artRow++;
+  ctx.font = ART_FONT;
+  ctx.fillStyle = theme.colors.primary;
+  ctx.textAlign = "left";
+  for (const line of lines) {
+    curY += ART_LINE_HEIGHT;
+    ctx.fillText(line, 8, curY - 2);
   }
-  while (cells.length < rows) {
-    const row = [];
-    for (let c = 0;c < cols; c++) {
-      row.push({ char: " ", fg: dim });
-    }
-    cells.push(row);
-  }
-  return { cells };
+  return offscreen2;
 }
 
 // src/ui/header.ts
@@ -4630,11 +4540,34 @@ function computeRegions(totalCols, totalRows) {
     type: "grid",
     scrollOffset: 0
   });
+  const CARDS_COLS = 52;
+  const cardsCols = Math.min(CARDS_COLS, Math.floor(viewportCols * 0.55));
+  const mapCols = viewportCols - cardsCols - 1;
+  const colCards = colViewport + mapCols + 1;
+  const colMapVDiv = colViewport + mapCols;
   add({
-    name: "viewport",
+    name: "map",
     col: colViewport,
     row: rowTopStart,
-    cols: viewportCols,
+    cols: mapCols,
+    rows: topZoneRows,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "cards",
+    col: colCards,
+    row: rowTopStart,
+    cols: cardsCols,
+    rows: topZoneRows,
+    type: "grid",
+    scrollOffset: 0
+  });
+  add({
+    name: "_vDivMap",
+    col: colMapVDiv,
+    row: rowTopStart,
+    cols: 1,
     rows: topZoneRows,
     type: "grid",
     scrollOffset: 0
@@ -4821,6 +4754,7 @@ function drawBorders(grid, regions, totalCols, totalRows) {
   const sDiv0 = regions.get("_sDiv0");
   const sDiv1 = regions.get("_sDiv1");
   const vDiv2 = regions.get("_vDiv2");
+  const vDivMap = regions.get("_vDivMap");
   if (!hDiv0 || !hDiv1 || !hDiv2 || !hDiv3 || !vDiv0 || !vDiv1 || !sDiv0 || !sDiv1) {
     console.warn("[border-renderer] Missing divider metadata regions — skipping border draw");
     return;
@@ -4852,6 +4786,9 @@ function drawBorders(grid, regions, totalCols, totalRows) {
     if (vDiv2 && row >= vDiv2.row && row < vDiv2.row + vDiv2.rows) {
       setCell(grid, row, vDiv2.col, "╪", fg);
     }
+    if (vDivMap && row >= vDivMap.row && row < vDivMap.row + vDivMap.rows) {
+      setCell(grid, row, vDivMap.col, "╪", fg);
+    }
   }
   drawHDiv(hDiv0.row);
   drawHDiv(hDiv1.row);
@@ -4880,6 +4817,11 @@ function drawBorders(grid, regions, totalCols, totalRows) {
   hLine(grid, sDiv1.row, sCol, sEnd, S_H, fg);
   setCell(grid, sDiv1.row, lastCol, M_SH_DV_R, fg);
   setCell(grid, hDiv3.row, vDiv1.col, "╧", fg);
+  if (vDivMap) {
+    vLine(grid, vDivMap.col, vDivMap.row, vDivMap.row + vDivMap.rows - 1, S_V, fg);
+    setCell(grid, hDiv0.row, vDivMap.col, M_SV_DH_T, fg);
+    setCell(grid, hDiv1.row, vDivMap.col, "╧", fg);
+  }
   if (vDiv2) {
     vLine(grid, vDiv2.col, vDiv2.row, vDiv2.row + vDiv2.rows - 1, S_V, fg);
     setCell(grid, hDiv1.row, vDiv2.col, M_SV_DH_T, fg);
@@ -5385,14 +5327,14 @@ class UnifiedCanvas {
     renderer2(ctx, region, cs);
     ctx.restore();
   }
-  _blitOffscreen(region, offscreen) {
+  _blitOffscreen(region, offscreen3) {
     const ctx = this.ctx;
     const cs = this.charSize;
     const px = region.col * cs.width;
     const py = region.row * cs.height;
     const pw = region.cols * cs.width;
     const ph = region.rows * cs.height;
-    ctx.drawImage(offscreen, px, py, pw, ph);
+    ctx.drawImage(offscreen3, px, py, pw, ph);
   }
   _pixelToGrid(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect();
@@ -7194,7 +7136,6 @@ var invModal;
 var overlays;
 var headerState = { title: "MEMENTO MORI", worldTime: undefined };
 var statusState = { phase: "ready", tick: 0, chain: false, activity: "", location: "" };
-var currentCard = null;
 var currentScene = null;
 function registerMapEntities(map) {
   if (!map)
@@ -7233,9 +7174,9 @@ function renderAllPanels() {
   if (statusRegion) {
     uc.setRegionContent("status", renderStatusBar(statusRegion.cols, statusState));
   }
-  const viewerRegionEarly = r("viewer");
-  if (viewerRegionEarly) {
-    uc.setRegionContent("viewer", renderViewer(viewerRegionEarly.cols, viewerRegionEarly.rows));
+  const viewerCanvas = renderViewerCanvas();
+  if (viewerCanvas) {
+    uc.setOffscreen("viewer", viewerCanvas);
   }
   if (!gameState)
     return;
@@ -7258,7 +7199,15 @@ function renderAllPanels() {
   updateMap(gameState, handleAction);
   const mapCanvas = getMapCanvas();
   if (mapCanvas && mapCanvas.width > 0) {
-    uc.setOffscreen("viewport", mapCanvas);
+    uc.setOffscreen("map", mapCanvas);
+  }
+  const cardsRegion = r("cards");
+  if (cardsRegion) {
+    const cs = uc.getCharSize();
+    const cardsCanvas = renderCardsCanvas(gameState, cardsRegion.cols * cs.width, cardsRegion.rows * cs.height);
+    if (cardsCanvas) {
+      uc.setOffscreen("cards", cardsCanvas);
+    }
   }
 }
 async function handleAction(action) {
@@ -7281,21 +7230,13 @@ function showDeathScreen(cause) {
   ` : "";
   overlays.show("death");
 }
-function setViewportCard(card) {
-  currentCard = card;
-  currentScene = null;
-  const vpRegion = uc?.getRegion("viewport");
-  if (vpRegion) {
-    uc.setRegionContent("viewport", renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
-  }
-}
+function setViewportCard(_card) {}
 function setViewportScene(lines) {
   currentScene = lines;
-  currentCard = null;
   setViewerArt(lines, "");
-  const viewerRegion = uc?.getRegion("viewer");
-  if (viewerRegion) {
-    uc.setRegionContent("viewer", renderViewer(viewerRegion.cols, viewerRegion.rows));
+  const viewerCanvas = renderViewerCanvas();
+  if (viewerCanvas) {
+    uc.setOffscreen("viewer", viewerCanvas);
   }
 }
 function enterGame(config) {
@@ -7434,7 +7375,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setMapUpdateCallback(() => {
     const mapCanvas = getMapCanvas();
     if (mapCanvas && mapCanvas.width > 0) {
-      uc.setOffscreen("viewport", mapCanvas);
+      uc.setOffscreen("map", mapCanvas);
     }
   });
   const actionInput = document.getElementById("action-input");

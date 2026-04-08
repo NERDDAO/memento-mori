@@ -2,18 +2,15 @@
 
 import type { RoomMap } from './types';
 import { tileColors, ENTITY_COLORS } from './colors';
-import { drawCard, CARD_W, type CardContent } from './card-renderer';
 
 const TILE_W = 14;
 const TILE_H = 18;
 const FONT = '15px monospace';
-const GAP = 8; // gap between map and card panel
 
 export class MapRenderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private dpr: number;
-  private cards: CardContent[] = [];
 
   constructor(container: HTMLElement) {
     this.dpr = Math.min(devicePixelRatio, 2);
@@ -28,41 +25,21 @@ export class MapRenderer {
     return this.canvas;
   }
 
-  /** Set the card content to display next to the map. */
-  setCard(content: CardContent | null): void {
-    // Keep first card as the proximity/player card; NPC cards are appended via setCards
-    if (content) {
-      this.cards = [content, ...this.cards.slice(1)];
-    } else {
-      this.cards = this.cards.slice(1);
-    }
-  }
-
-  /** Set all cards (player + NPCs) to display next to the map. */
-  setCards(cards: CardContent[]): void {
-    this.cards = cards;
-  }
-
   render(map: RoomMap, playerX: number, playerY: number): void {
     const mapW = map.width * TILE_W;
     const mapH = map.height * TILE_H;
-    const hasCards = this.cards.length > 0;
-    const totalW = mapW + (hasCards ? GAP + CARD_W : 0);
-    // Estimate card stack height to size canvas
-    const cardStackH = this.cards.length * 120; // rough estimate per card
-    const totalH = Math.max(mapH, hasCards ? cardStackH : 0);
 
-    this.canvas.width = totalW * this.dpr;
-    this.canvas.height = totalH * this.dpr;
-    this.canvas.style.width = `${totalW}px`;
-    this.canvas.style.height = `${totalH}px`;
+    this.canvas.width = mapW * this.dpr;
+    this.canvas.height = mapH * this.dpr;
+    this.canvas.style.width = `${mapW}px`;
+    this.canvas.style.height = `${mapH}px`;
 
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
     // Clear entire canvas
     ctx.fillStyle = '#0a0a0f';
-    ctx.fillRect(0, 0, totalW, totalH);
+    ctx.fillRect(0, 0, mapW, mapH);
 
     // Draw map tiles
     ctx.font = FONT;
@@ -99,15 +76,6 @@ export class MapRenderer {
 
     // Draw player
     this.drawEntity(playerX, playerY, '@', ENTITY_COLORS.player);
-
-    // Draw card stack on the right
-    if (hasCards) {
-      let cardY = 8;
-      for (const card of this.cards) {
-        const h = drawCard(ctx, mapW + GAP, cardY, card);
-        cardY += h + 6; // 6px gap between cards
-      }
-    }
   }
 
   private drawEntity(x: number, y: number, ch: string, color: string): void {

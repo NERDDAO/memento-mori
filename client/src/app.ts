@@ -17,8 +17,8 @@ import { renderWorldMapPanel } from './panels/worldmap';
 import { renderPresentPanel } from './panels/present';
 import { renderQuestLogPanel } from './panels/questlog';
 import { renderFactionsPanel } from './panels/factions';
-import { renderViewport } from './panels/viewport';
-import { renderViewer, setViewerArt } from './panels/viewer';
+import { renderCardsCanvas } from './panels/cards';
+import { renderViewerCanvas, setViewerArt } from './panels/viewer';
 import { renderHeader, type WorldTime } from './ui/header';
 import { renderStatusBar, type StatusState } from './ui/status';
 import { UnifiedCanvas } from './canvas/unified-canvas';
@@ -33,7 +33,7 @@ import { initInput } from './panels/input';
 import { setManageInventoryCallback } from './panels/inventory';
 import { initHotkeys } from './hotkeys';
 import { initCharCreation } from './char-creation';
-import type { CardContent } from './map/card-renderer';
+import type { CardContent } from './map/card-renderer';  // used by setViewportCard callback type
 
 let gameState: GameState;
 let narrative: NarrativeController;
@@ -50,8 +50,7 @@ let overlays: OverlayManager;
 let headerState = { title: 'MEMENTO MORI', worldTime: undefined as WorldTime | undefined };
 let statusState: StatusState = { phase: 'ready', tick: 0, chain: false, activity: '', location: '' };
 
-// --- Viewport state ---
-let currentCard: CardContent | null = null;
+// --- Scene state ---
 let currentScene: string[] | null = null;
 
 // --- Entity registration for narrative highlighting ---
@@ -97,10 +96,10 @@ function renderAllPanels(): void {
     uc.setRegionContent('status', renderStatusBar(statusRegion.cols, statusState));
   }
 
-  // Viewer renders even without game state
-  const viewerRegionEarly = r('viewer');
-  if (viewerRegionEarly) {
-    uc.setRegionContent('viewer', renderViewer(viewerRegionEarly.cols, viewerRegionEarly.rows));
+  // Viewer renders even without game state — use offscreen canvas for scaling
+  const viewerCanvas = renderViewerCanvas();
+  if (viewerCanvas) {
+    uc.setOffscreen('viewer', viewerCanvas);
   }
 
   // Game panels only render when gameState exists
@@ -128,10 +127,20 @@ function renderAllPanels(): void {
 
   updateMap(gameState, handleAction);
 
-  // Composite map canvas into viewport region
+  // Composite map canvas into map region
   const mapCanvas = getMapCanvas();
   if (mapCanvas && mapCanvas.width > 0) {
-    uc.setOffscreen('viewport', mapCanvas);
+    uc.setOffscreen('map', mapCanvas);
+  }
+
+  // NPC cards panel — offscreen canvas with Pretext layout
+  const cardsRegion = r('cards');
+  if (cardsRegion) {
+    const cs = uc.getCharSize();
+    const cardsCanvas = renderCardsCanvas(gameState, cardsRegion.cols * cs.width, cardsRegion.rows * cs.height);
+    if (cardsCanvas) {
+      uc.setOffscreen('cards', cardsCanvas);
+    }
   }
 }
 
@@ -161,23 +170,19 @@ function showDeathScreen(cause: string): void {
 }
 
 // --- Viewport setters ---
-function setViewportCard(card: CardContent | null): void {
-  currentCard = card;
-  currentScene = null;
-  const vpRegion = uc?.getRegion('viewport');
-  if (vpRegion) {
-    uc.setRegionContent('viewport', renderViewport(vpRegion.cols, vpRegion.rows, currentCard, currentScene));
-  }
+function setViewportCard(_card: CardContent | null): void {
+  // Card display is now handled by the cards panel via renderCardsPanel
+  // This callback is still wired for proximity detection but rendering is
+  // done in the main repaint loop.
 }
 
 function setViewportScene(lines: string[]): void {
   currentScene = lines;
-  currentCard = null;
-  // Show scene art in the viewer panel
+  // Show scene art in the viewer panel — offscreen canvas for scaling
   setViewerArt(lines, '');
-  const viewerRegion = uc?.getRegion('viewer');
-  if (viewerRegion) {
-    uc.setRegionContent('viewer', renderViewer(viewerRegion.cols, viewerRegion.rows));
+  const viewerCanvas = renderViewerCanvas();
+  if (viewerCanvas) {
+    uc.setOffscreen('viewer', viewerCanvas);
   }
 }
 
@@ -348,7 +353,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setMapUpdateCallback(() => {
     const mapCanvas = getMapCanvas();
     if (mapCanvas && mapCanvas.width > 0) {
-      uc.setOffscreen('viewport', mapCanvas);
+      uc.setOffscreen('map', mapCanvas);
     }
   });
 
