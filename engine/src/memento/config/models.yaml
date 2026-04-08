@@ -33,3 +33,5 @@ crews:
   faction_generation: npc_concept
   reputation: stat_assignment
   ascii_art: ascii_art
+  cartographer: ascii_art
+  portraitist: ascii_art
