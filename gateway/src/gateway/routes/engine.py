@@ -855,97 +855,20 @@ class MoveWithinRequest(BaseModel):
 
 @router.post("/engine/move-within")
 async def move_within(req: MoveWithinRequest, request: Request):
-    """Move an NPC to a different position within the current room.
-
-    Validates walkability, updates KG position, and broadcasts position_update to clients.
-    """
-    from gateway.npc_registry import resolve_npc_kg_uuid
-
-    npc_name = resolve_npc_name(req.npc_id)
-    location = resolve_npc_location(req.npc_id)
-    npc_uuid = resolve_npc_kg_uuid(req.npc_id)
-
-    if not npc_uuid:
-        return {"success": False, "error": "Cannot resolve NPC UUID"}
-
-    # Get current position + room map
-    from memento.bonfires_client import get_client
-    client = await asyncio.to_thread(get_client)
-
-    entity = await asyncio.to_thread(client.kg.get_entity, npc_uuid)
-    if isinstance(entity, dict) and "entity" in entity:
-        entity = entity["entity"]
-
-    # Find location UUID from edges
-    location_uuid = ""
-    try:
-        edges = await asyncio.to_thread(
-            client.kg.get_edges, npc_uuid,
-            direction="outgoing", edge_type="LOCATED_IN",
+    """Move an NPC within the current room (validation + KG update + ws broadcast)."""
+    from memento.tools.movement import move_within_room
+    result = await move_within_room(req.npc_id, req.target_x, req.target_y)
+    if result.get("success"):
+        ws_hub = getattr(request.app.state, "ws_hub", None)
+        if ws_hub and result.get("location"):
+            pos_msg = {"type": "position_update", "entity_id": result.get("npc_uuid", ""),
+                       "x": req.target_x, "y": req.target_y}
+            await ws_hub.broadcast_to_location(result["location"], pos_msg)
+        await broadcast_tool_event(
+            ws_hub, tool="mm_move_within", npc_id=req.npc_id,
+            summary=f"{result['npc_name']} moved to ({req.target_x},{req.target_y})",
         )
-        if edges:
-            target = edges[0].get("target", {})
-            location_uuid = target.get("uuid", target.get("id", ""))
-    except Exception:
-        pass
-
-    # Get current position from room manifest
-    current_x, current_y = 0, 0
-    room_width, room_height = 35, 18
-    tiles = []
-    if location_uuid:
-        try:
-            from memento.room_manifest import get_room_manifest
-            manifest = await asyncio.to_thread(get_room_manifest, location_uuid)
-            room_width = manifest.get("width", 35)
-            room_height = manifest.get("height", 18)
-            tiles = manifest.get("tiles", [])
-            npc_lower = npc_name.lower()
-            for npc in manifest.get("npcs", []):
-                if npc.get("name", "").lower() == npc_lower:
-                    current_x, current_y = npc.get("x", 0), npc.get("y", 0)
-                    break
-        except Exception:
-            pass
-
-    # Validate range (Manhattan distance <= 5)
-    distance = abs(req.target_x - current_x) + abs(req.target_y - current_y)
-    if distance > 5:
-        return {"success": False, "error": f"Too far: {distance} tiles (max 5)"}
-
-    # Validate bounds
-    if req.target_x >= room_width or req.target_y >= room_height:
-        return {"success": False, "error": f"Out of bounds ({room_width}x{room_height})"}
-
-    # Validate walkability
-    if tiles:
-        idx = req.target_y * room_width + req.target_x
-        tile = tiles[idx] if idx < len(tiles) else "#"
-        if tile in ("#", " "):
-            return {"success": False, "error": f"Tile ({req.target_x},{req.target_y}) is blocked"}
-
-    # Broadcast position_update to clients
-    ws_hub = getattr(request.app.state, "ws_hub", None)
-    if ws_hub and location:
-        await ws_hub.broadcast_to_location(location, {
-            "type": "position_update",
-            "entity_id": npc_uuid,
-            "x": req.target_x,
-            "y": req.target_y,
-        })
-
-    # Also broadcast as tool_event badge
-    await broadcast_tool_event(
-        getattr(request.app.state, "ws_hub", None), tool="mm_move_within", npc_id=req.npc_id,
-        summary=f"{npc_name} moved to ({req.target_x},{req.target_y})",
-    )
-
-    return {
-        "success": True,
-        "from": {"x": current_x, "y": current_y},
-        "to": {"x": req.target_x, "y": req.target_y},
-        "distance": distance,
-    }
+    return {k: v for k, v in result.items() if k not in ("npc_name", "npc_uuid", "location")}
 
 
 class RoomManifestRequest(BaseModel):
