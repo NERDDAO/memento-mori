@@ -921,6 +921,147 @@ def _register_combat_narrative_tools(
         return {"result": result}
 
 
+# ── Design crew tools (task 7) ─────────────────────────────────────────────
+
+def _register_design_tools(mcp: FastMCP) -> None:
+    """Register the procgen/design-crew tool handlers on ``mcp``.
+
+    Design tools don't broadcast, don't touch the matrix bridge, and don't
+    look anything up in the narrator registry, so this helper takes only
+    the ``FastMCP`` instance — matching the YAGNI precedent set by
+    ``_register_read_tools`` in task 4.
+
+    These handlers mirror the matching HTTP routes in ``routes/engine.py``:
+    they call the same ``memento.crews.*`` factory functions with the same
+    arguments inside ``engine_lock``, and return the same JSON-serialisable
+    shapes. Docstrings are copied verbatim from
+    ``scripts/seed_engine_tools.py`` so the NPC-facing tool description
+    stays identical across HTTP and MCP transports.
+
+    Gate inventory (mirrors HTTP routes exactly):
+      - mm_design_quest, mm_design_item, mm_design_npc,
+        mm_design_location, mm_design_region — all gated via
+        ``check_tool_access``.
+    """
+
+    @mcp.tool(name="mm_design_quest")
+    async def mm_design_quest(
+        npc_id: str,
+        location: str,
+        npc_name: str,
+        player_level: int = 1,
+        active_quests: str = "",
+        faction_context: str = "",
+    ) -> dict:
+        """Design a morally complex quest with choices, rewards, and consequences."""
+        await _check_tool_access(npc_id, "mm_design_quest")
+
+        def _run():
+            from memento.crews.quest.design import make_quest_design_crew
+            from gateway.engine_state import engine_lock
+            with engine_lock:
+                crew = make_quest_design_crew(
+                    location=location, npc=npc_name,
+                    player_level=player_level, active_quests=active_quests,
+                    faction_context=faction_context,
+                )
+                return crew.kickoff().raw
+
+        result = await asyncio.to_thread(_run)
+        return {"quest_design": result}
+
+    @mcp.tool(name="mm_design_item")
+    async def mm_design_item(
+        npc_id: str,
+        location_name: str,
+        rarity_budget: str = "common",
+        num_items: int = 1,
+    ) -> dict:
+        """Design thematically appropriate items with stats and lore."""
+        await _check_tool_access(npc_id, "mm_design_item")
+
+        def _run():
+            from memento.crews.item_gen.concept import make_item_concept_crew
+            from gateway.engine_state import engine_lock
+            with engine_lock:
+                crew = make_item_concept_crew(
+                    location_name=location_name,
+                    rarity_budget=rarity_budget,
+                    num_items=num_items,
+                )
+                return crew.kickoff().raw
+
+        result = await asyncio.to_thread(_run)
+        return {"items": result}
+
+    @mcp.tool(name="mm_design_npc")
+    async def mm_design_npc(
+        npc_id: str,
+        role: str,
+        location_name: str,
+        region_context: str = "",
+    ) -> dict:
+        """Design a full NPC with personality, stats, and backstory."""
+        await _check_tool_access(npc_id, "mm_design_npc")
+
+        def _run():
+            from memento.crews.npc_gen.concept import make_concept_crew
+            from gateway.engine_state import engine_lock
+            with engine_lock:
+                crew = make_concept_crew(
+                    npc_role=role, location_name=location_name,
+                    region_context=region_context,
+                )
+                return crew.kickoff().raw
+
+        result = await asyncio.to_thread(_run)
+        return {"npc_design": result}
+
+    @mcp.tool(name="mm_design_location")
+    async def mm_design_location(
+        npc_id: str,
+        location_plan: str,
+        region_name: str,
+    ) -> dict:
+        """Design a full location with tile map, secrets, and atmosphere."""
+        await _check_tool_access(npc_id, "mm_design_location")
+
+        def _run():
+            from memento.crews.world_gen.location import make_location_crew
+            from gateway.engine_state import engine_lock
+            with engine_lock:
+                crew = make_location_crew(
+                    location_plan=location_plan, region_name=region_name,
+                )
+                return crew.kickoff().raw
+
+        result = await asyncio.to_thread(_run)
+        return {"location_design": result}
+
+    @mcp.tool(name="mm_design_region")
+    async def mm_design_region(
+        npc_id: str,
+        theme: str,
+        adjacent_regions: str = "",
+        player_level: int = 1,
+    ) -> dict:
+        """Design an entire region with biome, culture, threats, and locations."""
+        await _check_tool_access(npc_id, "mm_design_region")
+
+        def _run():
+            from memento.crews.world_gen.region_design import make_region_design_crew
+            from gateway.engine_state import engine_lock
+            with engine_lock:
+                crew = make_region_design_crew(
+                    theme=theme, adjacent_regions=adjacent_regions,
+                    player_level=player_level,
+                )
+                return crew.kickoff().raw
+
+        result = await asyncio.to_thread(_run)
+        return {"region_design": result}
+
+
 # ── Factory ─────────────────────────────────────────────────────────────────
 
 def build_mcp_app(
@@ -948,6 +1089,7 @@ def build_mcp_app(
     _register_read_tools(mcp)
     _register_mutation_tools(mcp, ws_hub)
     _register_combat_narrative_tools(mcp, ws_hub, bridge)
+    _register_design_tools(mcp)
 
     logger.info("mcp_server: built FastMCP('memento-engine') scaffold")
 
