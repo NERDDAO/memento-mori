@@ -338,7 +338,9 @@ def _register_mutation_tools(
         modifiers: int = 0,
     ) -> dict:
         """Roll a d20 skill check. Returns PASS or FAIL with margin. Use for persuasion, stealth, lockpicking, any non-combat check."""
-        await _check_tool_access(npc_id, "mm_skill_check")
+        # No capability gate: HTTP route does not call check_tool_access either.
+        # (mm_skill_check is in INNATE_TOOLS, so any future gate would be a no-op today,
+        # but the strict mirror rule requires matching HTTP behaviour exactly.)
         from memento.tools.mechanics import roll_skill_check as _rsc
         roll_skill_check = _rsc.func
         result = roll_skill_check(str(skill_level), str(difficulty), str(modifiers))
