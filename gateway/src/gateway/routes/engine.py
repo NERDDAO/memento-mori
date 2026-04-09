@@ -24,14 +24,18 @@ _engine_lock = threading.Lock()
 # ── Tool Event Broadcasting ──
 
 async def broadcast_tool_event(
-    request: Request,
+    ws_hub,
     tool: str,
     npc_id: str,
     summary: str,
     data: dict | None = None,
 ) -> None:
-    """Push a tool_event to all players at the NPC's location."""
-    ws_hub = getattr(request.app.state, "ws_hub", None)
+    """Push a tool_event to all players at the NPC's location.
+
+    ``ws_hub`` is the gateway's WebSocket hub (or ``None`` if unavailable —
+    callers pass ``getattr(request.app.state, "ws_hub", None)`` from HTTP
+    route handlers, or the shared hub reference from the MCP path).
+    """
     if not ws_hub:
         return
     npc = resolve_npc_name(npc_id)
@@ -49,41 +53,6 @@ async def broadcast_tool_event(
         await ws_hub.broadcast_to_location(location, msg)
     else:
         await ws_hub.broadcast_all(msg)
-
-
-def push_to_stack(text: str, npc_name: str, location: str, narrator_registry: dict | None = None) -> None:
-    """Push NPC dialogue to the narrator agent stack (fire-and-forget).
-
-    Routes to the per-room narrator if available, otherwise falls back to global narrator.
-    """
-    if not text or not text.strip():
-        return
-    try:
-        from memento.bonfires_client import get_client
-        from datetime import datetime, UTC
-        client = get_client()
-
-        # Route to per-room narrator if available, else global narrator
-        agent_id = client.config.agent_id
-        if narrator_registry and location:
-            agent_id = narrator_registry.get(location) or agent_id
-
-        from bonfires.sdk.http import _post
-        _post(
-            client.config,
-            f"/agents/{agent_id}/stack/add",
-            body={
-                "messages": [{
-                    "text": f"[{location}] {npc_name}: {text[:2000]}",
-                    "userId": npc_name,
-                    "chatId": location or "unknown",
-                    "timestamp": datetime.now(UTC).isoformat(),
-                    "role": "user",
-                }],
-            },
-        )
-    except Exception:
-        logger.debug("push_to_stack failed for %s", npc_name, exc_info=True)
 
 
 # ── Request/Response Models ──
@@ -269,7 +238,7 @@ async def skill_check(req: SkillCheckRequest, request: Request):
     from memento.tools.mechanics import roll_skill_check as _rsc; roll_skill_check = _rsc.func
     result = roll_skill_check(str(req.skill_level), str(req.difficulty), str(req.modifiers))
     await broadcast_tool_event(
-        request, tool="mm_skill_check", npc_id=req.npc_id,
+        getattr(request.app.state, "ws_hub", None), tool="mm_skill_check", npc_id=req.npc_id,
         summary=f"Skill check (DC {req.difficulty}): {result}",
     )
     return {"result": result}
@@ -363,7 +332,7 @@ async def give_item(req: GiveItemRequest, request: Request):
         f"Transferred from {req.from_entity} to {req.to_entity}",
     )
     await broadcast_tool_event(
-        request, tool="mm_give_item", npc_id=req.npc_id,
+        getattr(request.app.state, "ws_hub", None), tool="mm_give_item", npc_id=req.npc_id,
         summary=f"{req.from_entity} gave {req.item_name} to {req.to_entity}",
     )
     return {"result": result}
@@ -384,7 +353,7 @@ async def give_quest(req: GiveQuestRequest, request: Request):
         create_edge, req.quest_name, req.giver_name, "GIVEN_BY", "",
     )
     await broadcast_tool_event(
-        request, tool="mm_give_quest", npc_id=req.npc_id,
+        getattr(request.app.state, "ws_hub", None), tool="mm_give_quest", npc_id=req.npc_id,
         summary=f"{req.giver_name} gave quest '{req.quest_name}' to {req.player_name}",
     )
     return {"uuid": uuid, "quest_name": req.quest_name, "assigned_to": req.player_name}
@@ -402,7 +371,7 @@ async def create_npc(req: CreateEntityRequest, request: Request):
             create_edge, req.name, req.location_name, "LOCATED_IN", "",
         )
     await broadcast_tool_event(
-        request, tool="mm_create_npc", npc_id=req.npc_id,
+        getattr(request.app.state, "ws_hub", None), tool="mm_create_npc", npc_id=req.npc_id,
         summary=f"New NPC: {req.name}",
     )
     return {"uuid": uuid, "name": req.name, "entity_type": "NPC"}
@@ -420,7 +389,7 @@ async def create_item(req: CreateEntityRequest, request: Request):
             create_edge, req.name, req.location_name, "LOCATED_IN", "",
         )
     await broadcast_tool_event(
-        request, tool="mm_create_item", npc_id=req.npc_id,
+        getattr(request.app.state, "ws_hub", None), tool="mm_create_item", npc_id=req.npc_id,
         summary=f"New item: {req.name}",
     )
     return {"uuid": uuid, "name": req.name, "entity_type": "Item"}
@@ -453,7 +422,7 @@ async def move_entity(req: MoveRequest, request: Request):
     except Exception:
         pass  # Non-fatal — agent may not exist
     await broadcast_tool_event(
-        request, tool="mm_move_to", npc_id=req.npc_id,
+        getattr(request.app.state, "ws_hub", None), tool="mm_move_to", npc_id=req.npc_id,
         summary=f"{req.entity_name} moved to {req.destination}",
     )
     return {"result": result, "entity": req.entity_name, "destination": req.destination}
@@ -563,7 +532,7 @@ async def resolve_combat(req: CombatResolveRequest, request: Request):
     if state.target_dead:
         summary += f" — {req.target} slain!"
     await broadcast_tool_event(
-        request, tool="mm_resolve_combat", npc_id=req.npc_id,
+        getattr(request.app.state, "ws_hub", None), tool="mm_resolve_combat", npc_id=req.npc_id,
         summary=summary,
     )
     return {
@@ -731,7 +700,7 @@ async def narrate(req: NarrateRequest, request: Request):
 
     # Broadcast as narrative channel event
     await broadcast_tool_event(
-        request,
+        getattr(request.app.state, "ws_hub", None),
         tool="mm_narrate",
         npc_id=req.npc_id,
         summary=narrative,
@@ -855,21 +824,21 @@ class NpcResponseRequest(BaseModel):
 
 @router.post("/engine/npc-response")
 async def npc_response(req: NpcResponseRequest, request: Request):
-    """NPC speaks in-character — broadcasts to WS hub + pushes to Delve stack."""
-    npc_name = resolve_npc_name(req.npc_id)
-    location = resolve_npc_location(req.npc_id)
+    """NPC speaks in-character — broadcasts to WS hub.
 
+    The narrator's stack is maintained by bonfires-ai's normal message
+    handling: when the NPC's matrix bot posts its dialogue to the room,
+    bonfires-ai sees the message, runs its storing policy, and pushes
+    to the narrator's stack automatically. No explicit push_to_stack
+    call needed here.
+    """
     await broadcast_tool_event(
-        request,
+        getattr(request.app.state, "ws_hub", None),
         tool="mm_npc_response",
         npc_id=req.npc_id,
         summary=req.dialogue,
         data={"emotion": req.emotion, "target": req.target},
     )
-
-    # Push to narrator stack so heartbeat/narrator see the dialogue
-    narrator_registry = getattr(request.app.state, "narrator_registry", None)
-    push_to_stack(req.dialogue, npc_name, location, narrator_registry)
 
     return {"status": "ok"}
 
@@ -1054,7 +1023,7 @@ async def move_within(req: MoveWithinRequest, request: Request):
 
     # Also broadcast as tool_event badge
     await broadcast_tool_event(
-        request, tool="mm_move_within", npc_id=req.npc_id,
+        getattr(request.app.state, "ws_hub", None), tool="mm_move_within", npc_id=req.npc_id,
         summary=f"{npc_name} moved to ({req.target_x},{req.target_y})",
     )
 
@@ -1144,7 +1113,7 @@ async def transfer_item(req: InventoryTransferRequest, request: Request):
     _chain.transfer_item(req.item_id, req.to_entity)
 
     await broadcast_tool_event(
-        request, tool="mm_inventory_transfer", npc_id=req.npc_id,
+        getattr(request.app.state, "ws_hub", None), tool="mm_inventory_transfer", npc_id=req.npc_id,
         summary=f"Item traded (id: {req.item_id[:8]}...)",
     )
     return {"status": "ok", "item_id": req.item_id,
