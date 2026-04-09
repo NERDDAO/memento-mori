@@ -366,7 +366,9 @@ def build_mcp_app(
     @mcp.tool(name="mm_room_manifest")
     async def mm_room_manifest(npc_id: str, location_uuid: str) -> dict:
         """Get complete room manifest — all NPCs, items, players, exits, tile map."""
-        await _check_tool_access(npc_id, "mm_room_manifest")
+        # No capability gate: the HTTP route does not call check_tool_access,
+        # and "mm_room_manifest" is not in INNATE_TOOLS or the generic kits,
+        # so gating here would cause capability_missing errors for normal NPCs.
         from memento.room_manifest import get_room_manifest
         result = await asyncio.to_thread(get_room_manifest, location_uuid)
         return result
@@ -374,14 +376,14 @@ def build_mcp_app(
     @mcp.tool(name="mm_reputation")
     async def mm_reputation(npc_id: str) -> dict:
         """Check how an action affects faction reputation."""
-        await _check_tool_access(npc_id, "mm_reputation")
+        # No capability gate: mirrors the HTTP route, which is ungated.
         # Simplified — full implementation would use make_reputation_crew
         return {"result": "reputation check not yet implemented"}
 
     @mcp.tool(name="mm_detect_events")
     async def mm_detect_events(npc_id: str) -> dict:
         """Detect event types in a scene."""
-        await _check_tool_access(npc_id, "mm_detect_events")
+        # No capability gate: mirrors the HTTP route, which is ungated.
         # Simplified — full implementation would use EventDetectionFlow
         return {"result": "event detection not yet implemented"}
 
