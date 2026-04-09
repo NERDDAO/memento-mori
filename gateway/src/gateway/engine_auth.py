@@ -6,17 +6,35 @@ to determine if the requested tool is allowed.
 """
 
 import asyncio
+import hmac
 import os
 
 from fastapi import HTTPException, Header
 
 
-async def verify_engine_token(authorization: str = Header("")) -> None:
-    """Verify the bearer token matches ENGINE_API_TOKEN."""
+def bearer_token_valid(authorization: str) -> bool:
+    """Pure predicate — no framework context. Safe to call from raw ASGI scope.
+
+    Dev-mode semantics: when ``ENGINE_API_TOKEN`` is unset/empty, all requests
+    pass (matches the existing ``verify_engine_token`` behaviour). When set,
+    requires ``Authorization: Bearer <token>`` with a constant-time compare.
+    """
     expected = os.getenv("ENGINE_API_TOKEN", "")
     if not expected:
-        return  # No token configured = no auth (dev mode)
-    if not authorization.startswith("Bearer ") or authorization[7:] != expected:
+        return True  # dev mode
+    if not authorization.startswith("Bearer "):
+        return False
+    return hmac.compare_digest(authorization[7:], expected)
+
+
+async def verify_engine_token(authorization: str = Header("")) -> None:
+    """Verify the bearer token matches ENGINE_API_TOKEN.
+
+    Thin FastAPI ``Depends`` wrapper over :func:`bearer_token_valid`. The status
+    code stays 403 (not 401) for backwards compatibility with existing HTTP
+    routes and tests. Only the MCP ASGI middleware surfaces 401s.
+    """
+    if not bearer_token_valid(authorization):
         raise HTTPException(status_code=403, detail="Invalid engine token")
 
 
