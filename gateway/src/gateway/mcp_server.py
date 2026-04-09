@@ -109,18 +109,13 @@ class _BearerAuthMiddleware:
 
 # ── Read-tool registrations ────────────────────────────────────────────────
 
-def _register_read_tools(
-    mcp: FastMCP,
-    ws_hub: "WebSocketHub",
-    bridge: "MatrixBridge | None",
-    narrator_registry: "dict[str, str]",
-) -> None:
+def _register_read_tools(mcp: FastMCP) -> None:
     """Register the read/query tool handlers on ``mcp``.
 
-    Handlers close over ``ws_hub`` / ``bridge`` / ``narrator_registry`` so
-    future read tools can reach them without additional plumbing. The current
-    batch does not touch those refs — they're accepted for uniformity with
-    the mutation/combat/design registration helpers landing in tasks 5-7.
+    Read tools don't broadcast, don't touch the matrix bridge, and don't
+    look anything up in the narrator registry, so this helper takes only
+    the ``FastMCP`` instance — matching the YAGNI precedent set by
+    ``_register_mutation_tools`` in task 5.
 
     These handlers mirror the matching HTTP routes in ``routes/engine.py``:
     they call the same underlying functions with the same arguments, return
@@ -133,7 +128,6 @@ def _register_read_tools(
     route broadcasts a ``tool_event`` on every call, which classifies it
     as a mutation-ish tool for the purposes of this migration.
     """
-    _ = (ws_hub, bridge, narrator_registry)  # read tools don't touch these yet
 
     @mcp.tool(name="mm_get_state")
     async def mm_get_state(npc_id: str, entity_name: str) -> dict:
@@ -621,7 +615,6 @@ def _register_combat_narrative_tools(
     mcp: FastMCP,
     ws_hub: "WebSocketHub",
     bridge: "MatrixBridge | None",
-    narrator_registry: "dict[str, str]",
 ) -> None:
     """Register combat/narrative/runtime tool handlers on ``mcp``.
 
@@ -646,11 +639,7 @@ def _register_combat_narrative_tools(
       - mm_trigger_npc: gated, does NOT broadcast, REQUIRES Matrix bridge
       - mm_heartbeat: ungated, no broadcast
       - mm_world_reaction: gated, no broadcast
-
-    ``narrator_registry`` is unused by the task-6 handlers (no HTTP route in
-    this batch reads it) — accepted for uniformity with future helpers.
     """
-    _ = (narrator_registry,)  # task-6 handlers don't read the narrator_registry
 
     @mcp.tool(name="mm_resolve_combat")
     async def mm_resolve_combat(
@@ -942,9 +931,8 @@ def build_mcp_app(
     """Build the streamable-HTTP MCP ASGI app for the memento engine.
 
     The returned app is meant to be mounted at /mcp on the gateway FastAPI app.
-    All captured refs (ws_hub, bridge, narrator_registry) are closed over by
-    the per-category registration helpers so tool handlers can reach them
-    without a FastAPI Request context.
+    Captured refs are closed over by the per-category registration helpers so
+    tool handlers can reach them without a FastAPI Request context.
 
     ``bridge`` may be ``None`` in dev environments where Matrix is not
     configured (see ``start.sh`` and ``example.env`` — ``MATRIX_BOT_TOKEN``
@@ -957,9 +945,9 @@ def build_mcp_app(
     """
     mcp = FastMCP("memento-engine")
 
-    _register_read_tools(mcp, ws_hub, bridge, narrator_registry)
+    _register_read_tools(mcp)
     _register_mutation_tools(mcp, ws_hub)
-    _register_combat_narrative_tools(mcp, ws_hub, bridge, narrator_registry)
+    _register_combat_narrative_tools(mcp, ws_hub, bridge)
 
     logger.info("mcp_server: built FastMCP('memento-engine') scaffold")
 
