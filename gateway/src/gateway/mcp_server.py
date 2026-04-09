@@ -23,6 +23,7 @@ from mcp.server.fastmcp import FastMCP
 
 from gateway.engine_auth import bearer_token_valid, check_tool_access
 from gateway.log import get_logger
+from gateway.routes.engine import broadcast_tool_event
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send
@@ -296,6 +297,411 @@ def _register_read_tools(
         return {"result": "event detection not yet implemented"}
 
 
+# ── Mutation tools (task 5) ────────────────────────────────────────────────
+
+def _register_mutation_tools(
+    mcp: FastMCP,
+    ws_hub: "WebSocketHub",
+    bridge: "MatrixBridge | None",
+    narrator_registry: "dict[str, str]",
+) -> None:
+    """Register the world-mutation tool handlers on ``mcp``.
+
+    Handlers close over ``ws_hub`` so they can call
+    :func:`gateway.routes.engine.broadcast_tool_event` directly without a
+    FastAPI ``Request`` context — exactly the broadcast points the matching
+    HTTP routes hit. ``bridge`` and ``narrator_registry`` are accepted for
+    uniformity with the other registration helpers; none of the mutations
+    in this batch reach for them (Matrix-touching tools land in task 6).
+
+    These handlers mirror the matching HTTP routes in ``routes/engine.py``:
+    same underlying memento.tools / client.kg calls, same arguments, same
+    return shapes. Docstrings are copied verbatim from
+    ``scripts/seed_engine_tools.py`` so the NPC-facing tool description
+    stays identical across HTTP and MCP transports.
+
+    Broadcast inventory (mirrors HTTP routes exactly):
+      - mm_skill_check, mm_give_item, mm_give_quest, mm_create_npc,
+        mm_create_item, mm_move_to, mm_move_within, mm_inventory_transfer
+        broadcast a ``tool_event``.
+      - mm_remember_event, mm_update_entity, mm_create_location,
+        mm_send_gossip, mm_npc_memory do NOT broadcast (HTTP routes don't
+        either).
+    """
+    _ = (bridge, narrator_registry)  # mutation tools don't touch these yet
+
+    @mcp.tool(name="mm_skill_check")
+    async def mm_skill_check(
+        npc_id: str,
+        skill_level: int,
+        difficulty: int,
+        modifiers: int = 0,
+    ) -> dict:
+        """Roll a d20 skill check. Returns PASS or FAIL with margin. Use for persuasion, stealth, lockpicking, any non-combat check."""
+        await _check_tool_access(npc_id, "mm_skill_check")
+        from memento.tools.mechanics import roll_skill_check as _rsc
+        roll_skill_check = _rsc.func
+        result = roll_skill_check(str(skill_level), str(difficulty), str(modifiers))
+        await broadcast_tool_event(
+            ws_hub,
+            tool="mm_skill_check",
+            npc_id=npc_id,
+            summary=f"Skill check (DC {difficulty}): {result}",
+        )
+        return {"result": result}
+
+    @mcp.tool(name="mm_remember_event")
+    async def mm_remember_event(npc_id: str, summary: str) -> dict:
+        """Record a significant event in the world's memory. Use for deaths, discoveries, betrayals, victories. The world will remember this."""
+        await _check_tool_access(npc_id, "mm_remember_event")
+        from memento.tools.kg import remember_event as _remember_tool
+        _remember = _remember_tool.func
+        result = await asyncio.to_thread(_remember, summary)
+        return {"result": result}
+
+    @mcp.tool(name="mm_update_entity")
+    async def mm_update_entity(
+        npc_id: str,
+        name: str,
+        new_summary: str = "",
+        new_labels: str = "",
+    ) -> dict:
+        """Update an entity's summary or labels in the knowledge graph."""
+        await _check_tool_access(npc_id, "mm_update_entity")
+        from memento.tools.kg import update_entity as _update_tool
+        _update = _update_tool.func
+        result = await asyncio.to_thread(_update, name, new_summary, new_labels)
+        return {"result": result}
+
+    @mcp.tool(name="mm_give_item")
+    async def mm_give_item(
+        npc_id: str,
+        item_name: str,
+        from_entity: str,
+        to_entity: str,
+    ) -> dict:
+        """Transfer an item from one entity to another. Use for quest rewards, trades, theft."""
+        await _check_tool_access(npc_id, "mm_give_item")
+        from memento.tools.kg import create_edge as _ce_tool
+        create_edge = _ce_tool.func
+        result = await asyncio.to_thread(
+            create_edge, item_name, to_entity, "OWNED_BY",
+            f"Transferred from {from_entity} to {to_entity}",
+        )
+        await broadcast_tool_event(
+            ws_hub,
+            tool="mm_give_item",
+            npc_id=npc_id,
+            summary=f"{from_entity} gave {item_name} to {to_entity}",
+        )
+        return {"result": result}
+
+    @mcp.tool(name="mm_give_quest")
+    async def mm_give_quest(
+        npc_id: str,
+        quest_name: str,
+        description: str,
+        giver_name: str,
+        player_name: str,
+    ) -> dict:
+        """Create a quest and assign it to a player."""
+        await _check_tool_access(npc_id, "mm_give_quest")
+        from memento.tools.kg import create_entity as _cen, create_edge as _ced
+        create_entity = _cen.func
+        create_edge = _ced.func
+        uuid = await asyncio.to_thread(create_entity, quest_name, "Quest", description)
+        await asyncio.to_thread(
+            create_edge, quest_name, player_name, "ASSIGNED_TO",
+            f"Quest given by {giver_name}",
+        )
+        await asyncio.to_thread(
+            create_edge, quest_name, giver_name, "GIVEN_BY", "",
+        )
+        await broadcast_tool_event(
+            ws_hub,
+            tool="mm_give_quest",
+            npc_id=npc_id,
+            summary=f"{giver_name} gave quest '{quest_name}' to {player_name}",
+        )
+        return {"uuid": uuid, "quest_name": quest_name, "assigned_to": player_name}
+
+    @mcp.tool(name="mm_create_npc")
+    async def mm_create_npc(
+        npc_id: str,
+        name: str,
+        summary: str = "",
+        location_name: str = "",
+    ) -> dict:
+        """Create a new NPC entity in the world."""
+        await _check_tool_access(npc_id, "mm_create_npc")
+        from memento.tools.kg import create_entity as _cen, create_edge as _ced
+        create_entity = _cen.func
+        create_edge = _ced.func
+        uuid = await asyncio.to_thread(create_entity, name, "NPC", summary)
+        if location_name:
+            await asyncio.to_thread(
+                create_edge, name, location_name, "LOCATED_IN", "",
+            )
+        await broadcast_tool_event(
+            ws_hub,
+            tool="mm_create_npc",
+            npc_id=npc_id,
+            summary=f"New NPC: {name}",
+        )
+        return {"uuid": uuid, "name": name, "entity_type": "NPC"}
+
+    @mcp.tool(name="mm_create_item")
+    async def mm_create_item(
+        npc_id: str,
+        name: str,
+        summary: str = "",
+        location_name: str = "",
+    ) -> dict:
+        """Create a new item in the world. Use for crafting, forging, finding."""
+        await _check_tool_access(npc_id, "mm_create_item")
+        from memento.tools.kg import create_entity as _cen, create_edge as _ced
+        create_entity = _cen.func
+        create_edge = _ced.func
+        uuid = await asyncio.to_thread(create_entity, name, "Item", summary)
+        if location_name:
+            await asyncio.to_thread(
+                create_edge, name, location_name, "LOCATED_IN", "",
+            )
+        await broadcast_tool_event(
+            ws_hub,
+            tool="mm_create_item",
+            npc_id=npc_id,
+            summary=f"New item: {name}",
+        )
+        return {"uuid": uuid, "name": name, "entity_type": "Item"}
+
+    @mcp.tool(name="mm_create_location")
+    async def mm_create_location(
+        npc_id: str,
+        name: str,
+        summary: str = "",
+    ) -> dict:
+        """Discover or build a new location in the world."""
+        await _check_tool_access(npc_id, "mm_create_location")
+        from memento.tools.kg import create_entity as _cen
+        create_entity = _cen.func
+        uuid = await asyncio.to_thread(create_entity, name, "Location", summary)
+        return {"uuid": uuid, "name": name, "entity_type": "Location"}
+
+    @mcp.tool(name="mm_move_to")
+    async def mm_move_to(
+        npc_id: str,
+        entity_name: str,
+        destination: str,
+    ) -> dict:
+        """ACTUALLY move to a different location in the world. This is the mutation — calling this tool is what makes the move happen and updates the map. Your NPC will not move unless you call this (or mm_move_within for same-room moves). Narrating a move in text does nothing; you must call this tool."""
+        await _check_tool_access(npc_id, "mm_move_to")
+        from memento.tools.kg import create_edge as _ce_tool
+        create_edge = _ce_tool.func
+        result = await asyncio.to_thread(
+            create_edge, entity_name, destination, "LOCATED_IN",
+            f"{entity_name} moved to {destination}",
+        )
+        # Update agent controller tracking
+        try:
+            from memento.agent_controller import get_agent_controller
+            controller = get_agent_controller()
+            controller.move_npc_agent(entity_name, to_location=destination)
+        except Exception:
+            pass  # Non-fatal — agent may not exist
+        await broadcast_tool_event(
+            ws_hub,
+            tool="mm_move_to",
+            npc_id=npc_id,
+            summary=f"{entity_name} moved to {destination}",
+        )
+        return {"result": result, "entity": entity_name, "destination": destination}
+
+    @mcp.tool(name="mm_move_within")
+    async def mm_move_within(
+        npc_id: str,
+        target_x: int,
+        target_y: int,
+    ) -> dict:
+        """ACTUALLY move your NPC to a new position within the current room. This is the mutation — calling this tool is what updates the map and fires the move badge. Use to approach a player, back away, patrol, or reposition. Max 5 tiles per move (Manhattan distance). Narrating a move in text does nothing — your NPC will not move unless you call this tool. mm_check_plausibility is a dry run and does NOT substitute for this."""
+        # No capability gate: HTTP route does not call check_tool_access either.
+        from gateway.npc_registry import (
+            resolve_npc_kg_uuid,
+            resolve_npc_location,
+            resolve_npc_name,
+        )
+
+        npc_name = resolve_npc_name(npc_id)
+        location = resolve_npc_location(npc_id)
+        npc_uuid = resolve_npc_kg_uuid(npc_id)
+
+        if not npc_uuid:
+            return {"success": False, "error": "Cannot resolve NPC UUID"}
+
+        from memento.bonfires_client import get_client
+        client = await asyncio.to_thread(get_client)
+
+        entity = await asyncio.to_thread(client.kg.get_entity, npc_uuid)
+        if isinstance(entity, dict) and "entity" in entity:
+            entity = entity["entity"]
+
+        # Find location UUID from edges
+        location_uuid = ""
+        try:
+            edges = await asyncio.to_thread(
+                client.kg.get_edges, npc_uuid,
+                direction="outgoing", edge_type="LOCATED_IN",
+            )
+            if edges:
+                target = edges[0].get("target", {})
+                location_uuid = target.get("uuid", target.get("id", ""))
+        except Exception:
+            pass
+
+        # Get current position from room manifest
+        current_x, current_y = 0, 0
+        room_width, room_height = 35, 18
+        tiles = []
+        if location_uuid:
+            try:
+                from memento.room_manifest import get_room_manifest
+                manifest = await asyncio.to_thread(get_room_manifest, location_uuid)
+                room_width = manifest.get("width", 35)
+                room_height = manifest.get("height", 18)
+                tiles = manifest.get("tiles", [])
+                npc_lower = npc_name.lower()
+                for npc in manifest.get("npcs", []):
+                    if npc.get("name", "").lower() == npc_lower:
+                        current_x, current_y = npc.get("x", 0), npc.get("y", 0)
+                        break
+            except Exception:
+                pass
+
+        # Validate range (Manhattan distance <= 5)
+        distance = abs(target_x - current_x) + abs(target_y - current_y)
+        if distance > 5:
+            return {"success": False, "error": f"Too far: {distance} tiles (max 5)"}
+
+        # Validate bounds
+        if target_x >= room_width or target_y >= room_height:
+            return {"success": False, "error": f"Out of bounds ({room_width}x{room_height})"}
+
+        # Validate walkability
+        if tiles:
+            idx = target_y * room_width + target_x
+            tile = tiles[idx] if idx < len(tiles) else "#"
+            if tile in ("#", " "):
+                return {"success": False, "error": f"Tile ({target_x},{target_y}) is blocked"}
+
+        # Broadcast position_update to clients
+        if ws_hub and location:
+            await ws_hub.broadcast_to_location(location, {
+                "type": "position_update",
+                "entity_id": npc_uuid,
+                "x": target_x,
+                "y": target_y,
+            })
+
+        # Also broadcast as tool_event badge
+        await broadcast_tool_event(
+            ws_hub,
+            tool="mm_move_within",
+            npc_id=npc_id,
+            summary=f"{npc_name} moved to ({target_x},{target_y})",
+        )
+
+        return {
+            "success": True,
+            "from": {"x": current_x, "y": current_y},
+            "to": {"x": target_x, "y": target_y},
+            "distance": distance,
+        }
+
+    @mcp.tool(name="mm_inventory_transfer")
+    async def mm_inventory_transfer(
+        npc_id: str,
+        item_id: str,
+        from_entity: str,
+        to_entity: str,
+        quantity: int = 1,
+    ) -> dict:
+        """Transfer an item from one entity to another. Use for trades, gifts, theft resolution."""
+        await _check_tool_access(npc_id, "mm_inventory_transfer")
+
+        from memento.bonfires_client import get_client
+        from memento.tools import chain as _chain
+
+        client = await asyncio.to_thread(get_client)
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Expire CARRIES from old owner
+        try:
+            edges = await asyncio.to_thread(
+                client.kg.get_edges, from_entity,
+                direction="outgoing", edge_type="CARRIES",
+            )
+            for edge in edges:
+                target = edge.get("target", {})
+                tid = target.get("uuid", target.get("id", ""))
+                if tid == item_id and not (edge.get("expired_at") or edge.get("invalid_at")):
+                    edge_uuid = edge.get("uuid", edge.get("id", ""))
+                    if edge_uuid:
+                        await asyncio.to_thread(
+                            client.kg.update_edge, edge_uuid, {"expired_at": now},
+                        )
+                        break
+        except Exception:
+            pass
+
+        # Create CARRIES to new owner
+        await asyncio.to_thread(
+            client.kg.create_edge,
+            to_entity, item_id, "CARRIES",
+            "Traded item",
+        )
+
+        # Chain update
+        _chain.transfer_item(item_id, to_entity)
+
+        await broadcast_tool_event(
+            ws_hub,
+            tool="mm_inventory_transfer",
+            npc_id=npc_id,
+            summary=f"Item traded (id: {item_id[:8]}...)",
+        )
+        return {
+            "status": "ok",
+            "item_id": item_id,
+            "from": from_entity,
+            "to": to_entity,
+        }
+
+    @mcp.tool(name="mm_send_gossip")
+    async def mm_send_gossip(
+        npc_id: str,
+        from_npc: str,
+        to_npc: str,
+        message: str,
+    ) -> dict:
+        """Send a message to another NPC. Creates organic information flow between NPCs."""
+        # No capability gate: HTTP route does not call check_tool_access either.
+        from memento.tools.kg import remember_event as _remember_tool
+        _remember = _remember_tool.func
+        summary = f"{from_npc} told {to_npc}: {message}"
+        result = await asyncio.to_thread(_remember, summary)
+        return {"result": result, "from": from_npc, "to": to_npc}
+
+    @mcp.tool(name="mm_npc_memory")
+    async def mm_npc_memory(npc_id: str, summary: str) -> dict:
+        """Record a first-person memory of a scene from your perspective."""
+        await _check_tool_access(npc_id, "mm_npc_memory")
+        from memento.tools.kg import remember_event as _remember_tool
+        _remember = _remember_tool.func
+        result = await asyncio.to_thread(_remember, summary)
+        return {"result": result}
+
+
 # ── Factory ─────────────────────────────────────────────────────────────────
 
 def build_mcp_app(
@@ -322,6 +728,7 @@ def build_mcp_app(
     mcp = FastMCP("memento-engine")
 
     _register_read_tools(mcp, ws_hub, bridge, narrator_registry)
+    _register_mutation_tools(mcp, ws_hub, bridge, narrator_registry)
 
     logger.info("mcp_server: built FastMCP('memento-engine') scaffold")
 
