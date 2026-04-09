@@ -42,14 +42,16 @@ async def lifespan(app: FastAPI):
         app.state.bridge = None
         app.state.narrator_registry = {}
 
-    app.mount(
-        "/mcp",
-        build_mcp_app(
-            ws_hub=ws_hub,
-            bridge=bridge,
-            narrator_registry=app.state.narrator_registry,
-        ),
+    mcp_asgi = build_mcp_app(
+        ws_hub=ws_hub,
+        bridge=bridge,
+        narrator_registry=app.state.narrator_registry,
     )
+    app.mount("/mcp", mcp_asgi)
+    # app.mount() appends after the catch-all StaticFiles("") mount, which
+    # would swallow all requests before /mcp is checked. Swap the last two
+    # routes so /mcp is tried before the catch-all.
+    app.router.routes[-2], app.router.routes[-1] = app.router.routes[-1], app.router.routes[-2]
     logger.info("mcp_server: mounted at /mcp")
 
     # Seed NPC registry from MongoDB + world.json
@@ -64,7 +66,12 @@ async def lifespan(app: FastAPI):
     # Seed ontology types on Delve for this bonfire
     _seed_ontology()
 
-    yield
+    # Start the MCP session manager's task group — streamable_http_app()'s
+    # inner Starlette lifespan won't fire because the mount was added during
+    # the outer app's lifespan (after inner lifespan dispatch already passed).
+    async with mcp_asgi.session_manager.run():
+        yield
+
     if bridge:
         await bridge.disconnect()
 

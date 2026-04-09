@@ -1091,7 +1091,16 @@ def build_mcp_app(
     _register_combat_narrative_tools(mcp, ws_hub, bridge)
     _register_design_tools(mcp)
 
-    logger.info("mcp_server: built FastMCP('memento-engine') scaffold")
+    logger.info("mcp_server: built FastMCP('memento-engine') with %d tools", len(mcp._tool_manager._tools))
 
     raw_app = mcp.streamable_http_app()
-    return _BearerAuthMiddleware(raw_app)
+    wrapped = _BearerAuthMiddleware(raw_app)
+
+    # Expose the session manager so the outer FastAPI lifespan can run it.
+    # streamable_http_app() creates a Starlette app whose lifespan initialises
+    # the session manager's task group.  When mounted inside an already-running
+    # FastAPI app, that inner lifespan never fires.  The caller must do:
+    #     async with wrapped.session_manager.run(): yield
+    wrapped.session_manager = mcp.session_manager  # type: ignore[attr-defined]
+
+    return wrapped
