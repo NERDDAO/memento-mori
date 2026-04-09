@@ -108,7 +108,7 @@ class _BearerAuthMiddleware:
 
 def build_mcp_app(
     ws_hub: "WebSocketHub",
-    bridge: "MatrixBridge",
+    bridge: "MatrixBridge | None",
     narrator_registry: "dict[str, str]",
 ) -> "ASGIApp":
     """Build the streamable-HTTP MCP ASGI app for the memento engine.
@@ -116,6 +116,15 @@ def build_mcp_app(
     The returned app is meant to be mounted at /mcp on the gateway FastAPI app.
     All captured refs (ws_hub, bridge, narrator_registry) are closed over so
     tool handlers can reach them without a FastAPI Request context.
+
+    ``bridge`` may be ``None`` in dev environments where Matrix is not
+    configured (see ``start.sh`` and ``example.env`` — ``MATRIX_BOT_TOKEN``
+    ships empty by default). Tool handlers that can operate without Matrix
+    (read-only tools, task-4) should tolerate ``bridge is None``. Tool
+    handlers that genuinely require the bridge (e.g., ``mm_trigger_npc`` in
+    task-6) MUST check for ``None`` at call time and raise a clear
+    ``RuntimeError`` with an actionable message rather than crashing with
+    an ``AttributeError`` — this is part of the tool-layer error contract.
     """
     mcp = FastMCP("memento-engine")
 

@@ -33,11 +33,24 @@ async def lifespan(app: FastAPI):
     if homeserver and token:
         bridge = MatrixBridge(homeserver, token, ws_hub)
         await bridge.connect()
+        app.state.bridge = bridge
         app.state.narrator_registry = bridge._narrator_agents
         round_manager.on_round_close(make_round_callback(bridge, ws_hub))
         round_manager.on_action(make_action_callback(ws_hub))
-        app.mount("/mcp", build_mcp_app(ws_hub=ws_hub, bridge=bridge, narrator_registry=bridge._narrator_agents))
-        logger.info("mcp_server: mounted at /mcp")
+    else:
+        bridge = None
+        app.state.bridge = None
+        app.state.narrator_registry = {}
+
+    app.mount(
+        "/mcp",
+        build_mcp_app(
+            ws_hub=ws_hub,
+            bridge=bridge,
+            narrator_registry=app.state.narrator_registry,
+        ),
+    )
+    logger.info("mcp_server: mounted at /mcp")
 
     # Seed NPC registry from MongoDB + world.json
     from gateway.npc_registry import seed_from_db, register_npc, update_npc_location
