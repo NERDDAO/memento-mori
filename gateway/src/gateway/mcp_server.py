@@ -520,6 +520,10 @@ def _register_mutation_tools(
         from memento.tools.movement import move_within_room
         result = await move_within_room(npc_id, target_x, target_y)
         if result.get("success"):
+            if ws_hub and result.get("location"):
+                pos_msg = {"type": "position_update", "entity_id": result.get("npc_uuid", ""),
+                           "x": target_x, "y": target_y}
+                await ws_hub.broadcast_to_location(result["location"], pos_msg)
             await broadcast_tool_event(
                 ws_hub, tool="mm_move_within", npc_id=npc_id,
                 summary=f"{result['npc_name']} moved to ({target_x},{target_y})",
