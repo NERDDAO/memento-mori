@@ -7,9 +7,10 @@ to be mounted at ``/mcp`` on the gateway FastAPI app so it shares the same
 process — and therefore the same ``ws_hub`` / ``bridge`` / ``narrator_registry``
 references — as the existing HTTP routes.
 
-Tool handlers are registered in subsequent tasks (task-4 through task-7).
-This file intentionally contains ONLY the scaffold: factory, auth
-middleware, and a small ``_check_tool_access`` helper.
+Read/query tool handlers are registered via ``_register_read_tools``
+(task 4). Mutation, combat, and design categories land in tasks 5-7
+with their own ``_register_*`` helpers, each called from
+``build_mcp_app`` to keep the factory small as the tool surface grows.
 """
 
 from __future__ import annotations
@@ -105,47 +106,33 @@ class _BearerAuthMiddleware:
         await self.app(scope, receive, send)
 
 
-# ── Factory ─────────────────────────────────────────────────────────────────
+# ── Read-tool registrations ────────────────────────────────────────────────
 
-def build_mcp_app(
+def _register_read_tools(
+    mcp: FastMCP,
     ws_hub: "WebSocketHub",
     bridge: "MatrixBridge | None",
     narrator_registry: "dict[str, str]",
-) -> "ASGIApp":
-    """Build the streamable-HTTP MCP ASGI app for the memento engine.
+) -> None:
+    """Register the read/query tool handlers on ``mcp``.
 
-    The returned app is meant to be mounted at /mcp on the gateway FastAPI app.
-    All captured refs (ws_hub, bridge, narrator_registry) are closed over so
-    tool handlers can reach them without a FastAPI Request context.
+    Handlers close over ``ws_hub`` / ``bridge`` / ``narrator_registry`` so
+    future read tools can reach them without additional plumbing. The current
+    batch does not touch those refs — they're accepted for uniformity with
+    the mutation/combat/design registration helpers landing in tasks 5-7.
 
-    ``bridge`` may be ``None`` in dev environments where Matrix is not
-    configured (see ``start.sh`` and ``example.env`` — ``MATRIX_BOT_TOKEN``
-    ships empty by default). Tool handlers that can operate without Matrix
-    (read-only tools, task-4) should tolerate ``bridge is None``. Tool
-    handlers that genuinely require the bridge (e.g., ``mm_trigger_npc`` in
-    task-6) MUST check for ``None`` at call time and raise a clear
-    ``RuntimeError`` with an actionable message rather than crashing with
-    an ``AttributeError`` — this is part of the tool-layer error contract.
+    These handlers mirror the matching HTTP routes in ``routes/engine.py``:
+    they call the same underlying functions with the same arguments, return
+    the same JSON-serialisable shapes, and do NOT broadcast tool_events
+    (broadcasts belong to the mutation-tool tasks). Docstrings are copied
+    verbatim from ``scripts/seed_engine_tools.py`` so the NPC-facing
+    tool description stays identical across HTTP and MCP transports.
+
+    NOTE: ``mm_skill_check`` is intentionally deferred to task 5 — the HTTP
+    route broadcasts a ``tool_event`` on every call, which classifies it
+    as a mutation-ish tool for the purposes of this migration.
     """
-    mcp = FastMCP("memento-engine")
-
-    # Captured for use by future tool handlers (task-5 through task-7).
-    # Read-only handlers below do not touch these refs but they are kept in
-    # scope via ``_unused_closure_refs`` so the factory shape is uniform.
-    _unused_closure_refs = (ws_hub, bridge, narrator_registry)
-    del _unused_closure_refs
-
-    # ── Read/query tools (task 4) ──
-    # These handlers mirror the matching HTTP routes in ``routes/engine.py``:
-    # they call the same underlying functions with the same arguments, return
-    # the same JSON-serialisable shapes, and do NOT broadcast tool_events
-    # (broadcasts belong to the mutation-tool tasks). Docstrings are copied
-    # verbatim from ``scripts/seed_engine_tools.py`` so the NPC-facing
-    # tool description stays identical across HTTP and MCP transports.
-    #
-    # NOTE: ``mm_skill_check`` is intentionally deferred to task 5 — the HTTP
-    # route broadcasts a ``tool_event`` on every call, which classifies it
-    # as a mutation-ish tool for the purposes of this migration.
+    _ = (ws_hub, bridge, narrator_registry)  # read tools don't touch these yet
 
     @mcp.tool(name="mm_get_state")
     async def mm_get_state(npc_id: str, entity_name: str) -> dict:
@@ -386,6 +373,34 @@ def build_mcp_app(
         # No capability gate: mirrors the HTTP route, which is ungated.
         # Simplified — full implementation would use EventDetectionFlow
         return {"result": "event detection not yet implemented"}
+
+
+# ── Factory ─────────────────────────────────────────────────────────────────
+
+def build_mcp_app(
+    ws_hub: "WebSocketHub",
+    bridge: "MatrixBridge | None",
+    narrator_registry: "dict[str, str]",
+) -> "ASGIApp":
+    """Build the streamable-HTTP MCP ASGI app for the memento engine.
+
+    The returned app is meant to be mounted at /mcp on the gateway FastAPI app.
+    All captured refs (ws_hub, bridge, narrator_registry) are closed over by
+    the per-category registration helpers so tool handlers can reach them
+    without a FastAPI Request context.
+
+    ``bridge`` may be ``None`` in dev environments where Matrix is not
+    configured (see ``start.sh`` and ``example.env`` — ``MATRIX_BOT_TOKEN``
+    ships empty by default). Tool handlers that can operate without Matrix
+    (read-only tools, task-4) should tolerate ``bridge is None``. Tool
+    handlers that genuinely require the bridge (e.g., ``mm_trigger_npc`` in
+    task-6) MUST check for ``None`` at call time and raise a clear
+    ``RuntimeError`` with an actionable message rather than crashing with
+    an ``AttributeError`` — this is part of the tool-layer error contract.
+    """
+    mcp = FastMCP("memento-engine")
+
+    _register_read_tools(mcp, ws_hub, bridge, narrator_registry)
 
     logger.info("mcp_server: built FastMCP('memento-engine') scaffold")
 
