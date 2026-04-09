@@ -5,6 +5,14 @@ Replaces the old HttpToolProvider seed with an McpTool document that
 bonfires-ai consumes via MultiServerMCPClient.  Also deletes the legacy
 HttpToolProvider doc so tools aren't loaded twice.
 
+Auth: the McpTool's apiKey is ``{{env:MEMENTO_JWT}}`` — bonfires-ai's
+``AgentEnvVarsService`` resolves this per-agent from the ``agentenvvars``
+collection at tool-load time. Each NPC needs its own JWT minted via the
+memento gateway's ``POST /api/admin/npc-jwt`` endpoint, then written to
+``agentenvvars`` via bonfires-ai's ``seed-agent-env-vars.ts`` script
+(values are field-encrypted so we can't write them from Python directly).
+A convenience bootstrap is in ``scripts/issue_npc_jwts.sh``.
+
 Usage:
     python scripts/seed_engine_tools.py [--dry-run]
 
@@ -23,7 +31,7 @@ MCP_TOOL = {
     "description": "Game mechanics tools for NPC agents — combat, skill checks, world queries, world building",
     "type": "http",
     "url": "{{env:MEMENTO_GATEWAY_URL}}/mcp",
-    "apiKey": "{{env:ENGINE_API_TOKEN}}",
+    "apiKey": "{{env:MEMENTO_JWT}}",
     "enabled": True,
     "toolSettings": {
         "allowedTools": [
@@ -67,9 +75,10 @@ MCP_TOOL = {
             "mm_reputation",
             "mm_detect_events",
         ],
-        "contextMappings": {
-            "*": {"npc_id": "agentId"},
-        },
+        # Identity now flows through the JWT sub claim decoded by the
+        # gateway's _BearerAuthMiddleware — tools do not take npc_id params
+        # anymore. contextMappings is an empty dict for forward compatibility.
+        "contextMappings": {},
         "writeTools": [
             "mm_remember_event",
             "mm_update_entity",

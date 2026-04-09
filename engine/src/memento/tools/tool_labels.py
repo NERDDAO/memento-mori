@@ -98,6 +98,19 @@ KITS: dict[str, set[str]] = {
     "World": {
         "mm_remember_event",
     },
+    # Human player controlling their character via an MCP-enabled agent
+    # (Claude Code, Cursor, etc.). Players get INNATE tools for free plus
+    # this kit for inspection, movement, and trade. They deliberately do
+    # NOT get design tools (mm_design_*), world-creation tools
+    # (mm_create_*), mutation tools that affect other entities
+    # (mm_update_entity, mm_remember_event), or referee tools
+    # (mm_resolve_combat — that's the Engine's job).
+    "Player": {
+        "mm_inventory",
+        "mm_move_to",
+        "mm_check_plausibility",
+        "mm_give_item",
+    },
 }
 
 # ── Granular labels — additive specializations on top of kits ──

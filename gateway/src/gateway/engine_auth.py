@@ -1,67 +1,141 @@
 # gateway/src/gateway/engine_auth.py
 """Auth + capability gating for engine tool endpoints.
 
-Verifies ENGINE_API_TOKEN and checks NPC's KG labels
-to determine if the requested tool is allowed.
+Two authentication layers:
+
+1. **JWT** — the only Bearer token accepted on ``/mcp``. Both NPCs and
+   players present a JWT whose ``sub`` claim is the entity's KG UUID.
+   NPCs get their JWTs from ``POST /api/admin/npc-jwt`` (admin-only);
+   players get theirs from ``POST /api/player/signup`` (x402 in prod).
+
+2. **Capability gate** — once the caller's UUID is resolved from the JWT,
+   ``check_tool_access`` looks up the entity's KG labels and verifies the
+   requested tool is in the allowed set for those labels.
+
+There is no legacy static-token fallback — everything goes through JWTs.
 """
 
 import asyncio
-import hmac
 import os
+import time
+from typing import Any
 
-from fastapi import HTTPException, Header
+import jwt
+from fastapi import HTTPException
 
 
-def bearer_token_valid(authorization: str) -> bool:
-    """Pure predicate — no framework context. Safe to call from raw ASGI scope.
+# ── JWT helpers ─────────────────────────────────────────────────────────────
 
-    Dev-mode semantics: when ``ENGINE_API_TOKEN`` is unset/empty, all requests
-    pass (matches the existing ``verify_engine_token`` behaviour). When set,
-    requires ``Authorization: Bearer <token>`` with a constant-time compare.
+_JWT_ALGO = "HS256"
+
+
+def _jwt_secret() -> str:
+    secret = os.getenv("JWT_SECRET", "")
+    if not secret:
+        raise RuntimeError(
+            "JWT_SECRET env var is not set — the gateway cannot sign or verify JWTs. "
+            "Generate one with `python -c 'import secrets; print(secrets.token_urlsafe(32))'` "
+            "and add it to .env."
+        )
+    return secret
+
+
+def sign_jwt(
+    sub: str,
+    *,
+    type: str,
+    ttl_seconds: int,
+    extra_claims: dict[str, Any] | None = None,
+) -> str:
+    """Sign an HS256 JWT.
+
+    ``sub`` is the entity UUID (NPC or player). ``type`` is ``"npc"`` or
+    ``"player"`` — used by tools that want to differentiate callers.
+    ``ttl_seconds`` controls expiry; callers are expected to pick a
+    sensible default (e.g. 24h for players, 1y for NPCs).
     """
-    expected = os.getenv("ENGINE_API_TOKEN", "")
+    now = int(time.time())
+    payload: dict[str, Any] = {
+        "sub": sub,
+        "type": type,
+        "iat": now,
+        "exp": now + ttl_seconds,
+    }
+    if extra_claims:
+        payload.update(extra_claims)
+    return jwt.encode(payload, _jwt_secret(), algorithm=_JWT_ALGO)
+
+
+def validate_jwt(token: str) -> dict[str, Any] | None:
+    """Decode + verify a JWT. Returns the claims dict on success, ``None``
+    on any validation failure (bad signature, expired, malformed, etc.).
+
+    Never raises — callers get a nullable result so they can distinguish
+    "invalid token" from "no token" without catching exceptions.
+    """
+    if not token:
+        return None
+    try:
+        claims = jwt.decode(token, _jwt_secret(), algorithms=[_JWT_ALGO])
+    except jwt.PyJWTError:
+        return None
+    if not isinstance(claims, dict) or not claims.get("sub"):
+        return None
+    return claims
+
+
+def identity_from_authorization(authorization: str) -> dict[str, Any] | None:
+    """Pure predicate — extract the JWT claims from an ``Authorization`` header.
+
+    Safe to call from raw ASGI scope (no FastAPI context needed). Returns
+    ``None`` if the header is missing, malformed, or the JWT fails to validate.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    return validate_jwt(authorization[7:])
+
+
+# ── Admin key for NPC JWT issuance ──────────────────────────────────────────
+
+
+def admin_key_valid(header_value: str) -> bool:
+    """Constant-time compare the ``X-Admin-Api-Key`` header against
+    ``ENGINE_ADMIN_KEY`` env var. Fails closed when the env var is unset.
+    """
+    import hmac as _hmac
+    expected = os.getenv("ENGINE_ADMIN_KEY", "")
     if not expected:
-        return True  # dev mode
-    if not authorization.startswith("Bearer "):
         return False
-    return hmac.compare_digest(authorization[7:], expected)
+    return _hmac.compare_digest(header_value or "", expected)
 
 
-async def verify_engine_token(authorization: str = Header("")) -> None:
-    """Verify the bearer token matches ENGINE_API_TOKEN.
-
-    Thin FastAPI ``Depends`` wrapper over :func:`bearer_token_valid`. The status
-    code stays 403 (not 401) for backwards compatibility with existing HTTP
-    routes and tests. Only the MCP ASGI middleware surfaces 401s.
-    """
-    if not bearer_token_valid(authorization):
-        raise HTTPException(status_code=403, detail="Invalid engine token")
+# ── Capability gate ─────────────────────────────────────────────────────────
 
 
 async def check_tool_access(npc_id: str, tool_name: str) -> None:
-    """Check if this NPC can call this tool based on its KG labels.
+    """Check if this entity can call this tool based on its KG labels.
 
-    Resolves agent ID → KG UUID via npc_registry, then fetches labels from KG.
-    Raises 403 if the tool is not in the NPC's allowed set.
+    Resolves ``npc_id`` → KG UUID via npc_registry (for legacy agent IDs
+    that aren't already UUIDs), then fetches labels from KG. Raises 403 if
+    the tool is not in the allowed set.
+
+    Innate tools bypass the KG fetch entirely.
     """
     from memento.tools.tool_labels import get_allowed_tools, INNATE_TOOLS
 
-    # Innate tools always allowed — skip KG fetch
     if tool_name in INNATE_TOOLS:
         return
 
-    # No NPC ID = dev/test mode, allow everything
     if not npc_id:
-        return
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "identity_missing", "tool": tool_name},
+        )
 
-    # Resolve agent ID → KG entity UUID via registry
     from gateway.npc_registry import resolve_npc_kg_uuid
     kg_uuid = resolve_npc_kg_uuid(npc_id)
-
-    # No KG UUID in registry — try using npc_id directly (legacy/fallback)
     entity_id = kg_uuid or npc_id
 
-    # Fetch NPC labels from KG
     try:
         from memento.bonfires_client import get_client
         client = await asyncio.to_thread(get_client)
@@ -79,8 +153,8 @@ async def check_tool_access(npc_id: str, tool_name: str) -> None:
             detail={
                 "error": "capability_missing",
                 "tool": tool_name,
-                "npc_labels": labels,
-                "message": f"This NPC doesn't have access to {tool_name}. "
+                "entity_labels": labels,
+                "message": f"This entity doesn't have access to {tool_name}. "
                            f"Add the required label to unlock it.",
             },
         )

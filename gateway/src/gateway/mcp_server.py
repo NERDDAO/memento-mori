@@ -21,9 +21,16 @@ from typing import TYPE_CHECKING
 from fastapi import HTTPException
 from mcp.server.fastmcp import FastMCP
 
-from gateway.engine_auth import bearer_token_valid, check_tool_access
+from contextvars import ContextVar
+
+from gateway.engine_auth import check_tool_access, identity_from_authorization
+from gateway.engine_events import broadcast_tool_event
 from gateway.log import get_logger
-from gateway.routes.engine import broadcast_tool_event
+
+
+# ── Identity context ────────────────────────────────────────────────────────
+
+_current_identity: ContextVar[str | None] = ContextVar("entity_id", default=None)
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send
@@ -36,32 +43,34 @@ logger = get_logger(__name__)
 
 # ── Auth helper ─────────────────────────────────────────────────────────────
 
-async def _check_tool_access(npc_id: str, tool_name: str) -> None:
-    """Wrap ``gateway.engine_auth.check_tool_access`` for MCP tool handlers.
+async def _check_tool_access(tool_name: str) -> str:
+    """Resolve caller identity from the ``_current_identity`` ContextVar and
+    run the KG-backed capability gate. Returns the resolved entity id so the
+    handler can pass it to ``broadcast_tool_event`` / KG calls.
 
-    The upstream helper raises ``fastapi.HTTPException`` on capability failures
-    (currently 403), which is meaningless to an MCP client. We catch *any*
-    ``HTTPException`` and re-raise it as a ``RuntimeError`` prefixed with
-    ``capability_missing:`` so the MCP runtime can surface it as a proper
-    tool error.
+    The ContextVar is set by :class:`_BearerAuthMiddleware` after it decodes
+    the Bearer JWT. Handlers never take an ``npc_id`` parameter anymore —
+    identity comes from the token, not from the client.
 
-    Stable contract — the ``capability_missing:`` prefix on the raised
-    ``RuntimeError`` message is part of the tool-layer error contract.
-    Future tasks (4-7) will swap the ``RuntimeError`` for
-    ``mcp.shared.exceptions.McpError`` with a structured ``ErrorData``
-    payload, but the ``capability_missing:`` marker must be preserved so
-    downstream consumers (bonfires-ai, tests) can continue to detect this
-    failure mode by string match until the structured error lands.
+    Stable error contract — capability failures raise ``RuntimeError`` with
+    the ``capability_missing:`` prefix; missing identity raises
+    ``RuntimeError`` with the ``identity_missing:`` prefix. Both markers are
+    load-bearing for downstream consumers (tests, bonfires-ai) that detect
+    the failure mode by string match.
     """
+    entity_id = _current_identity.get()
+    if not entity_id:
+        raise RuntimeError(
+            f"identity_missing: no JWT context available for tool={tool_name}"
+        )
     try:
-        await check_tool_access(npc_id, tool_name)
+        await check_tool_access(entity_id, tool_name)
     except HTTPException as exc:
-        # Any HTTPException (not just 403) must be surfaced as a tool-layer
-        # error — the MCP runtime can't render a FastAPI HTTPException.
         raise RuntimeError(
             f"capability_missing: {exc.detail or exc.status_code} "
-            f"(tool={tool_name}, npc_id={npc_id})"
+            f"(tool={tool_name}, entity_id={entity_id})"
         ) from exc
+    return entity_id
 
 
 # ── Bearer auth ASGI middleware ─────────────────────────────────────────────
@@ -78,13 +87,14 @@ def _unauthorized_response_factory(message: str):
 
 
 class _BearerAuthMiddleware:
-    """ASGI middleware that enforces the engine bearer token on /mcp.
+    """ASGI middleware that validates the Bearer JWT on every ``/mcp`` request.
 
-    Delegates the actual compare to
-    :func:`gateway.engine_auth.bearer_token_valid`, which is a pure,
-    framework-free predicate shared with the HTTP ``verify_engine_token``
-    ``Depends``. Dev-mode passthrough (empty ``ENGINE_API_TOKEN``) is
-    handled inside the predicate.
+    Both NPCs and players authenticate with a JWT whose ``sub`` claim is the
+    caller's KG UUID. Valid JWTs set the ``_current_identity`` ContextVar so
+    downstream tool handlers can read it via ``_check_tool_access``. Invalid
+    or missing tokens return 401 with a ``WWW-Authenticate: Bearer`` header.
+
+    There is no static-token fallback — this is the only auth path.
     """
 
     def __init__(self, app: "ASGIApp") -> None:
@@ -99,12 +109,17 @@ class _BearerAuthMiddleware:
         headers = {k.decode("latin-1").lower(): v.decode("latin-1")
                    for k, v in scope.get("headers", [])}
         auth = headers.get("authorization", "")
-        if not bearer_token_valid(auth):
-            response = _unauthorized_response_factory("Invalid or missing engine token")
+        claims = identity_from_authorization(auth)
+        if not claims:
+            response = _unauthorized_response_factory("Invalid or missing JWT")
             await response(scope, receive, send)
             return
 
-        await self.app(scope, receive, send)
+        token = _current_identity.set(claims["sub"])
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _current_identity.reset(token)
 
 
 # ── Read-tool registrations ────────────────────────────────────────────────
@@ -117,7 +132,8 @@ def _register_read_tools(mcp: FastMCP) -> None:
     the ``FastMCP`` instance — matching the YAGNI precedent set by
     ``_register_mutation_tools`` in task 5.
 
-    These handlers mirror the matching HTTP routes in ``routes/engine.py``:
+    These handlers were ported from the legacy ``gateway/routes/engine.py``
+    HTTP routes (removed in phase 2 — MCP is now the only transport):
     they call the same underlying functions with the same arguments, return
     the same JSON-serialisable shapes, and do NOT broadcast tool_events
     (broadcasts belong to the mutation-tool tasks). Docstrings are copied
@@ -130,24 +146,24 @@ def _register_read_tools(mcp: FastMCP) -> None:
     """
 
     @mcp.tool(name="mm_get_state")
-    async def mm_get_state(npc_id: str, entity_name: str) -> dict:
+    async def mm_get_state(entity_name: str) -> dict:
         """Get an entity's current state from the knowledge graph — HP, inventory, labels, edges, recent events. Call this before responding to check your current condition."""
-        await _check_tool_access(npc_id, "mm_get_state")
+        npc_id = await _check_tool_access("mm_get_state")
         from memento.tools.state import get_entity_state
         return await get_entity_state(entity_name)
 
     @mcp.tool(name="mm_get_world_time")
-    async def mm_get_world_time(npc_id: str) -> dict:
+    async def mm_get_world_time() -> dict:
         """Get current in-game time — moon phase, date, time of day, season."""
-        await _check_tool_access(npc_id, "mm_get_world_time")
+        npc_id = await _check_tool_access("mm_get_world_time")
         from memento.tools.time import get_current_time
         t = get_current_time()
         return t.to_display()
 
     @mcp.tool(name="mm_search_world")
-    async def mm_search_world(npc_id: str, query: str) -> dict:
+    async def mm_search_world(query: str) -> dict:
         """Search the game world's knowledge graph for entities, locations, NPCs, items, relationships, and lore."""
-        await _check_tool_access(npc_id, "mm_search_world")
+        npc_id = await _check_tool_access("mm_search_world")
         from memento.bonfires_client import get_client
         client = await asyncio.to_thread(get_client)
         result = await asyncio.to_thread(client.kg.search, query, 10)
@@ -167,9 +183,9 @@ def _register_read_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool(name="mm_get_entity")
-    async def mm_get_entity(npc_id: str, name: str) -> dict:
+    async def mm_get_entity(name: str) -> dict:
         """Get detailed information about a specific game entity by name."""
-        await _check_tool_access(npc_id, "mm_get_entity")
+        npc_id = await _check_tool_access("mm_get_entity")
         from memento.bonfires_client import get_client
         from memento.tools.kg import _resolve_entity_uuid
         client = await asyncio.to_thread(get_client)
@@ -188,13 +204,12 @@ def _register_read_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(name="mm_calculate_damage")
     async def mm_calculate_damage(
-        npc_id: str,
         weapon_damage: int,
         attacker_strength: int,
         defender_armor: int,
     ) -> dict:
         """Calculate final damage from weapon damage, strength, and armor."""
-        await _check_tool_access(npc_id, "mm_calculate_damage")
+        npc_id = await _check_tool_access("mm_calculate_damage")
         from memento.tools.mechanics import calculate_damage as _calc
         calc = _calc.func
         result = calc(str(weapon_damage), str(attacker_strength), str(defender_armor))
@@ -202,13 +217,12 @@ def _register_read_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(name="mm_evaluate_disposition")
     async def mm_evaluate_disposition(
-        npc_id: str,
         current_friendship: float,
         current_trust: float,
         interaction_type: str,
     ) -> dict:
         """Calculate how an interaction shifts friendship and trust."""
-        await _check_tool_access(npc_id, "mm_evaluate_disposition")
+        npc_id = await _check_tool_access("mm_evaluate_disposition")
         from memento.tools.mechanics import evaluate_disposition as _ed
         eval_disp = _ed.func
         result = eval_disp(str(current_friendship), str(current_trust), interaction_type)
@@ -216,14 +230,13 @@ def _register_read_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(name="mm_assess_combat")
     async def mm_assess_combat(
-        npc_id: str,
         action: str,
         attacker: str,
         target: str,
         location: str,
     ) -> dict:
         """Evaluate a combat situation without resolving it."""
-        await _check_tool_access(npc_id, "mm_assess_combat")
+        npc_id = await _check_tool_access("mm_assess_combat")
 
         def _run():
             from memento.crews.combat.assessment import make_combat_assessment_crew
@@ -239,9 +252,9 @@ def _register_read_tools(mcp: FastMCP) -> None:
         return {"assessment": result}
 
     @mcp.tool(name="mm_check_plausibility")
-    async def mm_check_plausibility(npc_id: str, action: str, context: str) -> dict:
+    async def mm_check_plausibility(action: str, context: str) -> dict:
         """DRY RUN ONLY — verifies whether an action is physically valid WITHOUT performing it. DOES NOT mutate game state, DOES NOT move your NPC, DOES NOT resolve combat. This is optional validation before a mutation. After calling this and getting plausible=true, you MUST still call the action's specific mutation tool (mm_move_within, mm_move_to, mm_resolve_combat, etc.) to actually execute the action. Returns {plausible: bool, reason: string}."""
-        await _check_tool_access(npc_id, "mm_check_plausibility")
+        npc_id = await _check_tool_access("mm_check_plausibility")
 
         def _run():
             from memento.config import load_config, get_model_for_crew
@@ -259,15 +272,15 @@ def _register_read_tools(mcp: FastMCP) -> None:
         return {"plausible": plausible, "reason": reason}
 
     @mcp.tool(name="mm_inventory")
-    async def mm_inventory(npc_id: str, entity_id: str) -> dict:
+    async def mm_inventory(entity_id: str) -> dict:
         """Get the inventory of any entity (player or NPC). Use to inspect what someone is carrying before trading."""
-        await _check_tool_access(npc_id, "mm_inventory")
+        npc_id = await _check_tool_access("mm_inventory")
         from memento.inventory_manifest import get_inventory_manifest
         manifest = await asyncio.to_thread(get_inventory_manifest, entity_id)
         return manifest
 
     @mcp.tool(name="mm_room_manifest")
-    async def mm_room_manifest(npc_id: str, location_uuid: str) -> dict:
+    async def mm_room_manifest(location_uuid: str) -> dict:
         """Get complete room manifest — all NPCs, items, players, exits, tile map."""
         # No capability gate: the HTTP route does not call check_tool_access,
         # and "mm_room_manifest" is not in INNATE_TOOLS or the generic kits,
@@ -277,14 +290,14 @@ def _register_read_tools(mcp: FastMCP) -> None:
         return result
 
     @mcp.tool(name="mm_reputation")
-    async def mm_reputation(npc_id: str) -> dict:
+    async def mm_reputation() -> dict:
         """Check how an action affects faction reputation."""
         # No capability gate: mirrors the HTTP route, which is ungated.
         # Simplified — full implementation would use make_reputation_crew
         return {"result": "reputation check not yet implemented"}
 
     @mcp.tool(name="mm_detect_events")
-    async def mm_detect_events(npc_id: str) -> dict:
+    async def mm_detect_events() -> dict:
         """Detect event types in a scene."""
         # No capability gate: mirrors the HTTP route, which is ungated.
         # Simplified — full implementation would use EventDetectionFlow
@@ -300,11 +313,12 @@ def _register_mutation_tools(
     """Register the world-mutation tool handlers on ``mcp``.
 
     Handlers close over ``ws_hub`` so they can call
-    :func:`gateway.routes.engine.broadcast_tool_event` directly without a
+    :func:`gateway.engine_events.broadcast_tool_event` directly without a
     FastAPI ``Request`` context — exactly the broadcast points the matching
     HTTP routes hit.
 
-    These handlers mirror the matching HTTP routes in ``routes/engine.py``:
+    These handlers were ported from the legacy ``gateway/routes/engine.py``
+    HTTP routes (removed in phase 2 — MCP is now the only transport):
     same underlying memento.tools / client.kg calls, same arguments, same
     return shapes. Docstrings are copied verbatim from
     ``scripts/seed_engine_tools.py`` so the NPC-facing tool description
@@ -320,15 +334,13 @@ def _register_mutation_tools(
     """
     @mcp.tool(name="mm_skill_check")
     async def mm_skill_check(
-        npc_id: str,
         skill_level: int,
         difficulty: int,
         modifiers: int = 0,
     ) -> dict:
         """Roll a d20 skill check. Returns PASS or FAIL with margin. Use for persuasion, stealth, lockpicking, any non-combat check."""
         # No capability gate: HTTP route does not call check_tool_access either.
-        # (mm_skill_check is in INNATE_TOOLS, so any future gate would be a no-op today,
-        # but the strict mirror rule requires matching HTTP behaviour exactly.)
+        npc_id = _current_identity.get() or ""
         from memento.tools.mechanics import roll_skill_check as _rsc
         roll_skill_check = _rsc.func
         result = roll_skill_check(str(skill_level), str(difficulty), str(modifiers))
@@ -341,9 +353,9 @@ def _register_mutation_tools(
         return {"result": result}
 
     @mcp.tool(name="mm_remember_event")
-    async def mm_remember_event(npc_id: str, summary: str) -> dict:
+    async def mm_remember_event(summary: str) -> dict:
         """Record a significant event in the world's memory. Use for deaths, discoveries, betrayals, victories. The world will remember this."""
-        await _check_tool_access(npc_id, "mm_remember_event")
+        npc_id = await _check_tool_access("mm_remember_event")
         from memento.tools.kg import remember_event as _remember_tool
         _remember = _remember_tool.func
         result = await asyncio.to_thread(_remember, summary)
@@ -351,13 +363,12 @@ def _register_mutation_tools(
 
     @mcp.tool(name="mm_update_entity")
     async def mm_update_entity(
-        npc_id: str,
         name: str,
         new_summary: str = "",
         new_labels: str = "",
     ) -> dict:
         """Update an entity's summary or labels in the knowledge graph."""
-        await _check_tool_access(npc_id, "mm_update_entity")
+        npc_id = await _check_tool_access("mm_update_entity")
         from memento.tools.kg import update_entity as _update_tool
         _update = _update_tool.func
         result = await asyncio.to_thread(_update, name, new_summary, new_labels)
@@ -365,13 +376,12 @@ def _register_mutation_tools(
 
     @mcp.tool(name="mm_give_item")
     async def mm_give_item(
-        npc_id: str,
         item_name: str,
         from_entity: str,
         to_entity: str,
     ) -> dict:
         """Transfer an item from one entity to another. Use for quest rewards, trades, theft."""
-        await _check_tool_access(npc_id, "mm_give_item")
+        npc_id = await _check_tool_access("mm_give_item")
         from memento.tools.kg import create_edge as _ce_tool
         create_edge = _ce_tool.func
         result = await asyncio.to_thread(
@@ -388,14 +398,13 @@ def _register_mutation_tools(
 
     @mcp.tool(name="mm_give_quest")
     async def mm_give_quest(
-        npc_id: str,
         quest_name: str,
         description: str,
         giver_name: str,
         player_name: str,
     ) -> dict:
         """Create a quest and assign it to a player."""
-        await _check_tool_access(npc_id, "mm_give_quest")
+        npc_id = await _check_tool_access("mm_give_quest")
         from memento.tools.kg import create_entity as _cen, create_edge as _ced
         create_entity = _cen.func
         create_edge = _ced.func
@@ -417,13 +426,12 @@ def _register_mutation_tools(
 
     @mcp.tool(name="mm_create_npc")
     async def mm_create_npc(
-        npc_id: str,
         name: str,
         summary: str = "",
         location_name: str = "",
     ) -> dict:
         """Create a new NPC entity in the world."""
-        await _check_tool_access(npc_id, "mm_create_npc")
+        npc_id = await _check_tool_access("mm_create_npc")
         from memento.tools.kg import create_entity as _cen, create_edge as _ced
         create_entity = _cen.func
         create_edge = _ced.func
@@ -442,13 +450,12 @@ def _register_mutation_tools(
 
     @mcp.tool(name="mm_create_item")
     async def mm_create_item(
-        npc_id: str,
         name: str,
         summary: str = "",
         location_name: str = "",
     ) -> dict:
         """Create a new item in the world. Use for crafting, forging, finding."""
-        await _check_tool_access(npc_id, "mm_create_item")
+        npc_id = await _check_tool_access("mm_create_item")
         from memento.tools.kg import create_entity as _cen, create_edge as _ced
         create_entity = _cen.func
         create_edge = _ced.func
@@ -467,12 +474,11 @@ def _register_mutation_tools(
 
     @mcp.tool(name="mm_create_location")
     async def mm_create_location(
-        npc_id: str,
         name: str,
         summary: str = "",
     ) -> dict:
         """Discover or build a new location in the world."""
-        await _check_tool_access(npc_id, "mm_create_location")
+        npc_id = await _check_tool_access("mm_create_location")
         from memento.tools.kg import create_entity as _cen
         create_entity = _cen.func
         uuid = await asyncio.to_thread(create_entity, name, "Location", summary)
@@ -480,12 +486,11 @@ def _register_mutation_tools(
 
     @mcp.tool(name="mm_move_to")
     async def mm_move_to(
-        npc_id: str,
         entity_name: str,
         destination: str,
     ) -> dict:
         """ACTUALLY move to a different location in the world. This is the mutation — calling this tool is what makes the move happen and updates the map. Your NPC will not move unless you call this (or mm_move_within for same-room moves). Narrating a move in text does nothing; you must call this tool."""
-        await _check_tool_access(npc_id, "mm_move_to")
+        npc_id = await _check_tool_access("mm_move_to")
         from memento.tools.kg import create_edge as _ce_tool
         create_edge = _ce_tool.func
         result = await asyncio.to_thread(
@@ -508,9 +513,10 @@ def _register_mutation_tools(
         return {"result": result, "entity": entity_name, "destination": destination}
 
     @mcp.tool(name="mm_move_within")
-    async def mm_move_within(npc_id: str, target_x: int, target_y: int) -> dict:
+    async def mm_move_within(target_x: int, target_y: int) -> dict:
         """ACTUALLY move your NPC to a new position within the current room. This is the mutation — calling this tool is what updates the map and fires the move badge. Use to approach a player, back away, patrol, or reposition. Max 5 tiles per move (Manhattan distance). Narrating a move in text does nothing — your NPC will not move unless you call this tool. mm_check_plausibility is a dry run and does NOT substitute for this."""
         # No capability gate: HTTP route does not call check_tool_access either.
+        npc_id = _current_identity.get() or ""
         from memento.tools.movement import move_within_room
         result = await move_within_room(npc_id, target_x, target_y)
         if result.get("success"):
@@ -526,14 +532,13 @@ def _register_mutation_tools(
 
     @mcp.tool(name="mm_inventory_transfer")
     async def mm_inventory_transfer(
-        npc_id: str,
         item_id: str,
         from_entity: str,
         to_entity: str,
         quantity: int = 1,
     ) -> dict:
         """Transfer an item from one entity to another. Use for trades, gifts, theft resolution."""
-        await _check_tool_access(npc_id, "mm_inventory_transfer")
+        npc_id = await _check_tool_access("mm_inventory_transfer")
 
         from memento.bonfires_client import get_client
         from memento.tools import chain as _chain
@@ -586,7 +591,6 @@ def _register_mutation_tools(
 
     @mcp.tool(name="mm_send_gossip")
     async def mm_send_gossip(
-        npc_id: str,
         from_npc: str,
         to_npc: str,
         message: str,
@@ -600,9 +604,9 @@ def _register_mutation_tools(
         return {"result": result, "from": from_npc, "to": to_npc}
 
     @mcp.tool(name="mm_npc_memory")
-    async def mm_npc_memory(npc_id: str, summary: str) -> dict:
+    async def mm_npc_memory(summary: str) -> dict:
         """Record a first-person memory of a scene from your perspective."""
-        await _check_tool_access(npc_id, "mm_npc_memory")
+        npc_id = await _check_tool_access("mm_npc_memory")
         from memento.tools.kg import remember_event as _remember_tool
         _remember = _remember_tool.func
         result = await asyncio.to_thread(_remember, summary)
@@ -624,7 +628,8 @@ def _register_combat_narrative_tools(
     ``RuntimeError`` prefixed with ``capability_unavailable:`` so the MCP
     runtime can surface an actionable error in Matrix-less dev environments.
 
-    These handlers mirror the matching HTTP routes in ``routes/engine.py``:
+    These handlers were ported from the legacy ``gateway/routes/engine.py``
+    HTTP routes (removed in phase 2 — MCP is now the only transport):
     same underlying memento calls, same arguments, same return shapes.
     Docstrings are copied verbatim from ``scripts/seed_engine_tools.py`` so
     the NPC-facing tool description stays identical across HTTP and MCP
@@ -643,7 +648,6 @@ def _register_combat_narrative_tools(
 
     @mcp.tool(name="mm_resolve_combat")
     async def mm_resolve_combat(
-        npc_id: str,
         action: str,
         attacker: str,
         target: str,
@@ -653,7 +657,7 @@ def _register_combat_narrative_tools(
         target_stats: str = "",
     ) -> dict:
         """Execute full combat resolution: assess, resolve attack/ability, apply consequences, check death. Returns complete outcome with authoritative entity states."""
-        await _check_tool_access(npc_id, "mm_resolve_combat")
+        npc_id = await _check_tool_access("mm_resolve_combat")
 
         def _run():
             from memento.flows.combat import CombatFlow, CombatState
@@ -688,14 +692,13 @@ def _register_combat_narrative_tools(
 
     @mcp.tool(name="mm_narrate")
     async def mm_narrate(
-        npc_id: str,
         action: str,
         context: str = "",
         events: str = "",
         mode: str = "action",
     ) -> dict:
         """Run the narration crew to generate immersive environment narration for a scene. Provide the player action, scene context from your world search, and any detected events. Returns polished narrative prose with @username NPC cues. Use this after gathering context via mm_search_world."""
-        await _check_tool_access(npc_id, "mm_narrate")
+        npc_id = await _check_tool_access("mm_narrate")
 
         def _run():
             from memento.crews.narrative.narration import make_narration_crew
@@ -790,7 +793,6 @@ def _register_combat_narrative_tools(
 
     @mcp.tool(name="mm_npc_response")
     async def mm_npc_response(
-        npc_id: str,
         dialogue: str,
         emotion: str = "",
         target: str = "",
@@ -799,6 +801,7 @@ def _register_combat_narrative_tools(
         # No capability gate: HTTP route does not call check_tool_access either.
         # Broadcast-only — the narrator's stack is maintained by bonfires-ai's
         # normal message handling (push_to_stack was removed in phase-1 prep).
+        npc_id = _current_identity.get() or ""
         await broadcast_tool_event(
             ws_hub, tool="mm_npc_response", npc_id=npc_id,
             summary=dialogue,
@@ -808,7 +811,6 @@ def _register_combat_narrative_tools(
 
     @mcp.tool(name="mm_trigger_npc")
     async def mm_trigger_npc(
-        npc_id: str,
         npc_name: str,
         context: str = "",
     ) -> dict:
@@ -818,7 +820,7 @@ def _register_combat_narrative_tools(
                 "capability_unavailable: mm_trigger_npc requires Matrix bridge — "
                 "check MATRIX_BOT_TOKEN and MATRIX_HOMESERVER env vars"
             )
-        await _check_tool_access(npc_id, "mm_trigger_npc")
+        npc_id = await _check_tool_access("mm_trigger_npc")
 
         import os
         import re
@@ -882,7 +884,7 @@ def _register_combat_narrative_tools(
             return {"error": f"Matrix send failed ({resp.status}): {text[:200]}"}
 
     @mcp.tool(name="mm_heartbeat")
-    async def mm_heartbeat(npc_id: str) -> dict:
+    async def mm_heartbeat() -> dict:
         """Trigger world evolution — processes the event stack and generates new content. Call when something significant happens that should evolve the world."""
         # No capability gate: HTTP route does not call check_tool_access either.
         def _run():
@@ -894,14 +896,13 @@ def _register_combat_narrative_tools(
 
     @mcp.tool(name="mm_world_reaction")
     async def mm_world_reaction(
-        npc_id: str,
         entities_json: str,
         location: str,
         location_uuid: str,
         episode_summary: str = "",
     ) -> dict:
         """Process world seeds and spawn entities from an episode. Batch-creates NPCs, items, quests, and lore from structured entity seeds."""
-        await _check_tool_access(npc_id, "mm_world_reaction")
+        npc_id = await _check_tool_access("mm_world_reaction")
 
         def _run():
             from memento.tools.world_reaction_tool import mm_world_reaction as _wr_tool
@@ -931,7 +932,8 @@ def _register_design_tools(mcp: FastMCP) -> None:
     the ``FastMCP`` instance — matching the YAGNI precedent set by
     ``_register_read_tools`` in task 4.
 
-    These handlers mirror the matching HTTP routes in ``routes/engine.py``:
+    These handlers were ported from the legacy ``gateway/routes/engine.py``
+    HTTP routes (removed in phase 2 — MCP is now the only transport):
     they call the same ``memento.crews.*`` factory functions with the same
     arguments inside ``engine_lock``, and return the same JSON-serialisable
     shapes. Docstrings are copied verbatim from
@@ -946,7 +948,6 @@ def _register_design_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(name="mm_design_quest")
     async def mm_design_quest(
-        npc_id: str,
         location: str,
         npc_name: str,
         player_level: int = 1,
@@ -954,7 +955,7 @@ def _register_design_tools(mcp: FastMCP) -> None:
         faction_context: str = "",
     ) -> dict:
         """Design a morally complex quest with choices, rewards, and consequences."""
-        await _check_tool_access(npc_id, "mm_design_quest")
+        npc_id = await _check_tool_access("mm_design_quest")
 
         def _run():
             from memento.crews.quest.design import make_quest_design_crew
@@ -972,13 +973,12 @@ def _register_design_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(name="mm_design_item")
     async def mm_design_item(
-        npc_id: str,
         location_name: str,
         rarity_budget: str = "common",
         num_items: int = 1,
     ) -> dict:
         """Design thematically appropriate items with stats and lore."""
-        await _check_tool_access(npc_id, "mm_design_item")
+        npc_id = await _check_tool_access("mm_design_item")
 
         def _run():
             from memento.crews.item_gen.concept import make_item_concept_crew
@@ -996,13 +996,12 @@ def _register_design_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(name="mm_design_npc")
     async def mm_design_npc(
-        npc_id: str,
         role: str,
         location_name: str,
         region_context: str = "",
     ) -> dict:
         """Design a full NPC with personality, stats, and backstory."""
-        await _check_tool_access(npc_id, "mm_design_npc")
+        npc_id = await _check_tool_access("mm_design_npc")
 
         def _run():
             from memento.crews.npc_gen.concept import make_concept_crew
@@ -1019,12 +1018,11 @@ def _register_design_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(name="mm_design_location")
     async def mm_design_location(
-        npc_id: str,
         location_plan: str,
         region_name: str,
     ) -> dict:
         """Design a full location with tile map, secrets, and atmosphere."""
-        await _check_tool_access(npc_id, "mm_design_location")
+        npc_id = await _check_tool_access("mm_design_location")
 
         def _run():
             from memento.crews.world_gen.location import make_location_crew
@@ -1040,13 +1038,12 @@ def _register_design_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(name="mm_design_region")
     async def mm_design_region(
-        npc_id: str,
         theme: str,
         adjacent_regions: str = "",
         player_level: int = 1,
     ) -> dict:
         """Design an entire region with biome, culture, threats, and locations."""
-        await _check_tool_access(npc_id, "mm_design_region")
+        npc_id = await _check_tool_access("mm_design_region")
 
         def _run():
             from memento.crews.world_gen.region_design import make_region_design_crew

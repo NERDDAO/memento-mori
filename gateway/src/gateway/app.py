@@ -140,16 +140,17 @@ async def get_room_id(location_name: str):
 
 
 # Include routes
-from gateway.routes import action, session, state, entity, chain, engine, inventory, codex, chronicle
+from gateway.routes import action, session, state, entity, chain, inventory, codex, chronicle, admin, player_signup
 app.include_router(action.router, prefix="/api")
 app.include_router(session.router, prefix="/api")
 app.include_router(state.router, prefix="/api")
 app.include_router(entity.router, prefix="/api")
 app.include_router(chain.router, prefix="/api")
-app.include_router(engine.router, prefix="/api")
 app.include_router(inventory.router, prefix="/api")
 app.include_router(codex.router, prefix="/api")
 app.include_router(chronicle.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
+app.include_router(player_signup.router, prefix="/api")
 
 # WebSocket endpoint
 from fastapi import WebSocket, WebSocketDisconnect
