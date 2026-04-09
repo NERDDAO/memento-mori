@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from gateway.log import get_logger
 from gateway.matrix_bridge import MatrixBridge
+from gateway.mcp_server import build_mcp_app
 from gateway.ws import WebSocketHub
 from memento.round_manager import RoundManager
 from gateway.round_callback import make_round_callback, make_action_callback
@@ -35,6 +36,8 @@ async def lifespan(app: FastAPI):
         app.state.narrator_registry = bridge._narrator_agents
         round_manager.on_round_close(make_round_callback(bridge, ws_hub))
         round_manager.on_action(make_action_callback(ws_hub))
+        app.mount("/mcp", build_mcp_app(ws_hub=ws_hub, bridge=bridge, narrator_registry=bridge._narrator_agents))
+        logger.info("mcp_server: mounted at /mcp")
 
     # Seed NPC registry from MongoDB + world.json
     from gateway.npc_registry import seed_from_db, register_npc, update_npc_location
