@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from gateway.engine_auth import verify_engine_token, check_tool_access
+from gateway.engine_state import engine_lock
 from gateway.npc_registry import resolve_npc_name, resolve_npc_location
 
 router = APIRouter(dependencies=[Depends(verify_engine_token)])
@@ -16,9 +17,6 @@ router = APIRouter(dependencies=[Depends(verify_engine_token)])
 # ── Logging ──
 from gateway.log import get_logger
 logger = get_logger(__name__)
-
-# Reuse the turn lock from matrix_listener for crew-powered endpoints
-_engine_lock = threading.Lock()
 
 
 # ── Tool Event Broadcasting ──
@@ -505,7 +503,7 @@ class NarrateRequest(BaseModel):
 def _locked(fn):
     """Run a function inside the engine lock."""
     def wrapper(*args, **kwargs):
-        with _engine_lock:
+        with engine_lock:
             return fn(*args, **kwargs)
     return wrapper
 
@@ -517,7 +515,7 @@ async def resolve_combat(req: CombatResolveRequest, request: Request):
 
     def _run():
         from memento.flows.combat import CombatFlow, CombatState
-        with _engine_lock:
+        with engine_lock:
             flow = CombatFlow()
             flow.state = CombatState(
                 action=req.action, attacker=req.attacker, target=req.target,
@@ -553,7 +551,7 @@ async def assess_combat(req: CombatAssessRequest):
 
     def _run():
         from memento.crews.combat.assessment import make_combat_assessment_crew
-        with _engine_lock:
+        with engine_lock:
             crew = make_combat_assessment_crew(
                 action=req.action, attacker=req.attacker,
                 target=req.target, location=req.location,
@@ -572,7 +570,7 @@ async def check_plausibility(req: PlausibilityRequest):
     def _run():
         from memento.config import load_config, get_model_for_crew
         from crewai import LLM
-        with _engine_lock:
+        with engine_lock:
             model = get_model_for_crew("plausibility")
             llm = LLM(model=model, **load_config().get("llm", {}).get("params", {}))
             prompt = f"Is this action plausible given the context? Action: {req.action}\nContext: {req.context}\nRespond with PLAUSIBLE or IMPLAUSIBLE and a brief reason."
@@ -591,7 +589,7 @@ async def design_quest(req: DesignQuestRequest):
 
     def _run():
         from memento.crews.quest.design import make_quest_design_crew
-        with _engine_lock:
+        with engine_lock:
             crew = make_quest_design_crew(
                 location=req.location, npc=req.npc_name,
                 player_level=req.player_level, active_quests=req.active_quests,
@@ -610,7 +608,7 @@ async def design_item(req: DesignItemRequest):
 
     def _run():
         from memento.crews.item_gen.concept import make_item_concept_crew
-        with _engine_lock:
+        with engine_lock:
             crew = make_item_concept_crew(
                 location_name=req.location_name,
                 rarity_budget=req.rarity_budget,
@@ -629,7 +627,7 @@ async def design_npc(req: DesignNPCRequest):
 
     def _run():
         from memento.crews.npc_gen.concept import make_concept_crew
-        with _engine_lock:
+        with engine_lock:
             crew = make_concept_crew(
                 npc_role=req.role, location_name=req.location_name,
                 region_context=req.region_context,
@@ -647,7 +645,7 @@ async def design_location(req: DesignLocationRequest):
 
     def _run():
         from memento.crews.world_gen.location import make_location_crew
-        with _engine_lock:
+        with engine_lock:
             crew = make_location_crew(
                 location_plan=req.location_plan, region_name=req.region_name,
             )
@@ -664,7 +662,7 @@ async def design_region(req: DesignRegionRequest):
 
     def _run():
         from memento.crews.world_gen.region_design import make_region_design_crew
-        with _engine_lock:
+        with engine_lock:
             crew = make_region_design_crew(
                 theme=req.theme, adjacent_regions=req.adjacent_regions,
                 player_level=req.player_level,
@@ -687,7 +685,7 @@ async def narrate(req: NarrateRequest, request: Request):
 
     def _run():
         from memento.crews.narrative.narration import make_narration_crew
-        with _engine_lock:
+        with engine_lock:
             crew = make_narration_crew(
                 action=req.action,
                 context=req.context,

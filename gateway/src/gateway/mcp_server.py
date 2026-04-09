@@ -324,8 +324,8 @@ def build_mcp_app(
 
         def _run():
             from memento.crews.combat.assessment import make_combat_assessment_crew
-            from gateway.routes.engine import _engine_lock
-            with _engine_lock:
+            from gateway.engine_state import engine_lock
+            with engine_lock:
                 crew = make_combat_assessment_crew(
                     action=action, attacker=attacker,
                     target=target, location=location,
@@ -343,8 +343,8 @@ def build_mcp_app(
         def _run():
             from memento.config import load_config, get_model_for_crew
             from crewai import LLM
-            from gateway.routes.engine import _engine_lock
-            with _engine_lock:
+            from gateway.engine_state import engine_lock
+            with engine_lock:
                 model = get_model_for_crew("plausibility")
                 llm = LLM(model=model, **load_config().get("llm", {}).get("params", {}))
                 prompt = f"Is this action plausible given the context? Action: {action}\nContext: {context}\nRespond with PLAUSIBLE or IMPLAUSIBLE and a brief reason."
