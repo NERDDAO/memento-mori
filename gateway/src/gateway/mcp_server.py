@@ -302,17 +302,13 @@ def _register_read_tools(
 def _register_mutation_tools(
     mcp: FastMCP,
     ws_hub: "WebSocketHub",
-    bridge: "MatrixBridge | None",
-    narrator_registry: "dict[str, str]",
 ) -> None:
     """Register the world-mutation tool handlers on ``mcp``.
 
     Handlers close over ``ws_hub`` so they can call
     :func:`gateway.routes.engine.broadcast_tool_event` directly without a
     FastAPI ``Request`` context — exactly the broadcast points the matching
-    HTTP routes hit. ``bridge`` and ``narrator_registry`` are accepted for
-    uniformity with the other registration helpers; none of the mutations
-    in this batch reach for them (Matrix-touching tools land in task 6).
+    HTTP routes hit.
 
     These handlers mirror the matching HTTP routes in ``routes/engine.py``:
     same underlying memento.tools / client.kg calls, same arguments, same
@@ -328,8 +324,6 @@ def _register_mutation_tools(
         mm_send_gossip, mm_npc_memory do NOT broadcast (HTTP routes don't
         either).
     """
-    _ = (bridge, narrator_registry)  # mutation tools don't touch these yet
-
     @mcp.tool(name="mm_skill_check")
     async def mm_skill_check(
         npc_id: str,
@@ -643,7 +637,7 @@ def build_mcp_app(
     mcp = FastMCP("memento-engine")
 
     _register_read_tools(mcp, ws_hub, bridge, narrator_registry)
-    _register_mutation_tools(mcp, ws_hub, bridge, narrator_registry)
+    _register_mutation_tools(mcp, ws_hub)
 
     logger.info("mcp_server: built FastMCP('memento-engine') scaffold")
 
