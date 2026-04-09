@@ -615,6 +615,323 @@ def _register_mutation_tools(
         return {"result": result}
 
 
+# ── Combat + narrative tools (task 6) ──────────────────────────────────────
+
+def _register_combat_narrative_tools(
+    mcp: FastMCP,
+    ws_hub: "WebSocketHub",
+    bridge: "MatrixBridge | None",
+    narrator_registry: "dict[str, str]",
+) -> None:
+    """Register combat/narrative/runtime tool handlers on ``mcp``.
+
+    Handlers close over ``ws_hub`` for ``broadcast_tool_event`` calls and over
+    ``bridge`` for Matrix-dependent tools (``mm_trigger_npc``). Bridge-
+    dependent handlers check ``bridge is None`` up-front and raise a
+    ``RuntimeError`` prefixed with ``capability_unavailable:`` so the MCP
+    runtime can surface an actionable error in Matrix-less dev environments.
+
+    These handlers mirror the matching HTTP routes in ``routes/engine.py``:
+    same underlying memento calls, same arguments, same return shapes.
+    Docstrings are copied verbatim from ``scripts/seed_engine_tools.py`` so
+    the NPC-facing tool description stays identical across HTTP and MCP
+    transports.
+
+    Broadcast + gate inventory (mirrors HTTP routes exactly):
+      - mm_resolve_combat: gated, broadcasts
+      - mm_narrate: gated, broadcasts, also kicks off background enrichment
+      - mm_npc_response: ungated, broadcasts (broadcast-only — push_to_stack
+        was removed in phase-1 prep, the bot posting its dialogue is what
+        updates the narrator's stack)
+      - mm_trigger_npc: gated, does NOT broadcast, REQUIRES Matrix bridge
+      - mm_heartbeat: ungated, no broadcast
+      - mm_world_reaction: gated, no broadcast
+
+    ``narrator_registry`` is unused by the task-6 handlers (no HTTP route in
+    this batch reads it) — accepted for uniformity with future helpers.
+    """
+    _ = (narrator_registry,)  # task-6 handlers don't read the narrator_registry
+
+    @mcp.tool(name="mm_resolve_combat")
+    async def mm_resolve_combat(
+        npc_id: str,
+        action: str,
+        attacker: str,
+        target: str,
+        location: str,
+        context: str = "",
+        attacker_stats: str = "",
+        target_stats: str = "",
+    ) -> dict:
+        """Execute full combat resolution: assess, resolve attack/ability, apply consequences, check death. Returns complete outcome with authoritative entity states."""
+        await _check_tool_access(npc_id, "mm_resolve_combat")
+
+        def _run():
+            from memento.flows.combat import CombatFlow, CombatState
+            from gateway.engine_state import engine_lock
+            with engine_lock:
+                flow = CombatFlow()
+                flow.state = CombatState(
+                    action=action, attacker=attacker, target=target,
+                    location=location, context=context,
+                    attacker_stats=attacker_stats, target_stats=target_stats,
+                )
+                flow.kickoff()
+                return flow.state
+
+        state = await asyncio.to_thread(_run)
+        summary = f"{attacker} vs {target}: {state.resolution or state.action_type}"
+        if state.target_dead:
+            summary += f" — {target} slain!"
+        await broadcast_tool_event(
+            ws_hub, tool="mm_resolve_combat", npc_id=npc_id,
+            summary=summary,
+        )
+        return {
+            "outcome": {
+                "action_type": state.action_type,
+                "assessment": state.assessment,
+                "resolution": state.resolution,
+                "consequences": state.consequences,
+                "target_dead": state.target_dead,
+            },
+        }
+
+    @mcp.tool(name="mm_narrate")
+    async def mm_narrate(
+        npc_id: str,
+        action: str,
+        context: str = "",
+        events: str = "",
+        mode: str = "action",
+    ) -> dict:
+        """Run the narration crew to generate immersive environment narration for a scene. Provide the player action, scene context from your world search, and any detected events. Returns polished narrative prose with @username NPC cues. Use this after gathering context via mm_search_world."""
+        await _check_tool_access(npc_id, "mm_narrate")
+
+        def _run():
+            from memento.crews.narrative.narration import make_narration_crew
+            from gateway.engine_state import engine_lock
+            with engine_lock:
+                crew = make_narration_crew(
+                    action=action, context=context, events=events, mode=mode,
+                )
+                return crew.kickoff().raw
+
+        narrative = await asyncio.to_thread(_run)
+
+        await broadcast_tool_event(
+            ws_hub, tool="mm_narrate", npc_id=npc_id, summary=narrative,
+        )
+
+        # Enrich lore stubs from the latest episode — runs in a background
+        # thread to mirror the HTTP route's fire-and-forget behaviour.
+        if npc_id:
+            import threading
+
+            def _enrich_episode_stubs():
+                try:
+                    from memento.bonfires_client import get_client
+                    from memento.rpg_types import RPG_ENTITY_TYPES
+                    from memento.flows.enrichment import enrich_entity
+                    from memento.models.attributes import needs_enrichment
+                    import json
+                    import logging
+                    _log = logging.getLogger(__name__)
+
+                    client = get_client()
+                    episode = client.kg.get_latest_episode(npc_id)
+                    if not episode:
+                        return
+
+                    stubs: list[dict] = []
+                    for entity in episode.get("entities", []):
+                        for label in entity.get("labels", []):
+                            if label in RPG_ENTITY_TYPES:
+                                stubs.append(entity)
+                                break
+                    for edge in episode.get("edges", []):
+                        node = edge.get("target", {})
+                        for label in node.get("labels", []):
+                            if label in RPG_ENTITY_TYPES:
+                                stubs.append(node)
+                                break
+
+                    if not stubs:
+                        return
+
+                    _log.info("Enriching %d episode stubs after narration", len(stubs))
+                    for stub in stubs:
+                        entity_uuid = stub.get("uuid", "")
+                        if not entity_uuid:
+                            continue
+                        try:
+                            entity = client.kg.get_entity(entity_uuid)
+                            attrs = entity.get("attributes", {})
+                            if isinstance(attrs, str):
+                                attrs = json.loads(attrs) if attrs else {}
+                            summary = entity.get("summary", "")
+                            entity_name = entity.get("name", "")
+                            entity_labels = entity.get("labels", [])
+
+                            entity_type = "npc"
+                            for label in entity_labels:
+                                if label in ("Item",):
+                                    entity_type = "item"
+                                elif label in ("Location",):
+                                    entity_type = "location"
+                                elif label in ("Quest",):
+                                    entity_type = "quest"
+
+                            missing = needs_enrichment(entity_type, attrs)
+                            if missing:
+                                enrich_entity(entity_uuid, entity_name, entity_type,
+                                              summary, attrs, missing)
+                        except Exception:
+                            _log.debug("Enrichment skipped for stub %s",
+                                       entity_uuid, exc_info=True)
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Episode stub enrichment failed", exc_info=True,
+                    )
+
+            threading.Thread(target=_enrich_episode_stubs, daemon=True).start()
+
+        return {"narrative": narrative}
+
+    @mcp.tool(name="mm_npc_response")
+    async def mm_npc_response(
+        npc_id: str,
+        dialogue: str,
+        emotion: str = "",
+        target: str = "",
+    ) -> dict:
+        """Send in-character dialogue or narration to the game. This is how you speak to players. Call this instead of writing dialogue in your final message."""
+        # No capability gate: HTTP route does not call check_tool_access either.
+        # Broadcast-only — the narrator's stack is maintained by bonfires-ai's
+        # normal message handling (push_to_stack was removed in phase-1 prep).
+        await broadcast_tool_event(
+            ws_hub, tool="mm_npc_response", npc_id=npc_id,
+            summary=dialogue,
+            data={"emotion": emotion, "target": target},
+        )
+        return {"status": "ok"}
+
+    @mcp.tool(name="mm_trigger_npc")
+    async def mm_trigger_npc(
+        npc_id: str,
+        npc_name: str,
+        context: str = "",
+    ) -> dict:
+        """Explicitly trigger a specific NPC to react to the scene. Sends a @tagged Matrix message so the NPC agent wakes up and responds. Use this instead of mentioning NPC names in your text."""
+        if bridge is None:
+            raise RuntimeError(
+                "capability_unavailable: mm_trigger_npc requires Matrix bridge — "
+                "check MATRIX_BOT_TOKEN and MATRIX_HOMESERVER env vars"
+            )
+        await _check_tool_access(npc_id, "mm_trigger_npc")
+
+        import os
+        import re
+        import uuid as _uuid
+
+        from gateway.npc_registry import _registry, resolve_npc_location, resolve_npc_name
+
+        # Resolve target NPC username from name.
+        target_username = ""
+        for entry in _registry.values():
+            if entry.name.lower() == npc_name.lower():
+                clean = re.sub(r"[^a-z0-9]", "_", entry.name.lower())
+                clean = re.sub(r"_+", "_", clean).strip("_")[:30]
+                target_username = f"bonfires-{clean}"
+                break
+
+        if not target_username:
+            return {"error": f"NPC '{npc_name}' not found in registry"}
+
+        caller_location = resolve_npc_location(npc_id)
+        if not caller_location:
+            return {"error": "Could not determine caller location"}
+
+        homeserver = os.getenv("MATRIX_HOMESERVER", "http://localhost:8008")
+        as_token = os.getenv("MATRIX_AS_TOKEN", "")
+        domain = os.getenv("MATRIX_DOMAIN", "localhost")
+
+        if not as_token:
+            return {"error": "No MATRIX_AS_TOKEN configured"}
+
+        room_id = ""
+        if hasattr(bridge, "location_to_room"):
+            room_id = bridge.location_to_room.get(caller_location, "")
+
+        if not room_id:
+            return {"error": f"No Matrix room for location '{caller_location}'"}
+
+        # Determine sender identity.
+        caller_name = resolve_npc_name(npc_id)
+        if caller_name.startswith("Engine"):
+            sender_user = f"@bonfires-engine:{domain}"
+        else:
+            caller_clean = re.sub(r"[^a-z0-9]", "_", caller_name.lower())
+            caller_clean = re.sub(r"_+", "_", caller_clean).strip("_")[:30]
+            sender_user = f"@bonfires-{caller_clean}:{domain}"
+
+        tag = f"@{target_username}"
+        message_text = f"{tag} {context}" if context else f"{tag} React to the scene."
+        txn_id = str(_uuid.uuid4())
+
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            resp = await session.put(
+                f"{homeserver}/_matrix/client/v3/rooms/{room_id}/send/m.room.message/{txn_id}",
+                params={"access_token": as_token, "user_id": sender_user},
+                json={"msgtype": "m.text", "body": message_text},
+            )
+            if resp.status == 200:
+                return {"status": "ok", "triggered": npc_name, "tag": tag}
+            text = await resp.text()
+            return {"error": f"Matrix send failed ({resp.status}): {text[:200]}"}
+
+    @mcp.tool(name="mm_heartbeat")
+    async def mm_heartbeat(npc_id: str) -> dict:
+        """Trigger world evolution — processes the event stack and generates new content. Call when something significant happens that should evolve the world."""
+        # No capability gate: HTTP route does not call check_tool_access either.
+        def _run():
+            from memento.heartbeat import HeartbeatRunner
+            return HeartbeatRunner().run()
+
+        result = await asyncio.to_thread(_run)
+        return result
+
+    @mcp.tool(name="mm_world_reaction")
+    async def mm_world_reaction(
+        npc_id: str,
+        entities_json: str,
+        location: str,
+        location_uuid: str,
+        episode_summary: str = "",
+    ) -> dict:
+        """Process world seeds and spawn entities from an episode. Batch-creates NPCs, items, quests, and lore from structured entity seeds."""
+        await _check_tool_access(npc_id, "mm_world_reaction")
+
+        def _run():
+            from memento.tools.world_reaction_tool import mm_world_reaction as _wr_tool
+            # HTTP route calls _wr_tool(...) directly, which technically
+            # targets the Tool wrapper's run() path. Use `.func` here to
+            # match the pattern other mutation tools use (mm_remember_event,
+            # mm_give_item) — both forms hit the same underlying function.
+            _wr = getattr(_wr_tool, "func", _wr_tool)
+            return _wr(
+                entities_json=entities_json,
+                location=location,
+                location_uuid=location_uuid,
+                episode_summary=episode_summary,
+            )
+
+        result = await asyncio.to_thread(_run)
+        return {"result": result}
+
+
 # ── Factory ─────────────────────────────────────────────────────────────────
 
 def build_mcp_app(
@@ -642,6 +959,7 @@ def build_mcp_app(
 
     _register_read_tools(mcp, ws_hub, bridge, narrator_registry)
     _register_mutation_tools(mcp, ws_hub)
+    _register_combat_narrative_tools(mcp, ws_hub, bridge, narrator_registry)
 
     logger.info("mcp_server: built FastMCP('memento-engine') scaffold")
 
