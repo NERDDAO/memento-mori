@@ -118,9 +118,7 @@ class TurnOutcome(TypedDict):
 
 
 class ResolutionFailure(TypedDict):
-    role: str
-    reason: str  # "unresolved" | "ambiguous"
-    candidates: list[str]  # UUIDs of ambiguous matches, or [] when unresolved
+    reason: str  # "unresolved_role:<r>" | "ambiguous_role:<r>"
 
 
 class Constructicon(Protocol):
