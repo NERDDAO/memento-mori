@@ -1096,7 +1096,7 @@ def build_mcp_app(
     # configured, else fall back to NullMemoryClient (ingest no-ops).
     import os
 
-    from gateway.cxn_tools import register_cxn_tools
+    from gateway.cxn_tools import register_cxn_tools, register_mm_act
     from memento.memory.client import MemoryClient
     from memento.memory.null_client import NullMemoryClient
     from memento.state.chain_mirror import NoopChainMirror
@@ -1110,12 +1110,38 @@ def build_mcp_app(
     else:
         memory = NullMemoryClient()
 
+    cxn_repo = InMemoryStateRepository()
+    cxn_mirror = NoopChainMirror()
+
     register_cxn_tools(
         mcp,
         ws_hub,
-        InMemoryStateRepository(),
-        NoopChainMirror(),
+        cxn_repo,
+        cxn_mirror,
         memory,
+    )
+
+    # mm_act — free-text MCP tool (M2 Task 3).
+    # Shares the same repo/mirror/memory as the Day-1 UUID tools; the
+    # ComprehensionClient is wired from env: HttpComprehensionClient when
+    # KERNEL_BASE_URL + GM_INTERNAL_TOKEN are configured, else NullComprehensionClient
+    # (always returns no-match → mm_act always clarifies without a running kernel).
+    from memento.cxn.kernel_client import ComprehensionClient, HttpComprehensionClient
+    from memento.cxn.null_comprehension_client import NullComprehensionClient
+
+    comprehension: ComprehensionClient
+    if os.environ.get("KERNEL_BASE_URL") and os.environ.get("GM_INTERNAL_TOKEN"):
+        comprehension = HttpComprehensionClient()
+    else:
+        comprehension = NullComprehensionClient()
+
+    register_mm_act(
+        mcp,
+        ws_hub,
+        cxn_repo,
+        cxn_mirror,
+        memory,
+        comprehension,
     )
 
     logger.info("mcp_server: built FastMCP('memento-engine') with %d tools", len(mcp._tool_manager._tools))

@@ -31,7 +31,13 @@ Each handler:
 
 On ``ConstructionError`` the handler returns
 ``{"status": "rejected", "cause": <reason>}`` with no further state change.
+
+M2 addition — ``register_mm_act``:
+  Registers the ``mm_act`` free-text tool.  The agent sends a natural-language
+  utterance; ``TurnRouter`` comprehends it via ``ComprehensionClient`` and
+  routes to the unchanged Day-1 executor or returns a ``clarify`` outcome.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -43,6 +49,7 @@ from memento.cxn.types import ConstructionError, CxnDef, MatchedCxn
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from mcp.server.fastmcp import FastMCP
 
+    from memento.cxn.kernel_client import ComprehensionClient
     from memento.memory.client import MemoryClient
     from memento.state.chain_mirror import ChainMirror
     from memento.state.repository import StateRepository
@@ -149,3 +156,71 @@ def register_cxn_tools(
             bound_roles,
             summary=f"took {patient[:8]}...",
         )
+
+
+def register_mm_act(
+    mcp: "FastMCP",
+    ws_hub: "WebSocketHub | None",
+    repo: "StateRepository",
+    mirror: "ChainMirror",
+    memory: "MemoryClient",
+    comprehension: "ComprehensionClient",
+    bonfire_id: str = "mm-world-v1",
+) -> None:
+    """Register the ``mm_act`` free-text MCP tool on ``mcp``.
+
+    ``mm_act`` accepts a natural-language utterance, routes it through
+    ``TurnRouter`` (comprehend → resolve → execute), and returns one of:
+      - ``{"status": "clarify", "message": <player-facing string>}``
+      - ``{"status": "rejected", "cause": <reason>}``  (ConstructionError)
+      - the raw ``StateUpdate`` dict (on success, after broadcasting)
+
+    The ``ComprehensionClient`` is wired from env in ``build_mcp_app``
+    (``HttpComprehensionClient`` when KERNEL_BASE_URL+GM_INTERNAL_TOKEN are set,
+    else a ``NullComprehensionClient`` that always returns no-match).
+    """
+    from gateway.engine_events import broadcast_tool_event
+    from gateway.mcp_server import _check_tool_access
+    from memento.cxn.constructicon import ConstructiconRegistry
+    from memento.cxn.entity_resolver import EntityResolver
+    from memento.cxn.turn_router import TurnRouter
+
+    executor = EffectExecutor(repo=repo, memory=memory, chain=mirror)
+    constructicon = ConstructiconRegistry()
+    resolver = EntityResolver(repo)
+    router = TurnRouter(
+        comprehension=comprehension,
+        constructicon=constructicon,
+        resolver=resolver,
+        executor=executor,
+        bonfire_id=bonfire_id,
+    )
+
+    @mcp.tool(name="mm_act")
+    async def mm_act(text: str) -> dict[str, Any]:
+        """Perform a game action using natural language (free-text utterance).
+
+        The engine comprehends the utterance, resolves entity references from
+        the current room context, and executes the matching construction.
+        Returns a clarify prompt when the action cannot be understood or the
+        target cannot be found.
+        """
+        actor_id = await _check_tool_access("mm_act")
+        try:
+            outcome = await router.handle(text, actor_id)
+        except ConstructionError as exc:
+            # Guard or transactional failure — store is untouched (all-or-nothing).
+            return {"status": "rejected", "cause": str(exc)}
+
+        if outcome["status"] == "clarify":
+            return {"status": "clarify", "message": outcome["message"]}
+
+        # "executed" — broadcast the event and return the StateUpdate
+        await broadcast_tool_event(
+            ws_hub,
+            tool="mm_act",
+            npc_id=actor_id,
+            summary=f"acted: {text[:40]}",
+        )
+        update = outcome["update"]
+        return update if update is not None else {}

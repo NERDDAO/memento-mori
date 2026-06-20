@@ -1,0 +1,176 @@
+"""TurnRouter — comprehend → clarify-or-execute orchestrator (Task 3, M2).
+
+Pipeline per utterance:
+  1. ComprehensionClient.comprehend(utterance, actor_id)
+     - frame.matched==False          → clarify("no_match")
+  2. Find CxnDef by predicate in CONSTRUCTION_REGISTRY
+     - no cxn                        → clarify("unknown_predicate")
+  3. EntityResolver.resolve(frame, actor_id, cxn)
+     - ResolutionFailure              → clarify(failure.reason)
+  4. Build SemanticFrame{predicate, roles=resolved, confidence=1.0, raw_text}
+  5. constructicon.match(frame)       → MatchedCxn
+  6. executor.execute(cxn, caller_id=actor_id, bindings=bound_roles)
+     - ConstructionError              → propagate (caller handles rejection)
+     → TurnOutcome(status="executed", update=result)
+
+Clarify outcomes never write to the store; the executor is never called.
+
+See spec §8 for the full state machine.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+from memento.cxn.constructicon import ConstructiconRegistry
+from memento.cxn.entity_resolver import EntityResolver
+from memento.cxn.executor import EffectExecutor
+from memento.cxn.types import (
+    SemanticFrame,
+    TurnOutcome,
+)
+
+if TYPE_CHECKING:
+    from memento.cxn.kernel_client import ComprehensionClient
+
+logger = logging.getLogger(__name__)
+
+
+class TurnRouter:
+    """Route a free-text utterance through comprehension → resolution → execution.
+
+    Args:
+        comprehension: ComprehensionClient (real HTTP or FakeComprehensionClient).
+        constructicon: ConstructiconRegistry for predicate → CxnDef lookup and matching.
+        resolver:      EntityResolver for role-filler → UUID resolution.
+        executor:      EffectExecutor for the 3-phase deterministic execution.
+        bonfire_id:    Fixed world identifier ("mm-world-v1" for Day-1).
+    """
+
+    _comprehension: "ComprehensionClient"
+    _constructicon: ConstructiconRegistry
+    _resolver: EntityResolver
+    _executor: EffectExecutor
+    _bonfire_id: str
+
+    def __init__(
+        self,
+        comprehension: "ComprehensionClient",
+        constructicon: ConstructiconRegistry,
+        resolver: EntityResolver,
+        executor: EffectExecutor,
+        bonfire_id: str,
+    ) -> None:
+        self._comprehension = comprehension
+        self._constructicon = constructicon
+        self._resolver = resolver
+        self._executor = executor
+        self._bonfire_id = bonfire_id
+
+    async def handle(self, utterance: str, actor_id: str) -> TurnOutcome:
+        """Comprehend utterance and route to execute or clarify.
+
+        Returns:
+            TurnOutcome with status=="executed" (update filled, message/reason None)
+            or status=="clarify" (update None, message = player-facing string, reason = machine tag).
+
+        Raises:
+            ConstructionError: if execution fails a guard or transactional phase
+                               (the store is left untouched; the caller decides how
+                               to surface this — see gateway mm_act handler).
+            ComprehendError:   if the kernel returns a non-200 response.
+        """
+        # ── Step 1: comprehend ───────────────────────────────────────────────
+        frame = await self._comprehension.comprehend(utterance, actor_id)
+
+        if not frame["matched"]:
+            return TurnOutcome(
+                status="clarify",
+                update=None,
+                message="I didn't understand that. Try something like 'attack the goblin'.",
+                reason="no_match",
+            )
+
+        # ── Step 2: find cxn by predicate ────────────────────────────────────
+        predicate = frame["predicate"]
+        cxn = next(
+            (c for c in self._constructicon.all_cxns() if c["predicate"] == predicate),
+            None,
+        )
+        if cxn is None:
+            return TurnOutcome(
+                status="clarify",
+                update=None,
+                message=f"I understood '{predicate}' but that action isn't available here.",
+                reason="unknown_predicate",
+            )
+
+        # ── Step 3: resolve role fillers → UUIDs ─────────────────────────────
+        # EntityResolver.resolve returns dict[str, str] (clean roles) OR
+        # ResolutionFailure (a TypedDict with a single "reason" key).
+        # Both are plain dicts at runtime; we discriminate on the "reason" key.
+        resolution = await self._resolver.resolve(frame, actor_id, cxn)
+
+        if "reason" in resolution:
+            # ResolutionFailure path — reason is the machine tag verbatim.
+            reason_str: str = resolution["reason"]  # type: ignore[typeddict-item]
+            return TurnOutcome(
+                status="clarify",
+                update=None,
+                message=_clarify_message_for(reason_str),
+                reason=reason_str,
+            )
+
+        # Clean resolution: dict[str, str] role → UUID (no "reason" key).
+        resolved: dict[str, str] = resolution  # type: ignore[assignment]
+
+        # ── Step 4: build SemanticFrame ───────────────────────────────────────
+        semantic_frame = SemanticFrame(
+            predicate=predicate,
+            roles=resolved,
+            confidence=1.0,
+            raw_text=utterance,
+        )
+
+        # ── Step 5: constructicon.match ───────────────────────────────────────
+        matched = self._constructicon.match(semantic_frame)
+        if matched is None:
+            # Should not happen given step 2 found the cxn, but be safe.
+            return TurnOutcome(
+                status="clarify",
+                update=None,
+                message=f"The action '{predicate}' couldn't be matched to a construction.",
+                reason="unknown_predicate",
+            )
+
+        # ── Step 6: execute ───────────────────────────────────────────────────
+        # ConstructionError propagates — the gateway handler catches it.
+        update = await self._executor.execute(
+            matched["cxn"],
+            caller_id=actor_id,
+            bindings=matched["bound_roles"],
+        )
+
+        return TurnOutcome(
+            status="executed",
+            update=update,
+            message=None,
+            reason=None,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _clarify_message_for(reason: str) -> str:
+    """Return a player-facing clarification string for a ResolutionFailure reason."""
+    if reason.startswith("unresolved_role:"):
+        role = reason.split(":", 1)[1]
+        return f"I couldn't find '{role}' here. Please be more specific."
+    if reason.startswith("ambiguous_role:"):
+        role = reason.split(":", 1)[1]
+        return f"There are multiple targets for '{role}'. Please be more specific."
+    return "I couldn't understand the target of that action."
