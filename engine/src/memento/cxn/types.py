@@ -15,8 +15,12 @@ class StatePrimitive(TypedDict):
         "chain_kill",
         "chain_transfer",
     ]
-    args: dict[str, Any]  # "$role" / "$computed_hp" refs, "@episode_template", or literals (§4.4)
-    if_condition: str | None  # None, or a key into the closed CONDITIONS dict (§4.4). NO expression parser, NO eval, NO LLM.
+    args: dict[
+        str, Any
+    ]  # "$role" / "$computed_hp" refs, "@episode_template", or literals (§4.4)
+    if_condition: (
+        str | None
+    )  # None, or a key into the closed CONDITIONS dict (§4.4). NO expression parser, NO eval, NO LLM.
 
 
 RoleTag = Literal["agent", "patient", "instrument", "location"]
@@ -70,13 +74,53 @@ class EpisodeIn(TypedDict):
 
 class ExecutionContext(TypedDict):
     bound_roles: dict[str, str]  # role label → UUID
-    entities: dict[str, dict]  # UUID → loaded entity doc
+    entities: dict[str, dict[str, Any]]  # UUID → loaded entity doc
     transients: dict[str, Any]  # computed_hp, damage, etc.
     world_tick: int
 
 
 class ConstructionError(Exception):
     """Typed failure from binding/guard/transactional phases (see spec §7.4 prefixes)."""
+
+
+class ComprehendError(Exception):
+    """Domain exception raised by ComprehensionClient on non-200 responses.
+
+    Never wraps HTTPException; callers inspect .status_code when set.
+    """
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class FrameRole(TypedDict):
+    role: str  # "agent" | "patient" | "instrument" | "location"
+    filler: str  # surface span verbatim from kernel, e.g. "the goblin"
+
+
+class ComprehendedFrame(TypedDict):
+    """Raw comprehend output — surface spans, not yet resolved to UUIDs."""
+
+    predicate: str
+    roles: list[FrameRole]
+    matched: bool
+    raw_text: str
+
+
+class TurnOutcome(TypedDict):
+    status: str  # "executed" | "clarify"
+    update: dict[str, Any] | None
+    message: str | None
+    reason: (
+        str | None
+    )  # "no_match"|"unknown_predicate"|"unresolved_role:<r>"|"ambiguous_role:<r>"
+
+
+class ResolutionFailure(TypedDict):
+    role: str
+    reason: str  # "unresolved" | "ambiguous"
+    candidates: list[str]  # UUIDs of ambiguous matches, or [] when unresolved
 
 
 class Constructicon(Protocol):
