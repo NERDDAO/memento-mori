@@ -1,3 +1,6 @@
+# LEGACY (cxn control system): replaced for the 3 skeleton actions (MOVE/ATTACK/TAKE),
+# retained as fallback for all other turns. See spec §9.1.
+
 """RoundController — stoplight orchestrator replacing GameTurnFlow.
 
 Drives crew execution step by step (no @start/@listen decorators).
