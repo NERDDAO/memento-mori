@@ -12,6 +12,7 @@ No live kernel required.  No RNG.  No LLM.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 import httpx
 import pytest
@@ -167,7 +168,8 @@ async def test_kernel_sends_correct_json_body():
     msg = batch[0]
     assert msg["content"] == EPISODE["content"]
     assert msg["speaker"] == ACTOR_ID
-    assert "timestamp" in msg  # ISO-8601 string; value varies by wall clock
+    # ISO-8601 string; value varies by wall clock — assert it parses (M-10).
+    datetime.fromisoformat(msg["timestamp"])
     assert msg["metadata"] == EPISODE["metadata"]
     # top-level metadata echoed
     assert "metadata" in body

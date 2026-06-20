@@ -13,10 +13,11 @@ Day-1 contract (UUID args only, no comprehension, no NLP):
     mutation handler does today.
   * Every other role is a UUID argument (``destination`` / ``patient`` /
     ``instrument``).
-  * The ``location`` role is the agent's current room, resolved from the
-    agent doc (one read). For MOVE the ``location`` role IS the destination
-    room (per the MOVE ``CxnDef``), so it is bound from the ``destination``
-    arg directly; for ATTACK/TAKE it is the agent's current room.
+  * The ``location`` role is filled by the executor (the single source of
+    truth) from the caller's current room — handlers do NOT pre-read it. For
+    MOVE the ``location`` role IS the destination room (per the MOVE
+    ``CxnDef``), so it is bound from the ``destination`` arg directly; for
+    ATTACK/TAKE the executor fills it from the agent's ``location_uuid``.
 
 Each handler:
   1. ``await _check_tool_access(tool_name)`` → returns the acting agent UUID
@@ -46,14 +47,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from memento.state.chain_mirror import ChainMirror
     from memento.state.repository import StateRepository
     from gateway.ws import WebSocketHub
-
-
-async def _resolve_location(repo: "StateRepository", agent_id: str) -> str | None:
-    """Return the agent's current room UUID, or None if the agent has no room."""
-    agent_doc = await repo.get_entity(agent_id)
-    if agent_doc is None:
-        return None
-    return agent_doc.get("location_uuid")
 
 
 def register_cxn_tools(
@@ -130,12 +123,12 @@ def register_cxn_tools(
     async def mm_attack(patient: str, instrument: str | None = None) -> dict:
         """Attack a target character (patient UUID); instrument is the weapon UUID."""
         agent_id = await _check_tool_access(attack_cxn["mcp_tool_name"])
-        location = await _resolve_location(repo, agent_id)
+        # `location` (the agent's current room) is filled by the executor — the
+        # single source of truth (I-1/I-8). The handler passes only explicit
+        # MCP args, so there is no double get_entity(agent) read here.
         bound_roles: dict[str, str] = {"agent": agent_id, "patient": patient}
         if instrument is not None:
             bound_roles["instrument"] = instrument
-        if location is not None:
-            bound_roles["location"] = location
         return await _run(
             attack_cxn,
             agent_id,
@@ -147,10 +140,9 @@ def register_cxn_tools(
     async def mm_take(patient: str) -> dict:
         """Pick up an item (patient UUID) from the current room into the inventory."""
         agent_id = await _check_tool_access(take_cxn["mcp_tool_name"])
-        location = await _resolve_location(repo, agent_id)
+        # `location` (the agent's current room) is filled by the executor — the
+        # single source of truth (I-1/I-8). Handler passes only explicit args.
         bound_roles: dict[str, str] = {"agent": agent_id, "patient": patient}
-        if location is not None:
-            bound_roles["location"] = location
         return await _run(
             take_cxn,
             agent_id,

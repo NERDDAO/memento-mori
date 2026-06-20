@@ -1090,18 +1090,32 @@ def build_mcp_app(
 
     # Construction control system tools (cxn skeleton, §7.1) — registered
     # via the same factory. Day-1 wired defaults: InMemoryStateRepository,
-    # NoopChainMirror, CapturingMemoryClient (§8.5).
+    # NoopChainMirror, and a real memory client. CapturingMemoryClient is a
+    # TEST double and must NEVER be the production default (I-4): wire the
+    # real KernelMemoryClient when KERNEL_BASE_URL + GM_INTERNAL_TOKEN are
+    # configured, else fall back to NullMemoryClient (ingest no-ops).
+    import os
+
     from gateway.cxn_tools import register_cxn_tools
-    from memento.memory.capturing_client import CapturingMemoryClient
+    from memento.memory.client import MemoryClient
+    from memento.memory.null_client import NullMemoryClient
     from memento.state.chain_mirror import NoopChainMirror
     from memento.state.in_memory import InMemoryStateRepository
+
+    memory: MemoryClient
+    if os.environ.get("KERNEL_BASE_URL") and os.environ.get("GM_INTERNAL_TOKEN"):
+        from memento.memory.kernel_client import KernelMemoryClient
+
+        memory = KernelMemoryClient()
+    else:
+        memory = NullMemoryClient()
 
     register_cxn_tools(
         mcp,
         ws_hub,
         InMemoryStateRepository(),
         NoopChainMirror(),
-        CapturingMemoryClient(),
+        memory,
     )
 
     logger.info("mcp_server: built FastMCP('memento-engine') with %d tools", len(mcp._tool_manager._tools))

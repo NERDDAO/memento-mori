@@ -121,4 +121,4 @@ def test_register_cxn_tools_registers_three_tools() -> None:
     )
 
     registered = set(mcp._tool_manager._tools.keys())
-    assert {"mm_move", "mm_attack", "mm_take"} <= registered
+    assert registered == {"mm_move", "mm_attack", "mm_take"}

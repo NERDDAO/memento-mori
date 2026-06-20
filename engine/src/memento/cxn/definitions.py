@@ -188,3 +188,24 @@ CONSTRUCTION_REGISTRY: dict[str, CxnDef] = {
     ATTACK_CXN["name"]: ATTACK_CXN,
     TAKE_CXN["name"]: TAKE_CXN,
 }
+
+
+def _validate_conditions() -> None:
+    """Registration-time guard (M-5): every ``if_condition`` referenced by any
+    effect template must be ``None`` or a known key in ``CONDITIONS``. Raising
+    at import time turns a Phase-3 "unknown condition" runtime error into a
+    fail-fast startup error (and makes the Phase-3 prefix-mismatch unreachable).
+    """
+    from memento.cxn.conditions import CONDITIONS
+
+    for cxn in CONSTRUCTION_REGISTRY.values():
+        for prim in cxn["effect_template"]:
+            cond = prim["if_condition"]
+            if cond is not None and cond not in CONDITIONS:
+                raise ValueError(
+                    f"{cxn['name']}: effect_template references unknown "
+                    f"if_condition {cond!r} (not in CONDITIONS)"
+                )
+
+
+_validate_conditions()

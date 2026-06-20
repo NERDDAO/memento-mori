@@ -212,15 +212,25 @@ class EffectExecutor:
         if agent_doc is None:
             raise ConstructionError(f"selection_restriction: agent {roles['agent']!r} not found")
         agent_location_uuid = agent_doc.get("location_uuid")
-        # location role defaults to the agent's current room (§7.1 M1) — but only
-        # when the handler did not bind it explicitly. MOVE binds location to the
-        # destination room; ATTACK/TAKE leave it for us to fill from the agent.
-        if not roles.get("location") and agent_location_uuid is not None:
+        # The executor is the SINGLE source of the `location` role for the
+        # caller's current room: gateway handlers pass only explicit MCP args.
+        # MOVE binds `location` to the destination room (its semantics); for
+        # ATTACK/TAKE the handler leaves it unbound and we fill it here.
+        # An explicit "" stays "" (is-None guard, not falsy) so a caller-
+        # supplied empty string is never silently overwritten (I-6).
+        if roles.get("location") is None:
+            if agent_location_uuid is None:
+                # Fail loudly BEFORE guard evaluation so same_room / exit_exists
+                # never silently fail on a None location (I-8).
+                raise ConstructionError(
+                    "selection_restriction: agent has no current room"
+                )
             roles["location"] = agent_location_uuid
 
-        # ATTACK: default instrument from equipped main-hand BEFORE the Weapon
-        # restriction check (§7.1 M2).
-        if cxn["name"] == "ATTACK" and not roles.get("instrument"):
+        # Default the instrument from the agent's equipped main-hand BEFORE the
+        # Weapon restriction check — keyed off the definition's semantic_roles,
+        # not the cxn name (I-2). Reads existing semantic_roles; no types change.
+        if "instrument" in cxn["semantic_roles"] and roles.get("instrument") is None:
             resolved = _equipped_main_hand(agent_doc)
             if resolved:
                 roles["instrument"] = resolved
@@ -305,8 +315,10 @@ class EffectExecutor:
             transients["damage"] = dmg
             transients["computed_hp"] = computed_hp
             patient_name = patient.get("name", "")
+            # No trailing period here: the episode_template ends in "{death_suffix}."
+            # so the template's own period terminates the sentence (§4.2).
             transients["death_suffix"] = (
-                f" — {patient_name} has died." if computed_hp <= 0 else ""
+                f" — {patient_name} has died" if computed_hp <= 0 else ""
             )
 
         return ExecutionContext(
@@ -337,10 +349,10 @@ class EffectExecutor:
                 continue
             try:
                 delta, comp = await self._apply_transactional(prim, roles, ctx)
-            except Exception:
+            except Exception as exc:
                 # Domain/programming failure: roll back applied ops in reverse.
                 await self._compensate(applied)
-                raise ConstructionError("transactional_failed")
+                raise ConstructionError("transactional_failed") from exc
             deltas.append(delta)
             applied.append(comp)
 
@@ -395,12 +407,16 @@ class EffectExecutor:
             delta = StateDelta(
                 op=op, target_uuid=item_uuid, field="owner_uuid", before=before, after=after
             )
-            # Restore: swap from/to and return item to its original floor location.
+            # Restore (§3.3): pull the item back from whoever received it
+            # (to_uuid, the agent) and drop it to its original floor location.
+            # to_uuid MUST be None so the repo's drop-to-floor branch runs;
+            # setting it to the original from_uuid (a location) would make the
+            # restore re-assign owner_uuid to a location — a corrupt state.
             comp = {
                 "op": "transfer_item",
                 "item_uuid": item_uuid,
                 "from_uuid": to_uuid,
-                "to_uuid": from_uuid,
+                "to_uuid": None,
                 "to_location_uuid": orig_location,
             }
             return delta, comp
@@ -536,6 +552,10 @@ class EffectExecutor:
             xp=snap.get("xp"),
         )
 
+        # NOTE (Milestone-2): event building is keyed off cxn["name"] for the
+        # three fixed Day-1 cxns. A generic event dispatch (e.g. a
+        # CxnDef.event_category field) is the M2 generalization point; it is
+        # deferred here to keep the frozen types.py / spec §4.1 contract intact.
         if cxn["name"] == "ATTACK":
             patient = ctx["entities"].get(roles.get("patient", ""), {})
             computed_hp = ctx["transients"].get("computed_hp", 0)
@@ -558,7 +578,9 @@ class EffectExecutor:
             )
 
         result = update.model_dump(exclude_none=True)
-        # state_deltas are the executor's audit payload (not a model field).
+        # state_deltas is the executor's audit payload, NOT part of the v1
+        # StateUpdate schema (§8.3 vertical-slice check reads it); it is
+        # stripped before WS delivery.
         result["state_deltas"] = [dict(d) for d in deltas]
         return result
 

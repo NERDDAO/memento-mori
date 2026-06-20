@@ -17,7 +17,12 @@ CONDITIONS: "dict[str, Callable[[ExecutionContext], bool]]" = {
     # True when the computed HP transient is zero or below (patient is dead).
     "hp_depleted": lambda ctx: ctx["transients"]["computed_hp"] <= 0,
     # True when the patient entity doc carries attrs.onchain == True.
+    # Defensive: a missing patient role or absent entity returns False rather
+    # than raising KeyError (I-7).
     "patient_onchain": lambda ctx: bool(
-        ctx["entities"][ctx["bound_roles"]["patient"]].get("attrs", {}).get("onchain")
+        ctx["entities"]
+        .get(ctx["bound_roles"].get("patient", ""), {})
+        .get("attrs", {})
+        .get("onchain")
     ),
 }

@@ -109,7 +109,7 @@ def _make_ash_market() -> EntityDoc:
 def _make_river_gate() -> EntityDoc:
     return EntityDoc(
         uuid=RIVER_GATE,
-        name="River Gate",
+        name="The River Gate",
         kind="location",
         labels=["Location"],
         location_uuid=None,
@@ -187,15 +187,16 @@ async def test_move_relocates_agent_and_captures_one_episode() -> None:
 
     # Exactly one episode captured, with the rendered destination name.
     assert len(mem.ingested) == 1
-    assert mem.ingested[0]["content"] == "Kael moved to River Gate."
+    assert mem.ingested[0]["content"] == "Kael moved to The River Gate."
     assert mem.ingested[0]["actor_id"] == KAEL
 
-    # move_entity delta recorded.
+    # Exactly one delta — the move_entity relocation (I-12).
     deltas = update["state_deltas"]
-    assert any(
-        d["op"] == "move_entity" and d["before"] == ASH_MARKET and d["after"] == RIVER_GATE
-        for d in deltas
-    )
+    assert len(deltas) == 1
+    move_delta = deltas[0]
+    assert move_delta["op"] == "move_entity"
+    assert move_delta["before"] == ASH_MARKET
+    assert move_delta["after"] == RIVER_GATE
     # No chain firing for MOVE.
     assert chain.deaths == []
     assert chain.transfers == []
@@ -269,12 +270,11 @@ async def test_attack_kills_goblin_exact_hp_and_fires_chain_kill() -> None:
 
     # Episode rendered with damage + death suffix.
     assert len(mem.ingested) == 1
-    # death_suffix (§4.4) is " — {patient_name} has died." and the episode
-    # template ends with "{death_suffix}." — the committed contract yields the
-    # trailing double period deterministically.
+    # death_suffix (§4.2) is " — {patient_name} has died" (NO trailing period);
+    # the episode template's own "." terminates the sentence — single period.
     assert mem.ingested[0]["content"] == (
         "Kael attacked Goblin Scout with Iron Sword for 9 damage"
-        " — Goblin Scout has died.."
+        " — Goblin Scout has died."
     )
 
 
@@ -329,10 +329,13 @@ async def test_take_moves_item_to_agent_off_floor() -> None:
     assert kael is not None
     assert TATTERED_SCROLL in kael["attrs"]["inventory"]
 
-    # transfer_item delta to agent.
+    # transfer_item delta to agent — from the floor (before owner None).
     deltas = update["state_deltas"]
     assert any(
-        d["op"] == "transfer_item" and d["target_uuid"] == TATTERED_SCROLL and d["after"] == KAEL
+        d["op"] == "transfer_item"
+        and d["target_uuid"] == TATTERED_SCROLL
+        and d["before"] is None
+        and d["after"] == KAEL
         for d in deltas
     )
 
@@ -399,3 +402,97 @@ async def test_attack_unarmed_agent_raises_before_any_write() -> None:
     assert goblin_after["is_dead"] is False
     assert mem.ingested == []
     assert chain.deaths == []
+
+
+@pytest.mark.asyncio
+async def test_take_guard_failure_non_carryable_raises_no_write() -> None:
+    """A non-carryable item fails the item_carryable guard with NO write (I-14)."""
+    repo = _world()
+    # Pin the scroll to the floor but mark it non-carryable.
+    repo._items[TATTERED_SCROLL]["attrs"]["carryable"] = False
+    chain = RecordingChainMirror()
+    ex, mem = _executor(repo, chain)
+
+    with pytest.raises(ConstructionError) as exc:
+        await ex.execute(
+            CONSTRUCTION_REGISTRY["TAKE"], caller_id=KAEL, bindings={"patient": TATTERED_SCROLL}
+        )
+    assert "item_carryable" in str(exc.value)
+
+    # No write: scroll still on the floor (owner None), no episode captured.
+    scroll = await repo.get_entity(TATTERED_SCROLL)
+    assert scroll is not None
+    assert scroll["owner_uuid"] is None
+    assert scroll["location_uuid"] == ASH_MARKET
+    assert mem.ingested == []
+    assert chain.transfers == []
+
+
+# ---------------------------------------------------------------------------
+# transfer_item rollback (§3.3) — a later transactional primitive fails after
+# the pickup, and the item is restored to the floor (C-1).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_transfer_item_rollback_restores_item_to_floor() -> None:
+    """When a transactional op AFTER transfer_item fails, the item is restored.
+
+    Drives a TAKE-like CxnDef whose effect_template runs transfer_item (scroll
+    floor -> Kael) then a set_attr against a non-existent UUID, which raises in
+    Phase 2. The §3.3 compensation must put the scroll back on the floor with
+    owner_uuid None and location_uuid == the original room.
+    """
+    from copy import deepcopy
+
+    from memento.cxn.types import StatePrimitive
+
+    repo = _world()
+    chain = RecordingChainMirror()
+    ex, mem = _executor(repo, chain)
+
+    MISSING_UUID = "6650000000000000000000ff"  # not seeded -> set_attr raises
+
+    # A TAKE-shaped cxn: pickup then a guaranteed-failing transactional op.
+    broken_cxn = deepcopy(CONSTRUCTION_REGISTRY["TAKE"])
+    broken_cxn["chain_mirror"] = False  # isolate the rollback path from chain
+    broken_cxn["effect_template"] = [
+        StatePrimitive(
+            substrate="transactional",
+            op="transfer_item",
+            args={
+                "item_uuid": "$patient",
+                "from_uuid": "$location",
+                "to_uuid": "$agent",
+                "to_location_uuid": None,
+            },
+            if_condition=None,
+        ),
+        StatePrimitive(
+            substrate="transactional",
+            op="set_attr",
+            args={"uuid": MISSING_UUID, "field": "hp", "value": 0},
+            if_condition=None,
+        ),
+    ]
+
+    with pytest.raises(ConstructionError) as exc:
+        await ex.execute(broken_cxn, caller_id=KAEL, bindings={"patient": TATTERED_SCROLL})
+    assert "transactional_failed" in str(exc.value)
+
+    # Compensation restored the scroll to the floor: owner None, original room.
+    scroll = await repo.get_entity(TATTERED_SCROLL)
+    assert scroll is not None
+    assert scroll["owner_uuid"] is None
+    assert scroll["location_uuid"] == ASH_MARKET
+
+    # Off Kael's inventory, back in the room's item_ids.
+    kael = await repo.get_entity(KAEL)
+    assert kael is not None
+    assert TATTERED_SCROLL not in kael["attrs"].get("inventory", [])
+    ash = await repo.get_entity(ASH_MARKET)
+    assert ash is not None
+    assert TATTERED_SCROLL in ash["attrs"].get("item_ids", [])
+
+    # No episode (Phase 3 never runs after a Phase-2 failure).
+    assert mem.ingested == []

@@ -171,7 +171,6 @@ async def test_move_relocates_kael_and_ingests_episode():
     assert len(memory.ingested) == 1
     content = memory.ingested[0]["content"]
     assert content == "Kael moved to The River Gate."
-    assert content.startswith("Kael moved to")
 
 
 # ---------------------------------------------------------------------------
@@ -215,11 +214,12 @@ async def test_attack_kills_goblin_with_exact_deltas_and_chain_kill():
     assert death["location_id"] == ASH_MARKET
     assert "killer_id" not in death
 
-    # Episode text carries the exact damage and the death suffix.
+    # Episode text is the exact §4.2 canonical string (single period).
     assert len(memory.ingested) == 1
     content = memory.ingested[0]["content"]
-    assert "for 9 damage" in content
-    assert "has died" in content
+    assert content == (
+        "Kael attacked Goblin with Iron Sword for 9 damage — Goblin has died."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +245,10 @@ async def test_take_moves_scroll_to_kael_off_the_floor():
     assert scroll is not None
     assert scroll["owner_uuid"] == KAEL          # now owned by Kael
     assert scroll["location_uuid"] is None        # off the floor
-    assert SCROLL not in repo._entities[ASH_MARKET]["attrs"].get("item_ids", [])
+    # Off the floor — read the room through the Protocol, not the dict (I-10).
+    ash = await repo.get_entity(ASH_MARKET)
+    assert ash is not None
+    assert SCROLL not in ash["attrs"].get("item_ids", [])
 
     # Scroll is onchain=False -> chain step skipped (patient_onchain is false).
     assert chain.transfers == []
@@ -253,4 +256,3 @@ async def test_take_moves_scroll_to_kael_off_the_floor():
     assert len(memory.ingested) == 1
     content = memory.ingested[0]["content"]
     assert content == "Kael picked up Tattered Scroll from The Ash Market."
-    assert content.startswith("Kael picked up")
