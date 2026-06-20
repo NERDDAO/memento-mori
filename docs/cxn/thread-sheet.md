@@ -46,7 +46,7 @@ class InMemoryStateRepository:
 **First step:** `engine/src/memento/state/repository.py` — write the `StateRepository`
 Protocol typing, import it into `types.py`.
 
-**Reuse pointer:** [reuse-inventory.md §4 — `StateUpdate` / `CombatEvent` / `InventoryEvent`](reuse-inventory.md#4-enginesrcmementomodelesstate_updatepy--stateupdate-and-event-models).
+**Reuse pointer:** [reuse-inventory.md §4 — `StateUpdate` / `CombatEvent` / `InventoryEvent`](reuse-inventory.md#4-enginesrcmementomodelsstate_updatepy--stateupdate-and-event-models).
 The executor populates `events.combat` and `events.inventory_changes`; `schema_version`
 stays `1`; no new fields.
 
@@ -182,7 +182,7 @@ returns `StateUpdate(status="rejected", cause=<reason>)` with no writes.
 **Reuse pointer:**
 - [reuse-inventory.md §1 — `chain.record_death` / `transfer_item` / `is_enabled`](reuse-inventory.md#1-enginesrcmementotoolschainpy):
   `LiveChainMirror` wraps these; executor calls via the mirror, never `chain.py` directly.
-- [reuse-inventory.md §4 — `StateUpdate` / `CombatEvent` / `InventoryEvent` / `EventSummary`](reuse-inventory.md#4-enginesrcmementomodelesstate_updatepy--stateupdate-and-event-models):
+- [reuse-inventory.md §4 — `StateUpdate` / `CombatEvent` / `InventoryEvent` / `EventSummary`](reuse-inventory.md#4-enginesrcmementomodelsstate_updatepy--stateupdate-and-event-models):
   Executor returns `StateUpdate.model_dump(exclude_none=True)`; `schema_version` stays `1`.
 
 ---

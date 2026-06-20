@@ -2,7 +2,7 @@
 
 ## What this is
 
-Memento-mori is a permadeath MUD engine. This branch (`book/ldf-design-spec`) is
+Memento-mori is a permadeath MUD engine. This branch (`cxn/control-system-spec`) is
 building the **construction-based control system** — a deterministic, effectful
 control layer that replaces the legacy CrewAI crew pipeline for three core actions:
 MOVE, ATTACK, and TAKE. A *construction* is a form→meaning→effect triple: an agent

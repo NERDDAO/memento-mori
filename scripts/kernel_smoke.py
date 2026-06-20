@@ -12,6 +12,11 @@ response.
 All network I/O is guarded behind ``if __name__ == "__main__":`` so that
 ``import scripts.kernel_smoke`` and ``python -m py_compile`` are fully
 side-effect-free.
+
+The request payload here is an illustrative liveness probe, NOT the canonical
+contract — Track C (Deliverable 1) records the verified ``kernel/index`` /
+``kernel/search`` request/response shapes against the live service into
+``docs/cxn/gm-contract.md``. Do not copy this body as the spec.
 """
 
 import os
