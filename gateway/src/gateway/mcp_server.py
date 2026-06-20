@@ -1088,6 +1088,22 @@ def build_mcp_app(
     _register_combat_narrative_tools(mcp, ws_hub, bridge)
     _register_design_tools(mcp)
 
+    # Construction control system tools (cxn skeleton, §7.1) — registered
+    # via the same factory. Day-1 wired defaults: InMemoryStateRepository,
+    # NoopChainMirror, CapturingMemoryClient (§8.5).
+    from gateway.cxn_tools import register_cxn_tools
+    from memento.memory.capturing_client import CapturingMemoryClient
+    from memento.state.chain_mirror import NoopChainMirror
+    from memento.state.in_memory import InMemoryStateRepository
+
+    register_cxn_tools(
+        mcp,
+        ws_hub,
+        InMemoryStateRepository(),
+        NoopChainMirror(),
+        CapturingMemoryClient(),
+    )
+
     logger.info("mcp_server: built FastMCP('memento-engine') with %d tools", len(mcp._tool_manager._tools))
 
     raw_app = mcp.streamable_http_app()

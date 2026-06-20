@@ -46,6 +46,10 @@ KITS: dict[str, set[str]] = {
         "mm_move_to",
         "mm_move_within",
         "mm_give_quest",
+        # Construction control system tools (cxn skeleton, §7.5)
+        "mm_move",
+        "mm_attack",
+        "mm_take",
     },
     # Non-sentient NPC — animal, elemental, construct: fight and move, no trade/quests
     "NonSentientNPC": {
@@ -110,6 +114,10 @@ KITS: dict[str, set[str]] = {
         "mm_move_to",
         "mm_check_plausibility",
         "mm_give_item",
+        # Construction control system tools (cxn skeleton, §7.5).
+        # Players deliberately do NOT get mm_attack — combat is the Engine's job.
+        "mm_move",
+        "mm_take",
     },
 }
 
