@@ -337,3 +337,57 @@ async def test_unresolvable_patient_returns_clarify() -> None:
 
     # Store untouched: 0 ingests
     assert mem.ingested == []
+
+
+# ---------------------------------------------------------------------------
+# (e) patient filler matches TWO entities → clarify with reason=="ambiguous_role:patient"
+# ---------------------------------------------------------------------------
+
+# A second goblin-type NPC for the ambiguity test only
+_GOBLIN_SENTINEL = "6650000000000000000000a3"
+
+
+async def test_ambiguous_patient_returns_clarify() -> None:
+    """Two room entities both match filler 'goblin' → clarify/ambiguous_role:patient, no writes."""
+    repo = _world()
+    mem = CapturingMemoryClient()
+
+    # Seed a second goblin in the same room so EntityResolver sees two matches
+    goblin_sentinel = EntityDoc(
+        uuid=_GOBLIN_SENTINEL,
+        name="Goblin Sentinel",
+        kind="character",
+        labels=["Character", "NPC"],
+        location_uuid=ASH_MARKET,
+        attrs={
+            "hp": 7,
+            "max_hp": 7,
+            "strength": 1,
+            "armor": 1,
+            "inventory": [],
+            "equipped": {},
+        },
+        is_dead=False,
+    )
+    repo.seed_entity(goblin_sentinel)
+
+    # Filler "goblin" is a substring of both "Goblin Scout" and "Goblin Sentinel"
+    canned_frame = ComprehendedFrame(
+        predicate="attack",
+        roles=[
+            FrameRole(role="patient", filler="goblin"),
+        ],
+        matched=True,
+        raw_text="attack goblin",
+    )
+    fake_client = FakeComprehensionClient({"attack goblin": canned_frame})
+
+    router = _router(fake_client, repo, mem)
+    outcome = await router.handle("attack goblin", KAEL)
+
+    assert outcome["status"] == "clarify"
+    assert outcome["reason"] == "ambiguous_role:patient"
+    assert outcome["update"] is None
+
+    # Store untouched: 0 ingests
+    assert mem.ingested == []

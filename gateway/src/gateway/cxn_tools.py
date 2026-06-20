@@ -223,4 +223,5 @@ def register_mm_act(
             summary=f"acted: {text[:40]}",
         )
         update = outcome["update"]
-        return update if update is not None else {}
+        assert update is not None, "executor path must produce a StateUpdate"
+        return update
