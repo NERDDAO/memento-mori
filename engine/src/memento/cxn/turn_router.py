@@ -21,6 +21,7 @@ See spec §8 for the full state machine.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from memento.cxn.constructicon import ConstructiconRegistry
@@ -35,6 +36,18 @@ if TYPE_CHECKING:
     from memento.cxn.kernel_client import ComprehensionClient
     from memento.opening.describe import DescribeClient
     from memento.opening.director import SceneDirector
+    from memento.state.repository import StateRepository
+
+_ARTICLE_RE = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
+
+
+def _normalize_filler(s: str) -> str:
+    """Lowercase, strip leading article, collapse whitespace."""
+    s = s.strip().lower()
+    s = _ARTICLE_RE.sub("", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +72,7 @@ class TurnRouter:
     _bonfire_id: str
     _director: "SceneDirector | None"
     _describe: "DescribeClient | None"
+    _repo: "StateRepository | None"
 
     def __init__(
         self,
@@ -69,6 +83,7 @@ class TurnRouter:
         bonfire_id: str,
         director: "SceneDirector | None" = None,
         describe_client: "DescribeClient | None" = None,
+        repo: "StateRepository | None" = None,
     ) -> None:
         self._comprehension = comprehension
         self._constructicon = constructicon
@@ -77,6 +92,30 @@ class TurnRouter:
         self._bonfire_id = bonfire_id
         self._director = director
         self._describe = describe_client
+        self._repo = repo
+
+    async def _resolve_exit(self, actor_id: str, filler: str) -> str | None:
+        """Resolve a direction filler to a target_uuid via the actor's room exits.
+
+        Returns the target_uuid string if the filler matches an exit direction,
+        or None if repo is not set or no matching exit is found.
+        """
+        if self._repo is None:
+            return None
+        snap = await self._repo.get_actor_snapshot(actor_id)
+        loc = snap.get("location")
+        if loc is None:
+            return None
+        room = await self._repo.get_entity(loc)
+        exits = (room["attrs"].get("exits") or []) if room else []
+        norm = _normalize_filler(filler)
+        for exit_rec in exits:
+            if _normalize_filler(exit_rec.get("direction", "")) == norm:
+                return exit_rec.get("target_uuid")
+            # also match on exit name/target field if present
+            if _normalize_filler(exit_rec.get("name", "")) == norm:
+                return exit_rec.get("target_uuid")
+        return None
 
     async def handle(self, utterance: str, actor_id: str) -> TurnOutcome:
         """Comprehend utterance and route to execute or clarify.
@@ -167,6 +206,20 @@ class TurnRouter:
         # Clean resolution: dict[str, str] role → UUID (no "reason" key).
         resolved: dict[str, str] = resolution  # type: ignore[assignment]
 
+        # ── Step 3b: MOVE exit-resolution ────────────────────────────────────
+        # EntityResolver skips the location role for MOVE (it's a direction, not
+        # an entity name).  If we have a repo, resolve the filler against the
+        # actor's room exits and inject the target UUID.
+        if cxn["predicate"] == "move":
+            filler = next(
+                (r["filler"] for r in frame["roles"] if r["role"] == "location"),
+                None,
+            )
+            if filler is not None:
+                target = await self._resolve_exit(actor_id, filler)
+                if target is not None:
+                    resolved["location"] = target
+
         # ── Step 4: build SemanticFrame ───────────────────────────────────────
         semantic_frame = SemanticFrame(
             predicate=predicate,
@@ -194,12 +247,19 @@ class TurnRouter:
             bindings=matched["bound_roles"],
         )
 
-        return TurnOutcome(
+        outcome = TurnOutcome(
             status="executed",
             update=update,
             message=None,
             reason=None,
         )
+
+        # ── Step 7: win check ─────────────────────────────────────────────────
+        if self._director is not None and await self._director.is_won():
+            outcome["won"] = True
+            outcome["narration"] = "The road goes on, into the dark."
+
+        return outcome
 
 
 # ---------------------------------------------------------------------------
