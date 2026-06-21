@@ -255,7 +255,12 @@ class TurnRouter:
         )
 
         # ── Step 7: win check ─────────────────────────────────────────────────
-        if self._director is not None and await self._director.is_won():
+        # Only MOVE changes location; checking on every verb is redundant.
+        if (
+            cxn["predicate"] == "move"
+            and self._director is not None
+            and await self._director.is_won()
+        ):
             outcome["won"] = True
             outcome["narration"] = "The road goes on, into the dark."
 

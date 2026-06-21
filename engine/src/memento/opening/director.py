@@ -51,6 +51,12 @@ class SceneDirector:
         self._actor_id = actor_id
         self._location_id: str = seed.location_id
 
+        # Win target: UUID of the room reached by following win_exit
+        self._win_target: str | None = next(
+            (e["target_uuid"] for e in seed.exits if e["direction"] == seed.win_exit),
+            None,
+        )
+
         # Index all facts by key for O(1) lookup
         self._facts: dict[str, SeedFact] = {f.key: f for f in seed.facts}
 
@@ -94,7 +100,7 @@ class SceneDirector:
         candidates = [f for f in self._facts.values() if f.key not in self._surfaced]
         if not candidates:
             return None
-        return max(candidates, key=lambda f: f.salience)
+        return max(candidates, key=lambda f: (f.salience, f.key))
 
     def mark_surfaced(self, key: str) -> None:
         """Record that a fact has been surfaced (revealed to the player)."""
@@ -154,6 +160,6 @@ class SceneDirector:
     # ------------------------------------------------------------------
 
     async def is_won(self) -> bool:
-        """Return True when the actor has left the opening location."""
+        """Return True when the actor has reached the win-exit target room."""
         snap = await self._repo.get_actor_snapshot(self._actor_id)
-        return snap.get("location") != self._location_id
+        return self._win_target is not None and snap.get("location") == self._win_target

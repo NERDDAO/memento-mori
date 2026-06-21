@@ -101,4 +101,7 @@ async def test_find_latent_and_win_predicate():
     assert found is not None and found.key == "blade"  # normalized name-match
     assert await d.is_won() is False
     await repo.move_entity(PLAYER, "loc2")
-    assert await d.is_won() is True  # left the room
+    assert await d.is_won() is True  # reached win-exit target
+    # Moving to a location that is NOT the win target must NOT win
+    await repo.move_entity(PLAYER, "loc_elsewhere")
+    assert await d.is_won() is False  # wrong destination — win_exit not honoured
