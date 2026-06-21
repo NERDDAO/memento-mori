@@ -70,6 +70,14 @@ async def test_surface_order_and_death_beat():
     d.mark_surfaced("body")
     await d.apply_surface_beats(first)
     assert (await repo.get_entity(BODY))["is_dead"] is True  # witnessed death
+    # DIED_IN link should be written to the entity
+    body_doc = await repo.get_entity(BODY)
+    assert LOC in body_doc["attrs"]["links"]["DIED_IN"]
+    # Death beat is idempotent — second call is a no-op
+    await d.apply_surface_beats(first)
+    body_doc2 = await repo.get_entity(BODY)
+    assert body_doc2["is_dead"] is True
+    assert body_doc2["attrs"]["links"]["DIED_IN"].count(LOC) == 1  # not duplicated
     assert (
         d.next_to_surface() is not None and d.next_to_surface().key == "blade"
     )  # next salient
