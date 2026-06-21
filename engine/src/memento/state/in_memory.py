@@ -19,6 +19,7 @@ Implementation notes
   compensation via reverse-order inverse ops over the in-memory dicts (§3.3).
 - ensure_indexes() is a no-op (indexes are a Mongo concern).
 """
+
 from __future__ import annotations
 
 import copy
@@ -303,6 +304,18 @@ class InMemoryStateRepository:
         targets: list[str] = links.get(rel, [])
         if to_uuid in targets:
             targets.remove(to_uuid)
+
+    async def materialize(self, doc: EntityDoc | ItemDoc, *, is_item: bool) -> str:
+        """Persist a newly-promoted latent fact and return its UUID.
+
+        Delegates to the SYNC seed helpers (seed_item / seed_entity) so the
+        resolver stays typed against the Protocol without introducing Any.
+        """
+        if is_item:
+            self.seed_item(doc)  # type: ignore[arg-type]
+        else:
+            self.seed_entity(doc)  # type: ignore[arg-type]
+        return doc["uuid"]
 
     async def ensure_indexes(self) -> None:
         """No-op for in-memory store; indexes are a Mongo concern."""

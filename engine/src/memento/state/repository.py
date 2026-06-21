@@ -15,6 +15,7 @@ MongoStateRepository     (engine/src/memento/state/mongo_repository.py, FUTURE)
 No component outside engine/src/memento/state/ imports concrete classes by name.
 All callers depend only on StateRepository (the Protocol) and the TypedDicts here.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -31,13 +32,15 @@ from typing_extensions import TypedDict
 class EntityDoc(TypedDict):
     """Character / NPC / Location document stored in mm_entities."""
 
-    uuid: str                   # == Mongo _id; canonical identifier; never changes
-    name: str                   # display-only; never used for lookups
-    kind: str                   # "character" | "location" | "item" | "region" | "faction" | "quest"
-    labels: list[str]           # e.g. ["Character", "NPC"], ["Location"], ["Item", "Weapon"]
-    location_uuid: str | None   # MUTABLE — which Location this entity is in
-    attrs: dict[str, Any]       # MUTABLE — hp, max_hp, strength, armor, exits[], item_ids[], …
-    is_dead: bool               # MUTABLE — permadeath flag
+    uuid: str  # == Mongo _id; canonical identifier; never changes
+    name: str  # display-only; never used for lookups
+    kind: str  # "character" | "location" | "item" | "region" | "faction" | "quest"
+    labels: list[str]  # e.g. ["Character", "NPC"], ["Location"], ["Item", "Weapon"]
+    location_uuid: str | None  # MUTABLE — which Location this entity is in
+    attrs: dict[
+        str, Any
+    ]  # MUTABLE — hp, max_hp, strength, armor, exits[], item_ids[], …
+    is_dead: bool  # MUTABLE — permadeath flag
 
 
 class ItemDoc(TypedDict):
@@ -45,11 +48,13 @@ class ItemDoc(TypedDict):
 
     uuid: str
     name: str
-    kind: str                   # "item"
+    kind: str  # "item"
     labels: list[str]
-    owner_uuid: str | None      # MUTABLE — holder entity UUID; None = on the floor
-    location_uuid: str | None   # MUTABLE — room UUID when on the floor
-    attrs: dict[str, Any]       # slot_type, damage, defense, weight, quantity, carryable, onchain, …
+    owner_uuid: str | None  # MUTABLE — holder entity UUID; None = on the floor
+    location_uuid: str | None  # MUTABLE — room UUID when on the floor
+    attrs: dict[
+        str, Any
+    ]  # slot_type, damage, defense, weight, quantity, carryable, onchain, …
 
 
 # ---------------------------------------------------------------------------
@@ -75,9 +80,13 @@ class RoomManifest:
     name: str
     description: str
     exits: list[ExitRecord] = field(default_factory=list)
-    npcs: list[dict[str, Any]] = field(default_factory=list)   # characters at this location
-    items: list[dict[str, Any]] = field(default_factory=list)  # floor items (owner_uuid None)
-    room_map: dict[str, Any] = field(default_factory=dict)     # display hint only
+    npcs: list[dict[str, Any]] = field(
+        default_factory=list
+    )  # characters at this location
+    items: list[dict[str, Any]] = field(
+        default_factory=list
+    )  # floor items (owner_uuid None)
+    room_map: dict[str, Any] = field(default_factory=dict)  # display hint only
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +210,19 @@ class StateRepository(Protocol):
     # ------------------------------------------------------------------
     # Lifecycle / utility
     # ------------------------------------------------------------------
+
+    async def materialize(self, doc: EntityDoc | ItemDoc, *, is_item: bool) -> str:
+        """Persist a newly-promoted latent fact and return its UUID.
+
+        Callers (EntityResolver.promote-on-miss) pass:
+          is_item=True  → the doc is an ItemDoc (kind=="item"); stored so that
+                          it is resolvable as a patient AND takeable.
+          is_item=False → the doc is an EntityDoc (NPC/character/etc.).
+
+        The UUID in doc["uuid"] is the canonical identifier; it is returned
+        so the caller can register it with the SceneDirector.
+        """
+        ...
 
     async def ensure_indexes(self) -> None:
         """Idempotent index creation.  Called once at startup.

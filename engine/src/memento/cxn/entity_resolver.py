@@ -19,9 +19,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from memento.cxn.types import ComprehendedFrame, CxnDef, ResolutionFailure
 from memento.state.repository import EntityDoc, StateRepository
+
+if TYPE_CHECKING:
+    from memento.opening.director import SceneDirector
 
 # ---------------------------------------------------------------------------
 # Normalisation
@@ -65,6 +70,24 @@ def _match_filler(filler: str, candidates: Sequence[EntityDoc]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _new_object_id() -> str:
+    """Return a 24-hex string suitable as an entity UUID."""
+    return uuid4().hex[:24]
+
+
+_LEADING_ARTICLE_RE = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
+
+
+def _strip_article(s: str) -> str:
+    """Remove a leading article (the/a/an) from a name string."""
+    return _LEADING_ARTICLE_RE.sub("", s).strip()
+
+
+# ---------------------------------------------------------------------------
 # EntityResolver
 # ---------------------------------------------------------------------------
 
@@ -76,12 +99,28 @@ class EntityResolver:
     The caller (TurnRouter) is responsible for binding ``agent`` and
     ``location``, and for defaulting ``instrument`` from equipped main_hand
     when it is absent from the frame.
+
+    Parameters
+    ----------
+    state:
+        The authoritative transactional store (StateRepository Protocol).
+    director:
+        Optional SceneDirector for the opening sequence.  When supplied,
+        a resolve-miss on patient or instrument attempts lazy materialization
+        of the matching latent SeedFact before returning a ResolutionFailure.
+        When None (default), behaviour is unchanged from the original resolver.
     """
 
     _state: StateRepository
+    _director: SceneDirector | None
 
-    def __init__(self, state: StateRepository) -> None:
+    def __init__(
+        self,
+        state: StateRepository,
+        director: SceneDirector | None = None,
+    ) -> None:
         self._state = state
+        self._director = director
 
     async def resolve(
         self,
@@ -129,7 +168,7 @@ class EntityResolver:
         if "instrument" in role_fillers:
             inventory: list[str] = snapshot.get("inventory", [])
             instrument_result = await self._resolve_instrument(
-                role_fillers["instrument"], inventory
+                role_fillers["instrument"], inventory, location_uuid
             )
             if isinstance(instrument_result, str):
                 resolved["instrument"] = instrument_result
@@ -158,6 +197,35 @@ class EntityResolver:
         matches = _match_filler(filler, candidates)
 
         if len(matches) == 0:
+            # Lazy materialization: promote a latent SeedFact if director is wired
+            if self._director is not None:
+                fact = self._director.find_latent(filler)
+                if fact is not None:
+                    uuid = fact.uuid or _new_object_id()
+                    if fact.kind == "item":
+                        item_doc = {
+                            "uuid": uuid,
+                            "name": _strip_article(fact.name),
+                            "kind": fact.kind,
+                            "labels": list(fact.labels),
+                            "owner_uuid": None,
+                            "location_uuid": location_uuid,
+                            "attrs": dict(fact.attrs),
+                        }
+                        await self._state.materialize(item_doc, is_item=True)
+                    else:
+                        entity_doc = {
+                            "uuid": uuid,
+                            "name": _strip_article(fact.name),
+                            "kind": fact.kind,
+                            "labels": list(fact.labels),
+                            "location_uuid": location_uuid,
+                            "attrs": dict(fact.attrs),
+                            "is_dead": False,
+                        }
+                        await self._state.materialize(entity_doc, is_item=False)
+                    self._director.mark_materialized(fact.key, uuid)
+                    return uuid
             return ResolutionFailure(reason="unresolved_role:patient")
         if len(matches) > 1:
             return ResolutionFailure(reason="ambiguous_role:patient")
@@ -167,6 +235,7 @@ class EntityResolver:
         self,
         filler: str,
         inventory: list[str],
+        location_uuid: str | None,
     ) -> str | ResolutionFailure:
         """Match the filler against inventory items by name/labels.
 
@@ -174,6 +243,9 @@ class EntityResolver:
         EntityDoc | None, and ItemDoc shapes share the same fields (name,
         labels, uuid) as EntityDoc, so this lookup works correctly for items
         stored in the _entities dict by InMemoryStateRepository.
+
+        ``location_uuid`` is threaded in so that the promote-on-miss branch
+        can place materialised items at the actor's current location.
         """
         item_docs: list[EntityDoc] = []
         for uuid in inventory:
@@ -184,6 +256,35 @@ class EntityResolver:
         matches = _match_filler(filler, item_docs)
 
         if len(matches) == 0:
+            # Lazy materialization: promote a latent SeedFact if director is wired
+            if self._director is not None:
+                fact = self._director.find_latent(filler)
+                if fact is not None:
+                    uuid = fact.uuid or _new_object_id()
+                    if fact.kind == "item":
+                        item_doc = {
+                            "uuid": uuid,
+                            "name": _strip_article(fact.name),
+                            "kind": fact.kind,
+                            "labels": list(fact.labels),
+                            "owner_uuid": None,
+                            "location_uuid": location_uuid,
+                            "attrs": dict(fact.attrs),
+                        }
+                        await self._state.materialize(item_doc, is_item=True)
+                    else:
+                        entity_doc = {
+                            "uuid": uuid,
+                            "name": _strip_article(fact.name),
+                            "kind": fact.kind,
+                            "labels": list(fact.labels),
+                            "location_uuid": location_uuid,
+                            "attrs": dict(fact.attrs),
+                            "is_dead": False,
+                        }
+                        await self._state.materialize(entity_doc, is_item=False)
+                    self._director.mark_materialized(fact.key, uuid)
+                    return uuid
             return ResolutionFailure(reason="unresolved_role:instrument")
         if len(matches) > 1:
             return ResolutionFailure(reason="ambiguous_role:instrument")
