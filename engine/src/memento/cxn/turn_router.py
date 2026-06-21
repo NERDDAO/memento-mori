@@ -33,6 +33,8 @@ from memento.cxn.types import (
 
 if TYPE_CHECKING:
     from memento.cxn.kernel_client import ComprehensionClient
+    from memento.opening.describe import DescribeClient
+    from memento.opening.director import SceneDirector
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +43,13 @@ class TurnRouter:
     """Route a free-text utterance through comprehension → resolution → execution.
 
     Args:
-        comprehension: ComprehensionClient (real HTTP or FakeComprehensionClient).
-        constructicon: ConstructiconRegistry for predicate → CxnDef lookup and matching.
-        resolver:      EntityResolver for role-filler → UUID resolution.
-        executor:      EffectExecutor for the 3-phase deterministic execution.
-        bonfire_id:    Fixed world identifier ("mm-world-v1" for Day-1).
+        comprehension:   ComprehensionClient (real HTTP or FakeComprehensionClient).
+        constructicon:   ConstructiconRegistry for predicate → CxnDef lookup and matching.
+        resolver:        EntityResolver for role-filler → UUID resolution.
+        executor:        EffectExecutor for the 3-phase deterministic execution.
+        bonfire_id:      Fixed world identifier ("mm-world-v1" for Day-1).
+        director:        SceneDirector for the active opening scene (optional).
+        describe_client: DescribeClient for the read-only narration branch (optional).
     """
 
     _comprehension: "ComprehensionClient"
@@ -53,6 +57,8 @@ class TurnRouter:
     _resolver: EntityResolver
     _executor: EffectExecutor
     _bonfire_id: str
+    _director: "SceneDirector | None"
+    _describe: "DescribeClient | None"
 
     def __init__(
         self,
@@ -61,12 +67,16 @@ class TurnRouter:
         resolver: EntityResolver,
         executor: EffectExecutor,
         bonfire_id: str,
+        director: "SceneDirector | None" = None,
+        describe_client: "DescribeClient | None" = None,
     ) -> None:
         self._comprehension = comprehension
         self._constructicon = constructicon
         self._resolver = resolver
         self._executor = executor
         self._bonfire_id = bonfire_id
+        self._director = director
+        self._describe = describe_client
 
     async def handle(self, utterance: str, actor_id: str) -> TurnOutcome:
         """Comprehend utterance and route to execute or clarify.
@@ -104,6 +114,38 @@ class TurnRouter:
                 update=None,
                 message=f"I understood '{predicate}' but that action isn't available here.",
                 reason="unknown_predicate",
+            )
+
+        # ── Step 2b: read-only branch (LOOK) ─────────────────────────────────
+        if cxn.get("read_only"):
+            if self._director is None or self._describe is None:
+                return TurnOutcome(
+                    status="clarify",
+                    update=None,
+                    message="There is nothing to perceive.",
+                    reason="no_scene",
+                )
+            from memento.opening.describe import DescribeRequest
+
+            director = self._director
+            fact = director.next_to_surface()
+            if fact is not None:
+                director.mark_surfaced(fact.key)
+                await director.apply_surface_beats(fact)
+            req = DescribeRequest(
+                room_name=director.room_name,
+                room_description=director.room_description,
+                focus=fact,
+                surfaced=(),
+                candidates=director.candidates(),
+            )
+            result = await self._describe.describe(req)
+            return TurnOutcome(
+                status="narrated",
+                update=None,
+                message=None,
+                reason=None,
+                narration=result.prose,
             )
 
         # ── Step 3: resolve role fillers → UUIDs ─────────────────────────────

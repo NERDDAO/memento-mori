@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol, TypedDict
+from typing import Any, Literal, NotRequired, Protocol, TypedDict
 
 
 class StatePrimitive(TypedDict):
@@ -40,9 +40,9 @@ class SelectionRestriction(TypedDict):
 
 
 class CxnDef(TypedDict):
-    name: str  # "MOVE" | "ATTACK" | "TAKE"
+    name: str  # "MOVE" | "ATTACK" | "TAKE" | "LOOK"
     predicate: str  # frame predicate this cxn matches
-    mcp_tool_name: str  # "mm_move" | "mm_attack" | "mm_take"
+    mcp_tool_name: str  # "mm_move" | "mm_attack" | "mm_take" | "mm_look"
     description: str  # MCP tool docstring (agent-facing)
     semantic_roles: list[str]  # ordered roles → MCP tool params
     restrictions: list[SelectionRestriction]
@@ -50,6 +50,7 @@ class CxnDef(TypedDict):
     chain_mirror: bool  # whether the cxn fires chain primitives
     effect_template: list[StatePrimitive]
     episode_template: str  # f-string over role labels + computed values
+    read_only: NotRequired[bool]  # if True, cxn never touches the executor
 
 
 class MatchedCxn(TypedDict):
@@ -109,12 +110,14 @@ class ComprehendedFrame(TypedDict):
 
 
 class TurnOutcome(TypedDict):
-    status: str  # "executed" | "clarify"
+    status: str  # "executed" | "clarify" | "narrated"
     update: dict[str, Any] | None
     message: str | None
     reason: (
         str | None
     )  # "no_match"|"unknown_predicate"|"unresolved_role:<r>"|"ambiguous_role:<r>"
+    narration: NotRequired[str | None]  # prose returned by the describe branch (LOOK)
+    won: NotRequired[bool]  # True when the player has left the opening room
 
 
 class ResolutionFailure(TypedDict):

@@ -2,9 +2,9 @@
 
 All tests are deterministic, no I/O, no LLM, no RNG.
 """
+
 from __future__ import annotations
 
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -66,15 +66,15 @@ class TestArithmetic:
 
 
 class TestDefinitions:
-    def test_registry_has_three_entries(self):
+    def test_registry_has_four_entries(self):
         from memento.cxn.definitions import CONSTRUCTION_REGISTRY
 
-        assert len(CONSTRUCTION_REGISTRY) == 3
+        assert len(CONSTRUCTION_REGISTRY) == 4
 
     def test_registry_keys(self):
         from memento.cxn.definitions import CONSTRUCTION_REGISTRY
 
-        assert set(CONSTRUCTION_REGISTRY.keys()) == {"MOVE", "ATTACK", "TAKE"}
+        assert set(CONSTRUCTION_REGISTRY.keys()) == {"MOVE", "ATTACK", "TAKE", "LOOK"}
 
     def test_move_cxn_shape(self):
         from memento.cxn.definitions import MOVE_CXN
@@ -93,7 +93,12 @@ class TestDefinitions:
         assert ATTACK_CXN["predicate"] == "attack"
         assert ATTACK_CXN["mcp_tool_name"] == "mm_attack"
         assert ATTACK_CXN["chain_mirror"] is True
-        assert ATTACK_CXN["semantic_roles"] == ["agent", "patient", "instrument", "location"]
+        assert ATTACK_CXN["semantic_roles"] == [
+            "agent",
+            "patient",
+            "instrument",
+            "location",
+        ]
         assert ATTACK_CXN["guards"] == ["agent_armed", "target_damageable", "same_room"]
 
     def test_take_cxn_shape(self):
@@ -293,7 +298,12 @@ class TestConstructicon:
         reg = self._registry()
         frame = self._frame(
             "attack",
-            {"agent": "a1b2", "patient": "goblin-001", "instrument": "sword-001", "location": "r002"},
+            {
+                "agent": "a1b2",
+                "patient": "goblin-001",
+                "instrument": "sword-001",
+                "location": "r002",
+            },
         )
         result = reg.match(frame)
 
@@ -326,15 +336,15 @@ class TestConstructicon:
         result = reg.match(frame)
         assert result is None
 
-    def test_all_cxns_returns_three(self):
+    def test_all_cxns_returns_four(self):
         reg = self._registry()
         cxns = reg.all_cxns()
-        assert len(cxns) == 3
+        assert len(cxns) == 4
 
     def test_all_cxns_names(self):
         reg = self._registry()
         names = {c["name"] for c in reg.all_cxns()}
-        assert names == {"MOVE", "ATTACK", "TAKE"}
+        assert names == {"MOVE", "ATTACK", "TAKE", "LOOK"}
 
     def test_bound_roles_is_copy(self):
         """Mutating the returned bound_roles must not affect a subsequent call."""

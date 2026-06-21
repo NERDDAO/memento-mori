@@ -3,6 +3,7 @@
 Literals are exactly per spec §4.2. The CONSTRUCTION_REGISTRY maps each
 cxn name to its CxnDef. No logic lives here — only data.
 """
+
 from __future__ import annotations
 
 from memento.cxn.types import CxnDef, SelectionRestriction, StatePrimitive
@@ -104,7 +105,11 @@ ATTACK_CXN: CxnDef = CxnDef(
         StatePrimitive(
             substrate="chain",
             op="chain_kill",
-            args={"character_id": "$patient", "cause": "combat", "location_id": "$location"},
+            args={
+                "character_id": "$patient",
+                "cause": "combat",
+                "location_id": "$location",
+            },
             if_condition="hp_depleted",
         ),
         StatePrimitive(
@@ -180,6 +185,24 @@ TAKE_CXN: CxnDef = CxnDef(
 )
 
 # ---------------------------------------------------------------------------
+# CXN.LOOK
+# ---------------------------------------------------------------------------
+
+LOOK_CXN: CxnDef = CxnDef(
+    name="LOOK",
+    predicate="look",
+    mcp_tool_name="mm_look",
+    description="Look around / examine the scene.",
+    semantic_roles=[],
+    restrictions=[],
+    guards=[],
+    chain_mirror=False,
+    effect_template=[],
+    episode_template="",
+    read_only=True,
+)
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -187,6 +210,7 @@ CONSTRUCTION_REGISTRY: dict[str, CxnDef] = {
     MOVE_CXN["name"]: MOVE_CXN,
     ATTACK_CXN["name"]: ATTACK_CXN,
     TAKE_CXN["name"]: TAKE_CXN,
+    LOOK_CXN["name"]: LOOK_CXN,
 }
 
 

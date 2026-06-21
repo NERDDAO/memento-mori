@@ -69,6 +69,14 @@ class SceneDirector:
     def location_id(self) -> str:
         return self._location_id
 
+    @property
+    def room_name(self) -> str:
+        return self._seed.name
+
+    @property
+    def room_description(self) -> str:
+        return self._seed.description
+
     # ------------------------------------------------------------------
     # Registry
     # ------------------------------------------------------------------
