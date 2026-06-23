@@ -530,8 +530,13 @@ async def test_set_activation_changes_stamp() -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_attr_is_dead_fires_chain_mirror() -> None:
-    """set_attr(is_dead=True) fires on_character_death."""
+async def test_set_attr_is_dead_does_not_fire_chain_mirror_from_repo() -> None:
+    """set_attr(is_dead=True) does NOT fire on_character_death from the repo.
+
+    Chain firing is the EffectExecutor's sole responsibility (chain_kill primitive).
+    The repo fires ZERO chain calls — identical to InMemoryStateRepository.
+    Firing from the repo would double-notarize deaths and break InMemory parity.
+    """
     loc_a = _location(LOC_A)
     char = _character(CHAR_1, LOC_A)
 
@@ -540,10 +545,8 @@ async def test_set_attr_is_dead_fires_chain_mirror() -> None:
 
     await es.set_attr(CHAR_1, "is_dead", True)
 
-    assert len(chain.death_calls) == 1
-    call = chain.death_calls[0]
-    assert call["character_id"] == CHAR_1
-    assert call["location_id"] == LOC_A
+    # State write succeeds — but chain is never touched by the repo.
+    assert len(chain.death_calls) == 0
 
 
 @pytest.mark.asyncio
@@ -561,8 +564,13 @@ async def test_set_attr_is_dead_false_does_not_fire_chain_mirror() -> None:
 
 
 @pytest.mark.asyncio
-async def test_transfer_item_to_owner_fires_chain_mirror() -> None:
-    """transfer_item to a new owner fires on_item_transferred."""
+async def test_transfer_item_to_owner_does_not_fire_chain_mirror_from_repo() -> None:
+    """transfer_item to a new owner does NOT fire on_item_transferred from the repo.
+
+    Chain firing is the EffectExecutor's sole responsibility (chain_transfer primitive).
+    The repo fires ZERO chain calls — identical to InMemoryStateRepository.
+    Firing from the repo would double-notarize ownership and break InMemory parity.
+    """
     loc_a = _location(LOC_A)
     loc_a["attrs"]["item_ids"] = [ITEM_1]
     char = _character(CHAR_1, LOC_A)
@@ -573,9 +581,8 @@ async def test_transfer_item_to_owner_fires_chain_mirror() -> None:
 
     await es.transfer_item(ITEM_1, from_uuid=LOC_A, to_uuid=CHAR_1)
 
-    assert len(chain.transfer_calls) == 1
-    assert chain.transfer_calls[0]["item_id"] == ITEM_1
-    assert chain.transfer_calls[0]["new_owner_id"] == CHAR_1
+    # State write succeeds (item ownership updated) — but chain is never touched by repo.
+    assert len(chain.transfer_calls) == 0
 
 
 @pytest.mark.asyncio
@@ -664,3 +671,127 @@ async def test_rebuild_projection_location_index() -> None:
 
     at_b = await rebuilt.entities_at_location(LOC_B)
     assert any(e["uuid"] == CHAR_1 for e in at_b)
+
+
+# ---------------------------------------------------------------------------
+# FIX 1 — Immutable log: genesis delta frozen at write time
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_genesis_delta_is_immutable_after_write() -> None:
+    """Genesis delta doc must not be aliased by live projection state.
+
+    After seed_entity seeds a character with an empty inventory, a subsequent
+    transfer_item that adds an item to the character's inventory must NOT
+    retroactively change the earlier genesis delta stored in the TxLog.
+
+    This proves FIX 1: the TxLog stores a deepcopy of each entry so later
+    mutations to live projection attrs cannot reach logged deltas.
+    """
+    loc_a = _location(LOC_A)
+    char = _character(CHAR_1, LOC_A)
+    # Character starts with empty inventory.
+    char["attrs"]["inventory"] = []
+    item = _item(ITEM_1, loc=LOC_A)
+    loc_a["attrs"]["item_ids"] = [ITEM_1]
+
+    proj = KgProjectionFake()
+    tx_log = InMemoryTxLog()
+    act_log = InMemoryActivationLog()
+    es = EventSourcedStateRepository(
+        tx_log=tx_log,
+        activation_log=act_log,
+        projection=proj,
+        chain=NoopChainMirror(),
+    )
+
+    await es.seed_entity(loc_a)
+    await es.seed_entity(char)
+    await es.seed_item(item)
+
+    # Capture the genesis delta for the character NOW (before any mutations).
+    char_genesis_entries = tx_log.for_actor(CHAR_1)
+    assert len(char_genesis_entries) == 1, "expected exactly one genesis entry for char"
+    genesis_delta = char_genesis_entries[0].deltas[0]
+    assert genesis_delta["op"] == "create"
+    # Snapshot the inventory as recorded in the genesis delta.
+    genesis_inventory_before = list(genesis_delta["doc"]["attrs"]["inventory"])  # type: ignore[index]
+    assert genesis_inventory_before == [], "genesis inventory should be empty"
+
+    # Now transfer the item to the character — this mutates the live projection.
+    es.set_activation(ACT_1, tool="mm_take")
+    await es.transfer_item(ITEM_1, from_uuid=LOC_A, to_uuid=CHAR_1)
+
+    # Verify live projection updated correctly.
+    live_char = await es.get_entity(CHAR_1)
+    assert live_char is not None
+    assert ITEM_1 in live_char["attrs"]["inventory"], (
+        "ITEM_1 should be in live char inventory after transfer"
+    )
+
+    # The genesis delta must still show the ORIGINAL empty inventory.
+    char_genesis_entries_after = tx_log.for_actor(CHAR_1)
+    genesis_delta_after = char_genesis_entries_after[0].deltas[0]
+    genesis_inventory_after = list(genesis_delta_after["doc"]["attrs"]["inventory"])  # type: ignore[index]
+    assert genesis_inventory_after == [], (
+        f"Genesis delta was mutated retroactively! "
+        f"Expected empty inventory in genesis delta, got {genesis_inventory_after!r}. "
+        f"Fix 1 (immutable log) is broken."
+    )
+
+
+# ---------------------------------------------------------------------------
+# FIX 2 — Global rebuild: cross-entity writes reconstructed from full log
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rebuild_projection_includes_cross_entity_transfer() -> None:
+    """rebuild_projection(actor_id) must replay ALL log entries, not just actor's.
+
+    The transfer_item TX is logged under item_uuid (not player uuid).  The old
+    for_actor(CHAR_1) approach would miss it; the new all()-based replay must include it.
+
+    This proves FIX 2: the blade is in the rebuilt inventory even though the transfer
+    TX is filed under ITEM_1, not CHAR_1.
+    """
+    loc_a = _location(LOC_A)
+    char = _character(CHAR_1, LOC_A)
+    char["attrs"]["inventory"] = []
+    item = _item(ITEM_1, loc=LOC_A)
+    loc_a["attrs"]["item_ids"] = [ITEM_1]
+
+    proj = KgProjectionFake()
+    tx_log = InMemoryTxLog()
+    act_log = InMemoryActivationLog()
+    es = EventSourcedStateRepository(
+        tx_log=tx_log,
+        activation_log=act_log,
+        projection=proj,
+        chain=NoopChainMirror(),
+    )
+
+    await es.seed_entity(loc_a)
+    await es.seed_entity(char)
+    await es.seed_item(item)
+
+    # Transfer: logged under ITEM_1, NOT CHAR_1.
+    es.set_activation(ACT_1, tool="mm_take")
+    await es.transfer_item(ITEM_1, from_uuid=LOC_A, to_uuid=CHAR_1)
+
+    # Sanity: the transfer IS logged under ITEM_1, not CHAR_1.
+    char_entries_only = tx_log.for_actor(CHAR_1)
+    assert not any(
+        any(d.get("op") == "transfer" for d in e.deltas) for e in char_entries_only
+    ), "transfer TX should NOT appear in CHAR_1-filtered entries"
+
+    # rebuild_projection(CHAR_1) replays the whole log — blade must appear.
+    rebuilt = await es.rebuild_projection(CHAR_1)
+    rebuilt_char = await rebuilt.get(CHAR_1)
+    assert rebuilt_char is not None, "CHAR_1 missing from rebuilt projection"
+    rebuilt_inventory = rebuilt_char.get("attrs", {}).get("inventory", [])
+    assert ITEM_1 in rebuilt_inventory, (
+        f"Rebuilt inventory {rebuilt_inventory!r} does not contain ITEM_1 — "
+        f"Fix 2 (global rebuild) is broken: cross-entity transfer was missed."
+    )

@@ -1,9 +1,13 @@
 """EventSourcedStateRepository — event-sourced implementation of StateRepository.
 
-Every write fans out to three sinks:
+Every write fans out to two sinks:
   1. TxLog     — append-only truth record (one TxEntry per write call)
   2. KgProjection — read-side projection (updated in-place via create/update)
-  3. ChainMirror  — permadeath subset (death + item-ownership events only)
+
+ChainMirror firing is NOT the repo's responsibility.  The EffectExecutor's
+Phase 3 (chain_kill / chain_transfer primitives) is the single chain authority,
+identical to InMemoryStateRepository's contract.  The ``chain`` constructor
+param is retained for API compatibility but is NOT used for any writes.
 
 Reads come EXCLUSIVELY from the KgProjection — no internal dict cache.
 
@@ -57,14 +61,16 @@ from memento.state.tx_log import ActivationLog, TxEntry, TxLog
 
 
 class EventSourcedStateRepository:
-    """StateRepository backed by (TxLog, KgProjection, ChainMirror).
+    """StateRepository backed by (TxLog, KgProjection).
 
     Constructor
     -----------
     tx_log          : TxLog          — append-only transaction log
     activation_log  : ActivationLog  — activation provenance (stored but not read here)
     projection      : KgProjectionProtocol — live read-side projection
-    chain           : ChainMirror    — permadeath write-through
+    chain           : ChainMirror    — accepted for API compatibility; NOT used for
+                                       any writes.  ChainMirror firing is the
+                                       EffectExecutor's sole responsibility.
     """
 
     def __init__(
@@ -282,26 +288,31 @@ class EventSourcedStateRepository:
 
     async def seed_entity(self, doc: EntityDoc) -> None:
         """Insert or replace an entity doc; logs a genesis TxEntry."""
-        stored = copy.deepcopy(dict(doc))
-        delta: dict[str, Any] = {"op": "create", "doc": stored}
+        # Two independent deepcopies: one for the projection, one for the delta.
+        # This ensures the logged genesis delta is immutable even if the
+        # projection later mutates attrs in-place.
+        proj_copy = copy.deepcopy(dict(doc))
+        delta_copy = copy.deepcopy(dict(doc))
+        delta: dict[str, Any] = {"op": "create", "doc": delta_copy}
         # Apply to projection
         existing = await self._projection.get(doc["uuid"])
         if existing is not None:
-            await self._projection.update(stored)  # type: ignore[arg-type]
+            await self._projection.update(proj_copy)  # type: ignore[arg-type]
         else:
-            await self._projection.create(stored)  # type: ignore[arg-type]
+            await self._projection.create(proj_copy)  # type: ignore[arg-type]
         # Log genesis tx — actor_id is the entity's own UUID
         await self._with_genesis(doc["uuid"], [delta])
 
     async def seed_item(self, doc: ItemDoc) -> None:
         """Insert or replace an item doc; logs a genesis TxEntry."""
-        stored = copy.deepcopy(dict(doc))
-        delta: dict[str, Any] = {"op": "create", "doc": stored}
+        proj_copy = copy.deepcopy(dict(doc))
+        delta_copy = copy.deepcopy(dict(doc))
+        delta: dict[str, Any] = {"op": "create", "doc": delta_copy}
         existing = await self._projection.get(doc["uuid"])
         if existing is not None:
-            await self._projection.update(stored)  # type: ignore[arg-type]
+            await self._projection.update(proj_copy)  # type: ignore[arg-type]
         else:
-            await self._projection.create(stored)  # type: ignore[arg-type]
+            await self._projection.create(proj_copy)  # type: ignore[arg-type]
         await self._with_genesis(doc["uuid"], [delta])
 
     async def _with_genesis(
@@ -445,16 +456,11 @@ class EventSourcedStateRepository:
 
         await self._append_tx(uuid, [delta])
 
-        # ChainMirror — fire for death
-        if field == "is_dead" and value is True:
-            updated = await self._projection.get(uuid)
-            loc_id: str = (updated or {}).get("location_uuid") or ""
-            self._chain.on_character_death(
-                character_id=uuid,
-                cause="combat",
-                location_id=loc_id,
-                tick=0,
-            )
+        # NOTE: ChainMirror firing is NOT done here.
+        # The EffectExecutor's Phase 3 is the single chain authority (chain_kill /
+        # chain_transfer primitives in the effect_template).  InMemoryStateRepository
+        # also never fires chain — the executor always does.  Firing chain here would
+        # double-notarize ownership and break parity with InMemory.
 
         result = await self._projection.get(uuid)
         return copy.deepcopy(result)  # type: ignore[return-value]
@@ -501,9 +507,10 @@ class EventSourcedStateRepository:
         await self._apply_delta(self._projection, delta)
         await self._append_tx(item_uuid, [delta])
 
-        # ChainMirror — fire only when a new OWNER is assigned (not drop-to-floor)
-        if to_uuid is not None:
-            self._chain.on_item_transferred(item_id=item_uuid, new_owner_id=to_uuid)
+        # NOTE: ChainMirror firing is NOT done here.
+        # The EffectExecutor's Phase 3 (chain_transfer primitive) is the single
+        # chain authority.  InMemoryStateRepository also never fires chain.
+        # Firing here would double-notarize ownership and break parity with InMemory.
 
         result = await self._projection.get(item_uuid)
         return copy.deepcopy(result)  # type: ignore[return-value]
@@ -540,14 +547,16 @@ class EventSourcedStateRepository:
 
     async def materialize(self, doc: EntityDoc | ItemDoc, *, is_item: bool) -> str:
         """Persist a newly-promoted latent fact; returns doc['uuid']."""
-        stored = copy.deepcopy(dict(doc))
-        delta: dict[str, Any] = {"op": "create", "doc": stored}
+        # Two independent deepcopies: one for the projection, one for the delta.
+        proj_copy = copy.deepcopy(dict(doc))
+        delta_copy = copy.deepcopy(dict(doc))
+        delta: dict[str, Any] = {"op": "create", "doc": delta_copy}
 
         existing = await self._projection.get(doc["uuid"])
         if existing is not None:
-            await self._projection.update(stored)  # type: ignore[arg-type]
+            await self._projection.update(proj_copy)  # type: ignore[arg-type]
         else:
-            await self._projection.create(stored)  # type: ignore[arg-type]
+            await self._projection.create(proj_copy)  # type: ignore[arg-type]
 
         await self._append_tx(doc["uuid"], [delta])
         return doc["uuid"]
@@ -561,13 +570,18 @@ class EventSourcedStateRepository:
     # ------------------------------------------------------------------
 
     async def rebuild_projection(self, actor_id: str) -> KgProjectionFake:
-        """Replay TxLog.for_actor(actor_id) into a fresh KgProjectionFake.
+        """Replay the ENTIRE TxLog into a fresh KgProjectionFake and return it.
 
-        The returned projection reflects the same state as the live projection
-        (for the actor's entities).  Callers use it for inspection only.
+        Replays all entries in append order regardless of actor_id, then returns
+        the fresh projection.  This is true event-sourcing: cross-entity writes
+        (e.g. item transfers logged under item_uuid, not player_uuid) are included.
+
+        The ``actor_id`` parameter is retained for API compatibility and is used
+        only as the docstring label — the returned projection contains the full
+        reconstructed world state, which the caller can then inspect for any uuid.
         """
         fresh: KgProjectionFake = KgProjectionFake()
-        entries = self._tx_log.for_actor(actor_id)
+        entries = self._tx_log.all()
         for entry in entries:
             for delta in entry.deltas:
                 await self._apply_delta(fresh, delta)

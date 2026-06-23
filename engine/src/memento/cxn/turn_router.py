@@ -215,7 +215,9 @@ class TurnRouter:
                 )
             finally:
                 if self._repo is not None and hasattr(self._repo, "set_activation"):
-                    self._repo.set_activation("", "")
+                    # Reset to "genesis" sentinel (not "") so any between-turn writes
+                    # are attributed to genesis rather than stamped with an empty string.
+                    self._repo.set_activation("genesis", "")
 
         # ── Step 3: resolve role fillers → UUIDs ─────────────────────────────
         # EntityResolver.resolve returns dict[str, str] (clean roles) OR
@@ -295,7 +297,9 @@ class TurnRouter:
             )
         finally:
             if self._repo is not None and hasattr(self._repo, "set_activation"):
-                self._repo.set_activation("", "")
+                # Reset to "genesis" sentinel (not "") so any between-turn writes
+                # are attributed to genesis rather than stamped with an empty string.
+                self._repo.set_activation("genesis", "")
 
         outcome = TurnOutcome(
             status="executed",

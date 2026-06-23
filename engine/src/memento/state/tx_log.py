@@ -22,6 +22,7 @@ defined here.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Protocol
@@ -92,6 +93,9 @@ class TxLog(Protocol):
     ``for_actor`` returns entries in append order (oldest first).  The
     EffectExecutor (C4) and EventSourcedStateRepository (Task 3) are the only
     callers outside this package.
+
+    ``all`` returns every entry in append order regardless of actor_id.
+    Used by rebuild_projection to replay the full world log.
     """
 
     def append(self, entry: TxEntry) -> None:
@@ -100,6 +104,10 @@ class TxLog(Protocol):
 
     def for_actor(self, actor_id: str) -> list[TxEntry]:
         """Return all transaction records for an actor, in append order."""
+        ...
+
+    def all(self) -> list[TxEntry]:
+        """Return every transaction record in append order."""
         ...
 
 
@@ -140,12 +148,21 @@ class InMemoryTxLog:
         self._entries: list[TxEntry] = []
 
     def append(self, entry: TxEntry) -> None:
-        """Append a transaction record."""
-        self._entries.append(entry)
+        """Append a deepcopy of the entry to make the log immutable at write time.
+
+        Deepcopying here ensures that delta dicts (which may contain nested
+        mutable objects such as attrs dicts) cannot be mutated retroactively
+        by callers that hold a reference to the same underlying object.
+        """
+        self._entries.append(copy.deepcopy(entry))
 
     def for_actor(self, actor_id: str) -> list[TxEntry]:
         """Return all entries for actor_id in insertion order."""
         return [e for e in self._entries if e.actor_id == actor_id]
+
+    def all(self) -> list[TxEntry]:
+        """Return every entry in append order regardless of actor_id."""
+        return list(self._entries)
 
 
 class InMemoryActivationLog:
