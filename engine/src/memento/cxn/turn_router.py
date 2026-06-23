@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import re
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from memento.cxn.constructicon import ConstructiconRegistry
 from memento.cxn.entity_resolver import EntityResolver
@@ -31,12 +32,14 @@ from memento.cxn.types import (
     SemanticFrame,
     TurnOutcome,
 )
+from memento.state.tx_log import ActivationRecord
 
 if TYPE_CHECKING:
     from memento.cxn.kernel_client import ComprehensionClient
     from memento.opening.describe import DescribeClient
     from memento.opening.director import SceneDirector
     from memento.state.repository import StateRepository
+    from memento.state.tx_log import ActivationLog
 
 _ARTICLE_RE = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
 
@@ -73,6 +76,7 @@ class TurnRouter:
     _director: "SceneDirector | None"
     _describe: "DescribeClient | None"
     _repo: "StateRepository | None"
+    _activation_log: "ActivationLog | None"
 
     def __init__(
         self,
@@ -84,6 +88,7 @@ class TurnRouter:
         director: "SceneDirector | None" = None,
         describe_client: "DescribeClient | None" = None,
         repo: "StateRepository | None" = None,
+        activation_log: "ActivationLog | None" = None,
     ) -> None:
         self._comprehension = comprehension
         self._constructicon = constructicon
@@ -93,6 +98,7 @@ class TurnRouter:
         self._director = director
         self._describe = describe_client
         self._repo = repo
+        self._activation_log = activation_log
 
     async def _resolve_exit(self, actor_id: str, filler: str) -> str | None:
         """Resolve a direction filler to a target_uuid via the actor's room exits.
@@ -130,6 +136,10 @@ class TurnRouter:
                                to surface this — see gateway mm_act handler).
             ComprehendError:   if the kernel returns a non-200 response.
         """
+        # ── Per-turn identifiers ─────────────────────────────────────────────
+        activation_id = uuid4().hex
+        message_id = uuid4().hex
+
         # ── Step 1: comprehend ───────────────────────────────────────────────
         frame = await self._comprehension.comprehend(utterance, actor_id)
 
@@ -166,26 +176,46 @@ class TurnRouter:
                 )
             from memento.opening.describe import DescribeRequest
 
-            director = self._director
-            fact = director.next_to_surface()
-            if fact is not None:
-                director.mark_surfaced(fact.key)
-                await director.apply_surface_beats(fact)
-            req = DescribeRequest(
-                room_name=director.room_name,
-                room_description=director.room_description,
-                focus=fact,
-                surfaced=(),
-                candidates=director.candidates(),
-            )
-            result = await self._describe.describe(req)
-            return TurnOutcome(
-                status="narrated",
-                update=None,
-                message=None,
-                reason=None,
-                narration=result.prose,
-            )
+            # Set activation context so any state writes (die beat) are stamped.
+            if self._repo is not None and hasattr(self._repo, "set_activation"):
+                self._repo.set_activation(activation_id, cxn["mcp_tool_name"])
+            try:
+                # Write activation record before any state writes.
+                if self._activation_log is not None:
+                    self._activation_log.append(
+                        ActivationRecord(
+                            activation_id=activation_id,
+                            message_id=message_id,
+                            actor_id=actor_id,
+                            cxn_id=cxn["name"],
+                            tool=cxn["mcp_tool_name"],
+                            roles=[],
+                        )
+                    )
+
+                director = self._director
+                fact = director.next_to_surface()
+                if fact is not None:
+                    director.mark_surfaced(fact.key)
+                    await director.apply_surface_beats(fact)
+                req = DescribeRequest(
+                    room_name=director.room_name,
+                    room_description=director.room_description,
+                    focus=fact,
+                    surfaced=(),
+                    candidates=director.candidates(),
+                )
+                result = await self._describe.describe(req)
+                return TurnOutcome(
+                    status="narrated",
+                    update=None,
+                    message=None,
+                    reason=None,
+                    narration=result.prose,
+                )
+            finally:
+                if self._repo is not None and hasattr(self._repo, "set_activation"):
+                    self._repo.set_activation("", "")
 
         # ── Step 3: resolve role fillers → UUIDs ─────────────────────────────
         # EntityResolver.resolve returns dict[str, str] (clean roles) OR
@@ -240,12 +270,32 @@ class TurnRouter:
             )
 
         # ── Step 6: execute ───────────────────────────────────────────────────
-        # ConstructionError propagates — the gateway handler catches it.
-        update = await self._executor.execute(
-            matched["cxn"],
-            caller_id=actor_id,
-            bindings=matched["bound_roles"],
-        )
+        # Set activation context so all repo writes in this turn are stamped.
+        if self._repo is not None and hasattr(self._repo, "set_activation"):
+            self._repo.set_activation(activation_id, matched["cxn"]["mcp_tool_name"])
+        try:
+            # Write activation record before any state writes.
+            if self._activation_log is not None:
+                self._activation_log.append(
+                    ActivationRecord(
+                        activation_id=activation_id,
+                        message_id=message_id,
+                        actor_id=actor_id,
+                        cxn_id=matched["cxn"]["name"],
+                        tool=matched["cxn"]["mcp_tool_name"],
+                        roles=list(matched["bound_roles"].keys()),
+                    )
+                )
+
+            # ConstructionError propagates — the gateway handler catches it.
+            update = await self._executor.execute(
+                matched["cxn"],
+                caller_id=actor_id,
+                bindings=matched["bound_roles"],
+            )
+        finally:
+            if self._repo is not None and hasattr(self._repo, "set_activation"):
+                self._repo.set_activation("", "")
 
         outcome = TurnOutcome(
             status="executed",
