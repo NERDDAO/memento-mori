@@ -128,6 +128,12 @@ async def test_start_returns_player_id_and_room(app_transport):
     assert "player_id" in data
     assert data["player_id"] == _FIXED_PLAYER_UUID
 
+    # Epigraph (the game's opening quote) is surfaced at start
+    from memento.opening.deep_roads import OPENING_EPIGRAPH
+
+    assert data["epigraph"] == OPENING_EPIGRAPH
+    assert "time of monsters" in data["epigraph"]
+
     # Registry should hold the router now
     import gateway.routes.opening as opening_mod
     assert _FIXED_PLAYER_UUID in opening_mod.opening_registry

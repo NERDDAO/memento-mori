@@ -71,6 +71,7 @@ class StartOpeningRequest(BaseModel):
 
 class StartOpeningResponse(BaseModel):
     player_id: str
+    epigraph: str
     location_id: str
     location_name: str
     description: str
@@ -230,9 +231,12 @@ async def start_opening(req: StartOpeningRequest) -> StartOpeningResponse:
     opening_registry[player_uuid] = turn_router
 
     # -- 8. Return room manifest -----------------------------------------------
+    from memento.opening.deep_roads import OPENING_EPIGRAPH
+
     manifest = await repo.room_manifest(LOC_DEEP_ROADS)
     return StartOpeningResponse(
         player_id=player_uuid,
+        epigraph=OPENING_EPIGRAPH,
         location_id=manifest.location_id,
         location_name=manifest.name,
         description=manifest.description,

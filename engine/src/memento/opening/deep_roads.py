@@ -23,6 +23,12 @@ LOC_DEEP_ROADS: str = "507f1f77bcf86cd799439011"
 NEXT_ROOM: str = "507f1f77bcf86cd799439012"
 UUID_DYING_ADVENTURER: str = "507f1f77bcf86cd799439013"
 
+# Epigraph shown at the very start of the opening arc (after Gramsci).
+OPENING_EPIGRAPH: str = (
+    "The old world is dying. The new world struggles to be born. "
+    "This is the time of monsters."
+)
+
 
 # ---------------------------------------------------------------------------
 # Seed factory
