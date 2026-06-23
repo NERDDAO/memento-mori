@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
     round_manager = RoundManager(window_seconds=20)
     # Matrix bridge connects on startup if env vars are set
     import os
+
     homeserver = os.getenv("MATRIX_HOMESERVER", "")
     token = os.getenv("MATRIX_BOT_TOKEN", "")
     if homeserver and token:
@@ -51,16 +52,27 @@ async def lifespan(app: FastAPI):
     # app.mount() appends after the catch-all StaticFiles("") mount, which
     # would swallow all requests before /mcp is checked. Swap the last two
     # routes so /mcp is tried before the catch-all.
-    app.router.routes[-2], app.router.routes[-1] = app.router.routes[-1], app.router.routes[-2]
+    app.router.routes[-2], app.router.routes[-1] = (
+        app.router.routes[-1],
+        app.router.routes[-2],
+    )
     logger.info("mcp_server: mounted at /mcp")
+
+    # Expose the shared cxn repo + executor on app.state so the HTTP
+    # tool-exec route (POST /v1/tools/{tool}) can dispatch through the SAME
+    # EffectExecutor instance as the MCP handlers — no divergent fork (G1).
+    app.state.cxn_repo = mcp_asgi.cxn_repo  # type: ignore[attr-defined]
+    app.state.cxn_executor = mcp_asgi.cxn_executor  # type: ignore[attr-defined]
 
     # Seed NPC registry from MongoDB + world.json
     from gateway.npc_registry import seed_from_db, register_npc, update_npc_location
+
     npc_count = seed_from_db()
     logger.info("NPC registry seeded: %d agents", npc_count)
 
     # Wire engine → gateway registry hooks (breaks the circular import)
     from memento.agent_controller import set_registry_hooks
+
     set_registry_hooks(on_register=register_npc, on_move=update_npc_location)
 
     # Seed ontology types on Delve for this bonfire
@@ -94,7 +106,12 @@ def _seed_ontology() -> None:
             for fname, fprop in properties.items():
                 ftype = fprop.get("type", "string")
                 # Map JSON Schema types to OntologyField types
-                type_map = {"string": "str", "integer": "int", "number": "float", "boolean": "bool"}
+                type_map = {
+                    "string": "str",
+                    "integer": "int",
+                    "number": "float",
+                    "boolean": "bool",
+                }
                 if ftype == "array" and fprop.get("items", {}).get("type") == "string":
                     resolved_type = "list[str]"
                 else:
@@ -104,12 +121,14 @@ def _seed_ontology() -> None:
                     "description": fprop.get("description", ""),
                     "required": fname in required_fields,
                 }
-            entity_labels.append({
-                "name": name,
-                "description": model.__doc__ or "",
-                "labels": [name],
-                "fields": fields,
-            })
+            entity_labels.append(
+                {
+                    "name": name,
+                    "description": model.__doc__ or "",
+                    "labels": [name],
+                    "fields": fields,
+                }
+            )
 
         client.ontology.set_extraction_types(entity_labels)
         logger.info("Seeded ontology types: %s", [l["name"] for l in entity_labels])
@@ -140,7 +159,20 @@ async def get_room_id(location_name: str):
 
 
 # Include routes
-from gateway.routes import action, session, state, entity, chain, inventory, codex, chronicle, admin, player_signup
+from gateway.routes import (
+    action,
+    session,
+    state,
+    entity,
+    chain,
+    inventory,
+    codex,
+    chronicle,
+    admin,
+    player_signup,
+    tools_http,
+)
+
 app.include_router(action.router, prefix="/api")
 app.include_router(session.router, prefix="/api")
 app.include_router(state.router, prefix="/api")
@@ -151,9 +183,11 @@ app.include_router(codex.router, prefix="/api")
 app.include_router(chronicle.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(player_signup.router, prefix="/api")
+app.include_router(tools_http.router)
 
 # WebSocket endpoint
 from fastapi import WebSocket, WebSocketDisconnect
+
 
 @app.websocket("/ws/{player_id}")
 async def websocket_endpoint(websocket: WebSocket, player_id: str):
@@ -168,7 +202,9 @@ async def websocket_endpoint(websocket: WebSocket, player_id: str):
     except WebSocketDisconnect:
         await ws_hub.disconnect(player_id)
     except Exception:
-        logger.warning("WebSocket error for %s, disconnecting", player_id, exc_info=True)
+        logger.warning(
+            "WebSocket error for %s, disconnecting", player_id, exc_info=True
+        )
         await ws_hub.disconnect(player_id)
 
 

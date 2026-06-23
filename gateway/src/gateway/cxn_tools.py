@@ -62,13 +62,16 @@ def register_cxn_tools(
     repo: "StateRepository",
     mirror: "ChainMirror",
     memory: "MemoryClient",
-) -> None:
+) -> "EffectExecutor":
     """Register the construction MCP tools on ``mcp``.
 
     One ``@mcp.tool`` is registered per cxn in ``CONSTRUCTION_REGISTRY``,
     under its ``mcp_tool_name`` with the exact §7.1 UUID parameters. All
     handlers close over a single shared ``EffectExecutor`` built from the
     injected ports (``repo`` / ``memory`` / ``mirror``).
+
+    Returns the shared ``EffectExecutor`` so callers can wire the HTTP
+    tool-exec route to the SAME executor instance (G1 — no divergent fork).
     """
     # Late import so this module imports cleanly even if the gateway auth
     # surface (FastMCP / JWT middleware) is unavailable in a bare unit test.
@@ -156,6 +159,8 @@ def register_cxn_tools(
             bound_roles,
             summary=f"took {patient[:8]}...",
         )
+
+    return executor
 
 
 def register_mm_act(
