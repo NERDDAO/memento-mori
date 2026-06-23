@@ -2,8 +2,10 @@
 
 Contract
 --------
-T1  POST /api/opening/start returns 200 with player_id and seeded room info;
-    opening_registry holds a TurnRouter for that player_id.
+T1  POST /api/opening/start returns 200 with a valid player_id and seeded room
+    info; opening_registry holds a TurnRouter for that player_id.
+    (player_id is now route-generated uuid4.hex — C3b: no double-creation via
+    create_player.)
 T2  POST /api/opening/act with text canned to LOOK → 200, status=="narrated",
     non-empty narration.
 T3  POST /api/opening/act with off-script text → 200, status=="clarify"
@@ -14,6 +16,9 @@ T5  POST /api/opening/act with unknown player_id → 404.
 
 All builder hooks are monkeypatched to fakes so the test is pure in-process:
 no network, no KG, no LLM.
+
+Note: create_player is still patched (the hook function still exists on the
+module) but /start no longer calls it — player_id is generated in the route.
 """
 
 from __future__ import annotations
@@ -25,6 +30,8 @@ import httpx
 # Fake / stub helpers
 # ---------------------------------------------------------------------------
 
+# Kept for reference (the monkeypatch fixture still patches the hook in case
+# other call-sites or future tests need it), but /start no longer calls it.
 _FIXED_PLAYER_UUID = "deadbeef00000000000000aa"
 
 
@@ -68,6 +75,8 @@ def _make_fake_projection() -> object:
 async def _fake_create_player(
     player_name: str, wallet_address: str, archetype: str
 ) -> str:
+    # Not called by /start (C3b) but kept so the monkeypatch remains valid
+    # in case other code or future tests invoke it directly.
     return _FIXED_PLAYER_UUID
 
 
@@ -126,7 +135,11 @@ async def test_start_returns_player_id_and_room(app_transport):
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert "player_id" in data
-    assert data["player_id"] == _FIXED_PLAYER_UUID
+    # player_id is route-generated (uuid4.hex) — check it is a non-empty string.
+    # /start no longer calls create_player, so the old fixed stub uuid is gone.
+    player_id = data["player_id"]
+    assert player_id, "player_id must be non-empty"
+    assert isinstance(player_id, str)
 
     # Epigraph (the game's opening quote) is surfaced at start
     from memento.opening.deep_roads import OPENING_EPIGRAPH
@@ -134,9 +147,9 @@ async def test_start_returns_player_id_and_room(app_transport):
     assert data["epigraph"] == OPENING_EPIGRAPH
     assert "time of monsters" in data["epigraph"]
 
-    # Registry should hold the router now
+    # Registry should hold the router for the returned player_id
     import gateway.routes.opening as opening_mod
-    assert _FIXED_PLAYER_UUID in opening_mod.opening_registry
+    assert player_id in opening_mod.opening_registry
 
 
 # ---------------------------------------------------------------------------
@@ -147,8 +160,8 @@ async def test_start_returns_player_id_and_room(app_transport):
 @pytest.mark.asyncio
 async def test_act_look_returns_narrated(app_transport):
     async with make_client(app_transport) as c:
-        # Start first
-        await c.post(
+        # Start first and capture the generated player_id
+        start_resp = await c.post(
             "/api/opening/start",
             json={
                 "player_name": "Tester",
@@ -156,9 +169,12 @@ async def test_act_look_returns_narrated(app_transport):
                 "archetype": "",
             },
         )
+        assert start_resp.status_code == 200, start_resp.text
+        player_id = start_resp.json()["player_id"]
+
         resp = await c.post(
             "/api/opening/act",
-            json={"player_id": _FIXED_PLAYER_UUID, "text": "look around"},
+            json={"player_id": player_id, "text": "look around"},
         )
     assert resp.status_code == 200, resp.text
     data = resp.json()
@@ -174,7 +190,7 @@ async def test_act_look_returns_narrated(app_transport):
 @pytest.mark.asyncio
 async def test_act_offscript_returns_clarify(app_transport):
     async with make_client(app_transport) as c:
-        await c.post(
+        start_resp = await c.post(
             "/api/opening/start",
             json={
                 "player_name": "Tester",
@@ -182,9 +198,12 @@ async def test_act_offscript_returns_clarify(app_transport):
                 "archetype": "",
             },
         )
+        assert start_resp.status_code == 200, start_resp.text
+        player_id = start_resp.json()["player_id"]
+
         resp = await c.post(
             "/api/opening/act",
-            json={"player_id": _FIXED_PLAYER_UUID, "text": "xyzzy no match"},
+            json={"player_id": player_id, "text": "xyzzy no match"},
         )
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "clarify"
@@ -198,7 +217,7 @@ async def test_act_offscript_returns_clarify(app_transport):
 @pytest.mark.asyncio
 async def test_act_winning_move_drops_registry(app_transport):
     async with make_client(app_transport) as c:
-        await c.post(
+        start_resp = await c.post(
             "/api/opening/start",
             json={
                 "player_name": "Tester",
@@ -206,29 +225,32 @@ async def test_act_winning_move_drops_registry(app_transport):
                 "archetype": "",
             },
         )
+        assert start_resp.status_code == 200, start_resp.text
+        player_id = start_resp.json()["player_id"]
+
         # We must look first so the dead-adventurer beat fires (FORCED_FIRST
         # beat blocks subsequent turns until surfaced).
         await c.post(
             "/api/opening/act",
-            json={"player_id": _FIXED_PLAYER_UUID, "text": "look around"},
+            json={"player_id": player_id, "text": "look around"},
         )
         # Now cross the exit (the player is seeded at LOC_DEEP_ROADS, NEXT_ROOM
         # is seeded by start).
         go = await c.post(
             "/api/opening/act",
-            json={"player_id": _FIXED_PLAYER_UUID, "text": "go on"},
+            json={"player_id": player_id, "text": "go on"},
         )
         assert go.status_code == 200, go.text
         assert go.json().get("won") is True, f"Expected won=True, got: {go.json()}"
 
         # Registry entry must be gone
         import gateway.routes.opening as opening_mod
-        assert _FIXED_PLAYER_UUID not in opening_mod.opening_registry
+        assert player_id not in opening_mod.opening_registry
 
         # Subsequent /act → 404 (same client, still open)
         second = await c.post(
             "/api/opening/act",
-            json={"player_id": _FIXED_PLAYER_UUID, "text": "go on"},
+            json={"player_id": player_id, "text": "go on"},
         )
         assert second.status_code == 404
 

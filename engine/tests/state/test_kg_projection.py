@@ -14,14 +14,17 @@ KgProjectionFake behavioural tests:
   - fake honours doc["uuid"] if present on create (stable test fixture UUIDs)
 
 KgProjection (real) tests with a stubbed kg client:
-  - create calls kg.create_entity with mapped labels+attributes
-  - create returns the server-assigned uuid
-  - get calls kg.get_entity_or_none and reconstructs an EntityDoc
-  - get returns None when kg returns None
-  - update calls kg.update_entity with resent name+labels+summary
-  - update calls kg.get_edges and update_edge when location_uuid changes
-  - entities_at_location queries kg.get_edges with LOCATED_IN/incoming
-  - items_at_location returns only owner-less items
+  - C3a: create stores engine→kg mapping; get(engine_uuid) works when KG uses different uuid
+  - C3a: entities_at_location returns docs with engine uuids (not KG uuids)
+  - C3a: update uses KG uuid internally after create
+  - create calls kg.create_entity with mapped labels+attributes+engine_uuid
+  - create returns the engine uuid (not server-assigned uuid)
+  - get after create reconstructs EntityDoc with engine uuid
+  - get returns None when engine uuid not in indirection map
+  - update calls kg.update_entity with KG uuid resending name+labels+summary
+  - update calls kg.get_edges and update_edge when location_uuid changes (uses KG uuids)
+  - entities_at_location queries kg.get_edges with LOCATED_IN/incoming (KG location uuid)
+  - items_at_location returns only owner-less items (engine uuids)
 """
 from __future__ import annotations
 
@@ -45,6 +48,10 @@ ENT_2 = "ent-uuid-0002"
 ITEM_1 = "item-uuid-0001"
 ITEM_2 = "item-uuid-0002"
 SERVER_UUID = "server-assigned-uuid-9999"
+
+# UUID constants used across real-KG tests
+ENGINE_UUID = ENT_1          # the engine's stable uuid
+ITEM_ENGINE_UUID = ITEM_1    # engine uuid for an item
 
 
 def _entity(uuid: str = ENT_1, loc: str | None = LOC_A) -> EntityDoc:
@@ -259,32 +266,197 @@ def _server_entity_dict(
     labels: list[str] | None = None,
     attributes: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Simulate what the server returns from get_entity_or_none."""
+    """Simulate what the server returns from get_entity_or_none.
+
+    The attributes dict includes engine_uuid so _from_kg_entity can
+    reconstruct the engine-side uuid after the indirection map resolves.
+    """
+    attrs: dict[str, Any] = attributes if attributes is not None else {
+        "_kind": "character",
+        "_location_uuid": LOC_A,
+        "_is_dead": False,
+        "hp": 20,
+        "max_hp": 20,
+        "inventory": [],
+    }
+    # Inject engine_uuid unless the caller already provided it
+    if "engine_uuid" not in attrs:
+        attrs = dict(attrs)
+        attrs["engine_uuid"] = ENGINE_UUID
     return {
         "uuid": uuid,
         "name": name,
         "labels": labels or ["Character", "NPC"],
         "summary": "Test NPC summary",
-        "attributes": attributes or {
+        "attributes": attrs,
+    }
+
+
+# ---------------------------------------------------------------------------
+# C3a regression guard — UUID indirection: KG assigns different uuid
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_real_indirection_get_by_engine_uuid_after_server_assigns_different_uuid() -> None:
+    """C3a: after create, get(engine_uuid) returns the doc even though the KG
+    stored a different (server-assigned) uuid.
+
+    The mock's create_entity returns SERVER_UUID != ENGINE_UUID.
+    After create, the indirection map must translate engine→kg so that
+    get(engine_uuid) fetches the kg entity by kg_uuid and returns a doc
+    whose uuid == engine_uuid.
+    """
+    server_entity = _server_entity_dict(
+        uuid=SERVER_UUID,
+        attributes={
             "_kind": "character",
             "_location_uuid": LOC_A,
             "_is_dead": False,
             "hp": 20,
             "max_hp": 20,
             "inventory": [],
+            "engine_uuid": ENGINE_UUID,
         },
+    )
+    kg = _make_kg_stub(
+        create_entity_return=SERVER_UUID,
+        get_entity_return=server_entity,
+    )
+    proj = KgProjection(kg=kg)
+    doc = _entity(uuid=ENGINE_UUID, loc=LOC_A)
+
+    # create returns the engine uuid (not the server uuid)
+    returned_uuid = await proj.create(doc)
+    assert returned_uuid == ENGINE_UUID, (
+        f"create must return engine uuid; got {returned_uuid!r}"
+    )
+
+    # get by engine uuid must work even though KG has a different uuid
+    result = await proj.get(ENGINE_UUID)
+    assert result is not None, "get(engine_uuid) returned None — indirection broken"
+    assert result["uuid"] == ENGINE_UUID, (
+        f"returned doc uuid must be engine uuid; got {result['uuid']!r}"
+    )
+    assert result["name"] == "Test NPC"
+    assert result["kind"] == "character"
+    assert result["location_uuid"] == LOC_A
+    assert result["is_dead"] is False
+
+    # The KG was called with the server uuid, not the engine uuid
+    kg.get_entity_or_none.assert_called_once_with(SERVER_UUID)
+
+
+@pytest.mark.asyncio
+async def test_real_indirection_entities_at_location_returns_engine_uuids() -> None:
+    """C3a: entities_at_location must return docs with ENGINE uuids, not KG uuids.
+
+    The edge's source.uuid is the KG uuid (SERVER_UUID). The entity's
+    engine_uuid attribute must be used to reconstruct the engine uuid.
+    """
+    server_entity = _server_entity_dict(
+        uuid=SERVER_UUID,
+        attributes={
+            "_kind": "character",
+            "_location_uuid": LOC_A,
+            "_is_dead": False,
+            "hp": 20,
+            "inventory": [],
+            "engine_uuid": ENGINE_UUID,
+        },
+    )
+    # Edges reference KG uuids
+    loc_server_a = "loc-server-uuid-aaaa"
+    incoming_edge = {
+        "uuid": "edge-001",
+        "name": "LOCATED_IN",
+        "source": {"uuid": SERVER_UUID},  # KG uuid in the edge
+        "target": {"uuid": loc_server_a},
+        "expired_at": None,
     }
+
+    kg = MagicMock()
+    kg.create_edge.return_value = {"uuid": "edge-uuid-0001"}
+    kg.update_entity.return_value = {}
+    kg.get_edges.return_value = [incoming_edge]
+    kg.get_entity_or_none.return_value = server_entity
+
+    proj = KgProjection(kg=kg)
+
+    # Seed location indirection
+    kg.create_entity.return_value = loc_server_a
+    await proj.create({
+        "uuid": LOC_A,
+        "name": "The Hall",
+        "kind": "location",
+        "labels": ["Location"],
+        "location_uuid": None,
+        "attrs": {},
+        "is_dead": False,
+    })
+    # Seed entity indirection
+    kg.create_entity.return_value = SERVER_UUID
+    await proj.create(_entity(uuid=ENGINE_UUID, loc=LOC_A))
+    kg.get_entity_or_none.return_value = server_entity
+
+    results = await proj.entities_at_location(LOC_A)
+    assert len(results) == 1, f"Expected 1 entity, got {len(results)}: {results}"
+    assert results[0]["uuid"] == ENGINE_UUID, (
+        f"entity uuid must be engine uuid; got {results[0]['uuid']!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_real_indirection_update_uses_kg_uuid() -> None:
+    """C3a: update after create uses the KG uuid for the update_entity call."""
+    server_entity = _server_entity_dict(
+        uuid=SERVER_UUID,
+        attributes={
+            "_kind": "character",
+            "_location_uuid": LOC_A,
+            "_is_dead": False,
+            "hp": 20,
+            "inventory": [],
+            "engine_uuid": ENGINE_UUID,
+        },
+    )
+    kg = _make_kg_stub(
+        create_entity_return=SERVER_UUID,
+        get_entity_return=server_entity,
+    )
+    proj = KgProjection(kg=kg)
+    doc = _entity(uuid=ENGINE_UUID, loc=LOC_A)
+    await proj.create(doc)
+
+    # Update with a field change — same location so no edge transition
+    updated = dict(doc)
+    updated["attrs"] = {**doc["attrs"], "hp": 5}
+    await proj.update(updated)  # type: ignore[arg-type]
+
+    kg.update_entity.assert_called_once()
+    update_args, update_kwargs = kg.update_entity.call_args
+    # The FIRST positional arg to update_entity must be the KG (server) uuid
+    called_uuid = update_args[0] if update_args else update_kwargs.get("uuid")
+    assert called_uuid == SERVER_UUID, (
+        f"update_entity must be called with KG uuid; got {called_uuid!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Original real-KG stub tests (updated for indirection semantics)
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_real_create_calls_kg_create_entity() -> None:
-    """create calls kg.create_entity with mapped labels + attributes."""
+    """create calls kg.create_entity with mapped labels + attributes + engine_uuid."""
     kg = _make_kg_stub()
     proj = KgProjection(kg=kg)
     doc = _entity()
     returned_uuid = await proj.create(doc)
 
-    assert returned_uuid == SERVER_UUID
+    # After indirection: create returns the ENGINE uuid, not the server uuid
+    assert returned_uuid == doc["uuid"]
     kg.create_entity.assert_called_once()
     call_kwargs = kg.create_entity.call_args
     # name is positional or kw
@@ -307,28 +479,38 @@ async def test_real_create_calls_kg_create_entity() -> None:
     assert passed_attrs["_kind"] == "character"
     assert passed_attrs["_location_uuid"] == LOC_A
     assert passed_attrs["_is_dead"] is False
+    # engine_uuid must be embedded so KG entity carries it
+    assert passed_attrs["engine_uuid"] == doc["uuid"]
 
 
 @pytest.mark.asyncio
-async def test_real_create_returns_server_uuid() -> None:
-    """create returns whatever uuid the server assigns."""
+async def test_real_create_returns_engine_uuid() -> None:
+    """create returns the engine (doc) uuid, not the server-assigned uuid."""
     kg = _make_kg_stub(create_entity_return="server-uuid-XYZ")
     proj = KgProjection(kg=kg)
-    returned = await proj.create(_entity())
-    assert returned == "server-uuid-XYZ"
+    doc = _entity()
+    returned = await proj.create(doc)
+    assert returned == doc["uuid"], (
+        f"create must return engine uuid {doc['uuid']!r}, not server uuid; got {returned!r}"
+    )
 
 
 @pytest.mark.asyncio
 async def test_real_get_reconstructs_entity_doc() -> None:
-    """get calls get_entity_or_none and reconstructs an EntityDoc."""
+    """get(engine_uuid) after create reconstructs an EntityDoc with engine uuid."""
     server_response = _server_entity_dict()
-    kg = _make_kg_stub(get_entity_return=server_response)
+    kg = _make_kg_stub(create_entity_return=SERVER_UUID, get_entity_return=server_response)
     proj = KgProjection(kg=kg)
 
-    result = await proj.get(SERVER_UUID)
+    # Must create first to populate indirection map
+    doc = _entity(uuid=ENGINE_UUID, loc=LOC_A)
+    await proj.create(doc)
+
+    result = await proj.get(ENGINE_UUID)
+    # get_entity_or_none is called with the KG (server) uuid
     kg.get_entity_or_none.assert_called_once_with(SERVER_UUID)
     assert result is not None
-    assert result["uuid"] == SERVER_UUID
+    assert result["uuid"] == ENGINE_UUID  # reconstructed as engine uuid
     assert result["name"] == "Test NPC"
     assert result["kind"] == "character"
     assert result["location_uuid"] == LOC_A
@@ -337,31 +519,36 @@ async def test_real_get_reconstructs_entity_doc() -> None:
 
 @pytest.mark.asyncio
 async def test_real_get_returns_none_when_missing() -> None:
-    """get returns None when the KG returns None."""
+    """get returns None when the engine uuid is not in the indirection map."""
     kg = _make_kg_stub(get_entity_return=None)
     proj = KgProjection(kg=kg)
     result = await proj.get("no-such-uuid")
     assert result is None
+    # No KG call should be made for an unknown engine uuid
+    kg.get_entity_or_none.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_real_update_calls_update_entity_with_resent_fields() -> None:
-    """update calls kg.update_entity resending name + labels + summary."""
-    # Must get current entity first to know old location
+    """update calls kg.update_entity with the KG uuid and resent name+labels."""
     server_response = _server_entity_dict()
-    kg = _make_kg_stub(get_entity_return=server_response)
+    kg = _make_kg_stub(create_entity_return=SERVER_UUID, get_entity_return=server_response)
     proj = KgProjection(kg=kg)
 
-    doc = _entity()
-    doc["attrs"] = {**doc["attrs"], "hp": 10}
+    doc = _entity(uuid=ENGINE_UUID, loc=LOC_A)
+    await proj.create(doc)  # populate indirection map
 
-    await proj.update(doc)
+    updated = dict(doc)
+    updated["attrs"] = {**doc["attrs"], "hp": 10}
+    await proj.update(updated)  # type: ignore[arg-type]
 
     kg.update_entity.assert_called_once()
     args, kwargs = kg.update_entity.call_args
-    # uuid is first positional arg
+    # uuid is first positional arg — must be KG (server) uuid
     called_uuid = args[0] if args else kwargs.get("uuid")
-    assert called_uuid == doc["uuid"]
+    assert called_uuid == SERVER_UUID, (
+        f"update_entity must use KG uuid; got {called_uuid!r}"
+    )
     # name must be resent
     called_name = args[1] if len(args) > 1 else kwargs.get("name")
     assert called_name == doc["name"]
@@ -372,18 +559,23 @@ async def test_real_update_calls_update_entity_with_resent_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_real_update_creates_new_located_in_edge_on_location_change() -> None:
-    """update expires old LOCATED_IN edge and creates a new one when location changes."""
+    """update expires old LOCATED_IN edge and creates a new one when location changes.
+
+    Edge target uuid must be the KG uuid of the new location (not engine uuid).
+    """
+    loc_server_a = "loc-server-uuid-aaaa"
+    loc_server_b = "loc-server-uuid-bbbb"
     old_edge = {
         "uuid": "old-edge-uuid",
         "name": "LOCATED_IN",
-        "source": {"uuid": ENT_1},
-        "target": {"uuid": LOC_A},
+        "source": {"uuid": SERVER_UUID},  # KG source uuid in edge
+        "target": {"uuid": loc_server_a},
         "expired_at": None,
         "valid_at": None,
         "invalid_at": None,
     }
     server_response = _server_entity_dict(
-        uuid=ENT_1,
+        uuid=SERVER_UUID,
         attributes={
             "_kind": "character",
             "_location_uuid": LOC_A,
@@ -391,12 +583,48 @@ async def test_real_update_creates_new_located_in_edge_on_location_change() -> N
             "hp": 20,
             "max_hp": 20,
             "inventory": [],
+            "engine_uuid": ENGINE_UUID,
         },
     )
-    kg = _make_kg_stub(get_entity_return=server_response, get_edges_return=[old_edge])
+
+    kg = MagicMock()
+    kg.create_edge.return_value = {"uuid": "edge-uuid-0001"}
+    kg.update_edge.return_value = {}
+    kg.update_entity.return_value = {}
+    kg.get_edges.return_value = [old_edge]
+    kg.get_entity_or_none.return_value = server_response
+
     proj = KgProjection(kg=kg)
 
-    doc = _entity(uuid=ENT_1, loc=LOC_B)  # moved to LOC_B
+    # Seed location A indirection
+    kg.create_entity.return_value = loc_server_a
+    await proj.create({
+        "uuid": LOC_A,
+        "name": "Hall A",
+        "kind": "location",
+        "labels": ["Location"],
+        "location_uuid": None,
+        "attrs": {},
+        "is_dead": False,
+    })
+    # Seed location B indirection
+    kg.create_entity.return_value = loc_server_b
+    await proj.create({
+        "uuid": LOC_B,
+        "name": "Hall B",
+        "kind": "location",
+        "labels": ["Location"],
+        "location_uuid": None,
+        "attrs": {},
+        "is_dead": False,
+    })
+    # Seed entity indirection
+    kg.create_entity.return_value = SERVER_UUID
+    await proj.create(_entity(uuid=ENGINE_UUID, loc=LOC_A))
+    kg.get_entity_or_none.return_value = server_response
+
+    # Move entity to LOC_B (using engine uuid)
+    doc = _entity(uuid=ENGINE_UUID, loc=LOC_B)
     await proj.update(doc)
 
     # Old edge should be expired
@@ -405,63 +633,92 @@ async def test_real_update_creates_new_located_in_edge_on_location_change() -> N
     called_edge_uuid = update_args[0] if update_args else update_kwargs.get("edge_uuid")
     assert called_edge_uuid == "old-edge-uuid"
 
-    # New edge should be created
-    kg.create_edge.assert_called_once()
-    create_args, create_kwargs = kg.create_edge.call_args
-    all_create = {**create_kwargs}
-    if create_args:
-        all_create["source_uuid"] = create_args[0]
-        all_create["target_uuid"] = create_args[1] if len(create_args) > 1 else all_create.get("target_uuid")
-    assert all_create.get("target_uuid") == LOC_B
+    # New edge should be created; target must be KG uuid for LOC_B
+    kg.create_edge.assert_called()
+    last_create_args, last_create_kwargs = kg.create_edge.call_args
+    all_create: dict[str, Any] = {**last_create_kwargs}
+    if last_create_args:
+        all_create["source_uuid"] = last_create_args[0]
+        all_create["target_uuid"] = (
+            last_create_args[1] if len(last_create_args) > 1
+            else all_create.get("target_uuid")
+        )
+    assert all_create.get("target_uuid") == loc_server_b, (
+        f"new LOCATED_IN target must be KG uuid for LOC_B ({loc_server_b!r}); "
+        f"got {all_create.get('target_uuid')!r}"
+    )
 
 
 @pytest.mark.asyncio
 async def test_real_entities_at_location_queries_kg_edges() -> None:
-    """entities_at_location calls get_edges on location with incoming LOCATED_IN filter."""
-    loc_entity = {
-        "uuid": LOC_A,
-        "name": "The Hall",
-        "labels": ["Location"],
-        "summary": "A hall",
-        "attributes": {"_kind": "location", "_location_uuid": None, "_is_dead": False},
-    }
+    """entities_at_location calls get_edges with KG location uuid, returns engine uuids."""
+    loc_server_a = "loc-server-uuid-aaaa"
+    server_entity = _server_entity_dict(
+        uuid=SERVER_UUID,
+        attributes={
+            "_kind": "character",
+            "_location_uuid": LOC_A,
+            "_is_dead": False,
+            "hp": 20,
+            "inventory": [],
+            "engine_uuid": ENGINE_UUID,
+        },
+    )
     incoming_edge = {
         "uuid": "edge-001",
         "name": "LOCATED_IN",
-        "source": {"uuid": ENT_1},
-        "target": {"uuid": LOC_A},
+        "source": {"uuid": SERVER_UUID},  # KG uuid in edge
+        "target": {"uuid": loc_server_a},
         "expired_at": None,
     }
-    entity_response = _server_entity_dict(uuid=ENT_1)
 
     kg = MagicMock()
+    kg.create_edge.return_value = {"uuid": "edge-uuid-0001"}
+    kg.update_entity.return_value = {}
     kg.get_edges.return_value = [incoming_edge]
-    kg.get_entity_or_none.return_value = entity_response
+    kg.get_entity_or_none.return_value = server_entity
 
     proj = KgProjection(kg=kg)
+
+    # Seed location indirection
+    kg.create_entity.return_value = loc_server_a
+    await proj.create({
+        "uuid": LOC_A,
+        "name": "The Hall",
+        "kind": "location",
+        "labels": ["Location"],
+        "location_uuid": None,
+        "attrs": {},
+        "is_dead": False,
+    })
+    # Seed entity indirection
+    kg.create_entity.return_value = SERVER_UUID
+    await proj.create(_entity(uuid=ENGINE_UUID, loc=LOC_A))
+    kg.get_entity_or_none.return_value = server_entity
+
     results = await proj.entities_at_location(LOC_A)
 
-    kg.get_edges.assert_called_once()
+    # get_edges called with the KG uuid for LOC_A (not engine uuid)
+    kg.get_edges.assert_called()
     call_args, call_kwargs = kg.get_edges.call_args
     called_uuid = call_args[0] if call_args else call_kwargs.get("entity_uuid")
-    assert called_uuid == LOC_A
+    assert called_uuid == loc_server_a, (
+        f"get_edges must use KG uuid for location; got {called_uuid!r}"
+    )
 
     assert len(results) == 1
-    assert results[0]["uuid"] == ENT_1
+    assert results[0]["uuid"] == ENGINE_UUID
 
 
 @pytest.mark.asyncio
 async def test_real_items_at_location_returns_only_ownerless() -> None:
-    """items_at_location returns only items with no owner_uuid."""
-    floor_edge = {
-        "uuid": "edge-floor",
-        "name": "LOCATED_IN",
-        "source": {"uuid": ITEM_1},
-        "target": {"uuid": LOC_A},
-        "expired_at": None,
-    }
+    """items_at_location returns only items with no owner_uuid, using engine uuids."""
+    floor_server_uuid = "floor-server-uuid-0001"
+    owned_server_uuid = "owned-server-uuid-0002"
+    loc_server_uuid = "loc-server-uuid-aaaa"
+
     floor_item_response = {
-        "uuid": ITEM_1,
+        "uuid": floor_server_uuid,
         "name": "Iron Sword",
         "labels": ["Item", "Weapon"],
         "summary": "A sword",
@@ -470,36 +727,68 @@ async def test_real_items_at_location_returns_only_ownerless() -> None:
             "_location_uuid": LOC_A,
             "_owner_uuid": None,
             "damage": 5,
+            "engine_uuid": ITEM_ENGINE_UUID,
         },
     }
-    owned_edge = {
-        "uuid": "edge-owned",
-        "name": "LOCATED_IN",
-        "source": {"uuid": ITEM_2},
-        "target": {"uuid": LOC_A},
-        "expired_at": None,
-    }
     owned_item_response = {
-        "uuid": ITEM_2,
+        "uuid": owned_server_uuid,
         "name": "Shield",
         "labels": ["Item", "Armor"],
         "summary": "A shield",
         "attributes": {
             "_kind": "item",
             "_location_uuid": LOC_A,
-            "_owner_uuid": ENT_1,  # has an owner
+            "_owner_uuid": ENT_1,
             "defense": 3,
+            "engine_uuid": ITEM_2,
         },
+    }
+    floor_edge = {
+        "uuid": "edge-floor",
+        "name": "LOCATED_IN",
+        "source": {"uuid": floor_server_uuid},
+        "target": {"uuid": loc_server_uuid},
+        "expired_at": None,
+    }
+    owned_edge = {
+        "uuid": "edge-owned",
+        "name": "LOCATED_IN",
+        "source": {"uuid": owned_server_uuid},
+        "target": {"uuid": loc_server_uuid},
+        "expired_at": None,
     }
 
     kg = MagicMock()
+    kg.create_edge.return_value = {"uuid": "edge-uuid-0001"}
+    kg.update_entity.return_value = {}
     kg.get_edges.return_value = [floor_edge, owned_edge]
     kg.get_entity_or_none.side_effect = lambda uuid: (
-        floor_item_response if uuid == ITEM_1 else owned_item_response
+        floor_item_response if uuid == floor_server_uuid
+        else owned_item_response if uuid == owned_server_uuid
+        else None
     )
 
     proj = KgProjection(kg=kg)
+
+    # Seed location indirection
+    kg.create_entity.return_value = loc_server_uuid
+    await proj.create({
+        "uuid": LOC_A,
+        "name": "The Hall",
+        "kind": "location",
+        "labels": ["Location"],
+        "location_uuid": None,
+        "attrs": {},
+        "is_dead": False,
+    })
+    # Seed floor item indirection
+    kg.create_entity.return_value = floor_server_uuid
+    await proj.create(_item(uuid=ITEM_ENGINE_UUID, owner=None, loc=LOC_A))
+    # Seed owned item indirection
+    kg.create_entity.return_value = owned_server_uuid
+    await proj.create(_item(uuid=ITEM_2, owner=ENT_1, loc=LOC_A))
+
     results = await proj.items_at_location(LOC_A)
 
     assert len(results) == 1
-    assert results[0]["uuid"] == ITEM_1
+    assert results[0]["uuid"] == ITEM_ENGINE_UUID

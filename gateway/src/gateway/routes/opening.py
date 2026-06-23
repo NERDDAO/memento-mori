@@ -2,8 +2,8 @@
 
 Two endpoints:
 
-  POST /api/opening/start  — create a fresh player + EventSourcedStateRepository
-                             seeded with the Deep Roads opening room; register a
+  POST /api/opening/start  — create a fresh per-player opening-arc stack seeded
+                             with the Deep Roads opening room; register a
                              director-backed TurnRouter; return initial room state.
 
   POST /api/opening/act   — drive a turn through the registered TurnRouter;
@@ -30,16 +30,21 @@ via monkeypatch without touching mcp_server.py:
   create_player(player_name, wallet_address, archetype) -> str (player_uuid)
       Real default: SessionManager.create_player via asyncio.to_thread (same
       path as routes/session.py:create_session).
+      NOTE: create_player is defined for future full-onboarding integration
+      (user/archetype edges etc.) but is NOT called by /start.  The opening
+      arc creates the player identity exclusively via repo.seed_entity so that
+      there is exactly ONE player entity per session (C3b fix).  Full player
+      onboarding (wallet linkage, archetype edges) is a deferred follow-up.
 
 Tests replace these hooks with fakes (KgProjectionFake, FakeComprehensionClient,
-NoopChainMirror, NullMemoryClient, a stub returning a fixed uuid) so the suite
-runs with zero network I/O.
+NoopChainMirror, NullMemoryClient) so the suite runs with zero network I/O.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import uuid as _uuid_mod
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -147,18 +152,22 @@ async def start_opening(req: StartOpeningRequest) -> StartOpeningResponse:
     """Create a fresh per-player opening-arc stack and return initial room state.
 
     Steps:
-    1. Create a new player entity (or reuse from stub in tests).
+    1. Generate a stable player uuid for this opening session.
     2. Build EventSourcedStateRepository with InMemoryTxLog/ActivationLog,
        the DI-injected projection and mirror.
-    3. Seed the player entity at the opening room.
+    3. Seed the player entity at the opening room via the projection
+       (this is the ONE and ONLY player entity — C3b: no double-creation).
     4. Seed the destination room (so MOVE exit guard can resolve it).
     5. load_seed_room → SceneDirector.
     6. Build director-backed TurnRouter (canonical wiring from test_opening_arc.py).
     7. Register in opening_registry[player_uuid].
     8. Return room manifest.
+
+    Note: full player onboarding (user/archetype edges, wallet linkage) via the
+    create_player hook is a deferred follow-up.  The opening arc is self-contained.
     """
-    # -- 1. Create player --------------------------------------------------------
-    player_uuid = await create_player(req.player_name, req.wallet_address, req.archetype)
+    # -- 1. Generate player uuid (single identity — no separate KG create_player call) --
+    player_uuid = _uuid_mod.uuid4().hex
 
     # -- 2. Build per-player stack -----------------------------------------------
     from memento.state.tx_log import InMemoryActivationLog, InMemoryTxLog
