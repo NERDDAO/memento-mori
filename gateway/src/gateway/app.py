@@ -171,6 +171,7 @@ from gateway.routes import (
     admin,
     player_signup,
     tools_http,
+    opening,
 )
 
 app.include_router(action.router, prefix="/api")
@@ -184,6 +185,7 @@ app.include_router(chronicle.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(player_signup.router, prefix="/api")
 app.include_router(tools_http.router)
+app.include_router(opening.router, prefix="/api")
 
 # WebSocket endpoint
 from fastapi import WebSocket, WebSocketDisconnect
