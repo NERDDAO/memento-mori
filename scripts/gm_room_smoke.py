@@ -142,7 +142,6 @@ def _check(ok: bool, label: str, detail: str = "") -> None:
 def run_smoke() -> None:
     import asyncio  # noqa: PLC0415
     import httpx  # noqa: PLC0415
-    from unittest.mock import AsyncMock, patch  # noqa: PLC0415
 
     # ------------------------------------------------------------------
     # Reachability check — skip cleanly when stack is not up
@@ -170,7 +169,9 @@ def run_smoke() -> None:
 
     repo, npc_id, room_a_id, room_b_id = _seed_world()
     capturing = CapturingMemoryClient()
-    gateway_app = _build_gateway_app(repo, capturing)
+    # Built for parity with the deterministic test; the live loop drives the
+    # real running gateway over HTTP, so this local app is not wired in here.
+    _gateway_app = _build_gateway_app(repo, capturing)
 
     # ------------------------------------------------------------------
     # Build a per-self-JWT turn harness pointing at the REAL agent-runtime
@@ -196,8 +197,8 @@ def run_smoke() -> None:
             print("  open_room ...")
             open_resp = await driver.open_room(room_a_id)
             _check(
-                "source_episode_id" in open_resp or True,  # stub may omit field
-                "open_room",
+                "source_episode_id" in open_resp,
+                "open_room returned source_episode_id",
             )
 
             # The real agent-runtime room route will drive the ReAct loop which
@@ -217,7 +218,7 @@ def run_smoke() -> None:
 
             print("  close_room ...")
             close_resp = await driver.close_room(room_a_id)
-            _check("task_id" in close_resp or True, "close_room")
+            _check("task_id" in close_resp, "close_room returned task_id")
 
         finally:
             await ar_client.aclose()
