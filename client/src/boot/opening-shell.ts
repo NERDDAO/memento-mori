@@ -1,86 +1,123 @@
 // src/boot/opening-shell.ts
 /**
- * Opening-shell boot entry.
+ * Opening-shell boot entry — the new default build entry
+ * (bun build src/boot/opening-shell.ts). The old full-panel boot remains
+ * buildable via `bun run build:full`.
  *
  * Assembles the layered baseline:
- *   ProseLayer  → prose region  (typewriter, left pane)
- *   MapLayer    → kgmap region  (KG-backed room box, right pane)
- *   OpeningLoop → drives both layers via the gateway + KG read port
+ *   ProseLayer          → prose region (typewriter, left pane)
+ *   RoomViewportAdapter → kgmap region (the EXISTING roguelike room renderer +
+ *                         player movement, blitted in via uc.setOffscreen)
  *
- * This is the new default build entry (bun build src/boot/opening-shell.ts).
- * The old full-panel boot remains buildable via `bun run build:full`.
+ * The opening data path (/api/opening/{start,act} + /room/{uuid}/contents) is
+ * orchestrated inline: `look` (re)builds the room viewport client-side, since
+ * engine comprehension is currently degraded.
  */
 
 import { UnifiedCanvas } from "../canvas/unified-canvas";
 import { computeOpeningRegions } from "../canvas/region-manager";
 import { ProseLayer } from "../layers/prose-layer";
-import { MapLayer } from "../layers/map-layer";
-import { OpeningLoop, httpGateway } from "../state/opening-loop";
+import { RoomViewportAdapter } from "../layers/room-viewport";
+import { httpGateway, type ActResp } from "../state/opening-loop";
 import { httpKgReadPort } from "../state/kg-read-port";
 import { initInput } from "../panels/input";
-import { textRow } from "../panels/panel-utils";
-import { theme } from "../renderer/theme";
 
 document.addEventListener("DOMContentLoaded", () => {
   // 1. Mount the unified canvas with the opening two-pane layout.
   const tuiMain = document.getElementById("tui-main")!;
   const uc = new UnifiedCanvas(tuiMain, computeOpeningRegions);
 
-  // 2. Instantiate layers.
+  // 2. Prose (CharCell typewriter) + the room viewport (pixel canvas blitted in).
   const prose = new ProseLayer();
-  const map   = new MapLayer();
+  const viewport = new RoomViewportAdapter(() => {
+    uc.setOffscreen("kgmap", viewport.canvas);
+    uc.markDirty("kgmap");
+  });
 
-  // 3. redraw() — push both layers into their UC regions.
-  function redraw(): void {
-    // Prose pane
-    const proseRegion = uc.getRegion("prose");
-    if (proseRegion) {
-      uc.setRegionContent("prose", prose.render(proseRegion.cols, proseRegion.rows));
+  // 3. redrawProse() — push the prose layer into its region.
+  function redrawProse(): void {
+    const region = uc.getRegion("prose");
+    if (region) {
+      uc.setRegionContent("prose", prose.render(region.cols, region.rows));
       uc.markDirty("prose");
     }
+  }
 
-    // KG map pane
-    const kgmapRegion = uc.getRegion("kgmap");
-    if (kgmapRegion) {
-      uc.setRegionContent("kgmap", map.render(kgmapRegion.cols, kgmapRegion.rows));
-      uc.markDirty("kgmap");
+  // 4. Opening-arc state + orchestration.
+  let playerId = "";
+  let currentRoom = "";
+  let ended = false;
+
+  async function refreshContents(): Promise<void> {
+    const things = await httpKgReadPort.getRoomContents(playerId, currentRoom);
+    viewport.setContents(currentRoom, things); // self-blits via onChange
+  }
+
+  async function start(): Promise<void> {
+    const s = await httpGateway.start();
+    playerId = s.player_id;
+    currentRoom = s.location_id;
+    (window as unknown as { __mmPlayerId?: string }).__mmPlayerId = playerId;
+
+    prose.enqueue({ text: s.epigraph, kind: "epigraph" });
+    prose.enqueue({ text: s.location_name, kind: "location" });
+    prose.enqueue({ text: s.description, kind: "description" });
+    redrawProse();
+
+    viewport.visitRoom({ uuid: s.location_id, name: s.location_name }, s.exits);
+    await refreshContents();
+  }
+
+  // `look` rebuilds the room viewport client-side (comprehension is degraded).
+  async function look(): Promise<void> {
+    prose.enqueue({ text: "You look around.", kind: "narration" });
+    redrawProse();
+    await refreshContents();
+  }
+
+  async function act(text: string): Promise<void> {
+    let r: ActResp;
+    try {
+      r = await httpGateway.act(playerId, text);
+    } catch {
+      return;
     }
+    // clarify carries `message`; narrated/executed carry `narration`.
+    const line = r.narration ?? (r as { message?: string }).message ?? "";
+    if (line) prose.enqueue({ text: line, kind: r.status === "clarify" ? "prompt" : "narration" });
+    if (r.won) ended = true;
+    redrawProse();
+    if (!ended) await refreshContents();
   }
 
-  // 4. renderChips() — write clarify chips into the status row as a single line.
-  function renderChips(chips: string[]): void {
-    const statusRegion = uc.getRegion("status");
-    if (!statusRegion) return;
-    const line = chips.join("  ·  ");
-    uc.setRegionContent("status", {
-      cells: [textRow(line, theme.colors.primary, statusRegion.cols)],
-    });
-    uc.markDirty("status");
+  function submit(text: string): void {
+    if (ended) return;
+    if (/^\s*look\b/i.test(text)) { void look(); return; }
+    void act(text);
   }
 
-  // 5. Wire the opening loop.
-  const loop = new OpeningLoop(prose, map, httpGateway, httpKgReadPort, renderChips, redraw);
-
-  // 6. Wire the action input.
+  // 5. Wire the action input.
   const actionInput = document.getElementById("action-input") as HTMLInputElement;
-  initInput(actionInput, (t) => { void loop.submit(t); });
+  initInput(actionInput, submit);
 
-  // 7. Skip-on-keydown: any keypress outside the input box skips the typewriter.
-  //    Mirror the INPUT-focus guard from hotkeys.ts:15 — when #action-input has
-  //    focus (which it holds during normal play) this listener is a no-op, so
-  //    skip is reachable only when focus leaves the box.  Acceptable for Phase 1
-  //    since the 25 ms tick auto-reveals prose continuously.
+  // 6. WASD/hjkl/arrows move the player in the room (reuses the existing
+  //    movement system; its own INPUT-focus guard ignores keys while typing).
+  viewport.attachInput();
+
+  // 7. Skip-on-keydown: a keypress outside the input box skips the typewriter.
+  //    (Movement keys are handled by attachInput; this also skips, which is fine.)
   document.addEventListener("keydown", () => {
     if (document.activeElement?.tagName === "INPUT") return;
     prose.skip();
-    redraw();
+    redrawProse();
   });
 
-  // 8. Typewriter tick: advance one character every 25 ms, repaint when still running.
+  // 8. Typewriter tick: advance one character every 25 ms.
   setInterval(() => {
-    if (prose.tick()) redraw();
+    if (prose.tick()) redrawProse();
   }, 25);
 
-  // 9. Kick off the opening sequence.
-  void loop.start();
+  // 9. Show the empty room shell immediately, then kick off the opening.
+  viewport.render();
+  void start();
 });
