@@ -26,7 +26,15 @@ export interface Gateway {
 
 export const httpGateway: Gateway = {
   start(): Promise<StartResp> {
-    return apiPost<StartResp>("/api/opening/start", {});
+    // The opening arc is identity-light: the gateway uses player_name only as
+    // the seed entity's display name and mints its own player uuid. Phase 1 has
+    // no onboarding layer yet, so we send a default identity; a name-entry layer
+    // replaces this later. wallet_address must be a 42-char string to pass the
+    // gateway's StartOpeningRequest validation.
+    return apiPost<StartResp>("/api/opening/start", {
+      player_name: "wanderer",
+      wallet_address: "0x0000000000000000000000000000000000000000",
+    });
   },
   act(playerId: string, text: string): Promise<ActResp> {
     return apiPost<ActResp>("/api/opening/act", { player_id: playerId, text });
