@@ -66,9 +66,9 @@ async def _handle_close(request: Request) -> JSONResponse:
 
 _stub_app = Starlette(
     routes=[
-        Route("/v1/rooms/{room_id}/open", _handle_open, methods=["POST"]),
-        Route("/v1/rooms/{room_id}/turn", _handle_turn, methods=["POST"]),
-        Route("/v1/rooms/{room_id}/close", _handle_close, methods=["POST"]),
+        Route("/v1/scenes/{room_id}/open", _handle_open, methods=["POST"]),
+        Route("/v1/scenes/{room_id}/turn", _handle_turn, methods=["POST"]),
+        Route("/v1/scenes/{room_id}/close", _handle_close, methods=["POST"]),
     ]
 )
 
