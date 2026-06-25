@@ -22,6 +22,8 @@ from typing import Any
 
 import httpx
 
+from memento.tools.tool_labels import get_allowed_tools
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -118,6 +120,7 @@ class RoomDriver:
             "embodiment_agent_id": entity_uuid,  # UUID, never name
             "names": [entity.get("name", "")],
             "seat": "LLM",
+            "capabilities": sorted(get_allowed_tools(entity.get("labels", []))),
         }
 
     def _gm_self_spec(self, location_uuid: str) -> dict[str, Any]:

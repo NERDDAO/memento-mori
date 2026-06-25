@@ -401,3 +401,50 @@ async def test_drive_turn_unknown_name_falls_back(driver_single_and_client):
 
     assert len(recorder.calls) == 1
     assert recorder.calls[0]["body"]["self_id"] == _GOBLIN_UUID
+
+
+# ---------------------------------------------------------------------------
+# T8 — roster self-spec carries resolved capabilities from KG labels
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_roster_self_spec_carries_resolved_capabilities(driver_and_client):
+    """Each NPC self-spec must carry a 'capabilities' list resolved from its KG labels.
+
+    Goblin and troll both have labels ["Character", "NPC"].
+    The NPC kit includes mm_move, mm_attack, mm_take (cxn control system tools).
+    INNATE tools include mm_get_state, mm_search_world.
+    The list must be sorted (deterministic order).
+    """
+    drv, client = driver_and_client
+    try:
+        await drv.open_room(_LOC_UUID)
+    finally:
+        await client.aclose()
+
+    roster = recorder.calls[0]["body"]["roster"]
+    goblin_spec = next(
+        s for s in roster if s["embodiment_agent_id"] == _GOBLIN_UUID
+    )
+
+    caps = goblin_spec["capabilities"]
+    assert isinstance(caps, list), "capabilities must be a list"
+    assert caps == sorted(caps), "capabilities must be sorted (deterministic)"
+
+    # NPC kit tools must be present
+    assert "mm_move" in caps
+    assert "mm_attack" in caps
+    assert "mm_take" in caps
+
+    # INNATE tools must be present
+    assert "mm_get_state" in caps
+    assert "mm_search_world" in caps
+
+    # Troll (also NPC-labelled) must likewise carry capabilities
+    troll_spec = next(
+        s for s in roster if s["embodiment_agent_id"] == _TROLL_UUID
+    )
+    assert troll_spec["capabilities"] == caps, (
+        "goblin and troll share the same labels so capabilities must match"
+    )
