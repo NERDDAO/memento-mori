@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from memento.state.kg_projection import KgProjectionProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +91,7 @@ class RoomDriver:
         bonfire_id: str,
         internal_token: str = "",
         player_labels: set[str] | None = None,
+        projection: "KgProjectionProtocol | None" = None,
     ) -> None:
         self._repo = repo
         self._client = agent_runtime_client
@@ -98,6 +102,7 @@ class RoomDriver:
         self._player_labels: set[str] = (
             player_labels if player_labels is not None else {"Player"}
         )
+        self._projection = projection
         # Per-instance cache: location_uuid → set of NPC entity UUIDs in the roster
         self._last_roster_uuids: dict[str, set[str]] = {}
 
@@ -110,12 +115,20 @@ class RoomDriver:
         labels: set[str] = set(entity.get("labels", []))
         return bool(labels & self._player_labels)
 
+    def _embodiment_id(self, engine_uuid: str) -> str:
+        """KG uuid for this entity if the projection resolves it, else the engine uuid."""
+        if self._projection is not None:
+            kg_uuid = self._projection.kg_uuid_for(engine_uuid)
+            if kg_uuid is not None:
+                return kg_uuid
+        return engine_uuid
+
     def _npc_self_spec(self, entity: dict[str, Any]) -> dict[str, Any]:
         """Build a self-spec dict for one NPC entity."""
         entity_uuid: str = entity["uuid"]
         return {
             "id": entity_uuid,
-            "embodiment_agent_id": entity_uuid,  # UUID, never name
+            "embodiment_agent_id": self._embodiment_id(entity_uuid),
             "names": [entity.get("name", "")],
             "seat": "LLM",
         }
@@ -126,7 +139,7 @@ class RoomDriver:
         gm_room_registry[location_uuid] = gm_id
         return {
             "id": gm_id,
-            "embodiment_agent_id": gm_id,
+            "embodiment_agent_id": self._embodiment_id(gm_id),
             "names": ["GM"],
         }
 

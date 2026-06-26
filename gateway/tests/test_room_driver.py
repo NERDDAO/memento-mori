@@ -8,6 +8,9 @@ TDD contract:
   T5  close_room POSTs /close
   T6  internal-token header is present on every call (open, turn, close)
   T7  drive_turn with addressed_name not in registry falls back to the single NPC
+  T8  _npc_self_spec ships KG uuid as embodiment_agent_id when projection resolves
+  T9  _npc_self_spec falls back to engine uuid without projection
+  T10 _npc_self_spec falls back to engine uuid when projection has no mapping
 """
 
 from __future__ import annotations
@@ -401,3 +404,94 @@ async def test_drive_turn_unknown_name_falls_back(driver_single_and_client):
 
     assert len(recorder.calls) == 1
     assert recorder.calls[0]["body"]["self_id"] == _GOBLIN_UUID
+
+
+# ---------------------------------------------------------------------------
+# Fake projection helper
+# ---------------------------------------------------------------------------
+
+
+class _FakeProjection:
+    def __init__(self, mapping: dict) -> None:
+        self._m = mapping
+
+    def kg_uuid_for(self, engine_uuid: str) -> str | None:
+        return self._m.get(engine_uuid)
+
+
+# ---------------------------------------------------------------------------
+# T8 — _npc_self_spec ships KG uuid as embodiment_agent_id when projection resolves
+# ---------------------------------------------------------------------------
+
+
+def test_npc_self_spec_ships_kg_uuid_when_projection_resolves(monkeypatch):
+    monkeypatch.setenv("AGENT_RUNTIME_BASE_URL", "http://agent-runtime")
+    monkeypatch.setenv("AGENT_RUNTIME_INTERNAL_TOKEN", _INTERNAL_TOKEN)
+
+    from memento.state.in_memory import InMemoryStateRepository
+    from gateway.room_driver import RoomDriver
+
+    transport = httpx.ASGITransport(app=_stub_app)  # type: ignore[arg-type]
+    client = httpx.AsyncClient(transport=transport, base_url="http://agent-runtime")
+
+    driver = RoomDriver(
+        repo=InMemoryStateRepository(),
+        agent_runtime_client=client,
+        bonfire_id="b1",
+        internal_token=_INTERNAL_TOKEN,
+        projection=_FakeProjection({"eng-1": "kg-1"}),
+    )
+    spec = driver._npc_self_spec({"uuid": "eng-1", "name": "Guard", "labels": ["Character", "NPC"]})
+    assert spec["embodiment_agent_id"] == "kg-1"
+    assert spec["id"] == "eng-1"  # local engine id unchanged
+
+
+# ---------------------------------------------------------------------------
+# T9 — _npc_self_spec falls back to engine uuid without projection
+# ---------------------------------------------------------------------------
+
+
+def test_npc_self_spec_falls_back_to_engine_uuid_without_projection(monkeypatch):
+    monkeypatch.setenv("AGENT_RUNTIME_BASE_URL", "http://agent-runtime")
+    monkeypatch.setenv("AGENT_RUNTIME_INTERNAL_TOKEN", _INTERNAL_TOKEN)
+
+    from memento.state.in_memory import InMemoryStateRepository
+    from gateway.room_driver import RoomDriver
+
+    transport = httpx.ASGITransport(app=_stub_app)  # type: ignore[arg-type]
+    client = httpx.AsyncClient(transport=transport, base_url="http://agent-runtime")
+
+    driver = RoomDriver(
+        repo=InMemoryStateRepository(),
+        agent_runtime_client=client,
+        bonfire_id="b1",
+        internal_token=_INTERNAL_TOKEN,
+    )
+    spec = driver._npc_self_spec({"uuid": "eng-2", "name": "Troll", "labels": ["Character", "NPC"]})
+    assert spec["embodiment_agent_id"] == "eng-2"
+
+
+# ---------------------------------------------------------------------------
+# T10 — _npc_self_spec falls back when projection has no mapping
+# ---------------------------------------------------------------------------
+
+
+def test_npc_self_spec_falls_back_when_projection_has_no_mapping(monkeypatch):
+    monkeypatch.setenv("AGENT_RUNTIME_BASE_URL", "http://agent-runtime")
+    monkeypatch.setenv("AGENT_RUNTIME_INTERNAL_TOKEN", _INTERNAL_TOKEN)
+
+    from memento.state.in_memory import InMemoryStateRepository
+    from gateway.room_driver import RoomDriver
+
+    transport = httpx.ASGITransport(app=_stub_app)  # type: ignore[arg-type]
+    client = httpx.AsyncClient(transport=transport, base_url="http://agent-runtime")
+
+    driver = RoomDriver(
+        repo=InMemoryStateRepository(),
+        agent_runtime_client=client,
+        bonfire_id="b1",
+        internal_token=_INTERNAL_TOKEN,
+        projection=_FakeProjection({}),
+    )
+    spec = driver._npc_self_spec({"uuid": "eng-3", "name": "Goblin", "labels": ["Character", "NPC"]})
+    assert spec["embodiment_agent_id"] == "eng-3"
