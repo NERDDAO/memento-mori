@@ -193,7 +193,9 @@ def register_mm_act(
     from memento.cxn.entity_resolver import EntityResolver
     from memento.cxn.turn_router import TurnRouter
 
-    executor = EffectExecutor(repo=repo, memory=memory, chain=mirror)
+    executor = EffectExecutor(
+        repo=repo, memory=memory, chain=mirror, bonfire_id=bonfire_id
+    )
     constructicon = ConstructiconRegistry()
     resolver = EntityResolver(repo)
     router = TurnRouter(
