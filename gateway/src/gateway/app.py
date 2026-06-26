@@ -213,6 +213,28 @@ app.include_router(scenes.router, prefix="/api")
 from fastapi import WebSocket, WebSocketDisconnect
 
 
+async def _evict_scene_on_disconnect(player_id: str) -> None:
+    """On WS disconnect, close the player's scene if they were the last one there.
+    Best-effort: never raises into the WS teardown path."""
+    if ws_hub is None:
+        return
+    departed = ws_hub.player_locations.get(
+        player_id, ""
+    )  # read before disconnect pops it
+    await ws_hub.disconnect(player_id)
+    if not departed:
+        return
+    try:
+        from gateway.scene_coordinator import SceneCoordinator
+
+        coordinator = SceneCoordinator.from_app_state(app.state)
+        await coordinator.maybe_close(departed)
+    except Exception:
+        logger.warning(
+            "scene eviction on disconnect failed for %s", player_id, exc_info=True
+        )
+
+
 @app.websocket("/ws/{player_id}")
 async def websocket_endpoint(websocket: WebSocket, player_id: str):
     if ws_hub is None:
@@ -224,12 +246,12 @@ async def websocket_endpoint(websocket: WebSocket, player_id: str):
             # Keep connection alive, receive pings
             await websocket.receive_text()
     except WebSocketDisconnect:
-        await ws_hub.disconnect(player_id)
+        await _evict_scene_on_disconnect(player_id)
     except Exception:
         logger.warning(
             "WebSocket error for %s, disconnecting", player_id, exc_info=True
         )
-        await ws_hub.disconnect(player_id)
+        await _evict_scene_on_disconnect(player_id)
 
 
 # Static file serving — must be last (mounts at "/")
