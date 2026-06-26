@@ -107,6 +107,27 @@ class SceneCoordinator:
             return
         self._resolver.forget_name(departed_location_name)
 
+    async def _broadcast_npcs_joined(
+        self, location_uuid: str, location_name: str
+    ) -> None:
+        if self._ws_hub is None or self._repo is None:
+            return
+        try:
+            entities = await self._repo.get_entities_at_location(location_uuid)
+        except Exception:  # surfacing is best-effort, never breaks the turn
+            return
+        for entity in entities:
+            if entity.get("kind") != "character":
+                continue
+            await self._ws_hub.broadcast_to_location(
+                location_name,
+                {
+                    "type": "npc_joined",
+                    "npc_name": entity.get("name", ""),
+                    "npc_id": entity.get("uuid", ""),
+                },
+            )
+
     async def _has_persona_npcs(self, location_uuid: str) -> bool:
         if self._repo is None:
             return False
@@ -125,9 +146,12 @@ class SceneCoordinator:
         if not location_uuid:
             return False
         self._resolver.record(location_name, location_uuid)  # for maybe_close (Task 4)
+        was_registered = location_uuid in self._registry
         driver = await self.ensure_scene(location_uuid)
         if driver is None:
             return False
+        if not was_registered:  # scene just opened -> surface its NPCs once
+            await self._broadcast_npcs_joined(location_uuid, location_name)
         try:
             turn = await driver.drive_turn(location_uuid, message)
         except Exception as exc:  # persona failure must NOT break the action path

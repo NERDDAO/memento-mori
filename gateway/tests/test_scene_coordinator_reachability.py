@@ -114,8 +114,14 @@ async def test_handle_player_message_auto_activates_and_broadcasts():
     assert handled is True
     assert act.activated == ["loc-1"]  # auto-activated
     assert driver.calls == [("loc-1", "Gareth?")]
-    assert len(hub.broadcasts) == 1
-    loc, msg = hub.broadcasts[0]
+    # Fresh activation emits npc_joined first, then mm_npc_response (Task 3).
+    assert len(hub.broadcasts) == 2
+    npc_joined = [m for _, m in hub.broadcasts if m["type"] == "npc_joined"]
+    assert len(npc_joined) == 1 and npc_joined[0]["npc_id"] == "npc-1"
+    npc_response = [m for _, m in hub.broadcasts if m.get("tool") == "mm_npc_response"]
+    loc, msg = next(
+        (l, m) for l, m in hub.broadcasts if m.get("tool") == "mm_npc_response"
+    )
     assert loc == "North Gate" and msg["npc"] == "Gareth" and msg["summary"] == "Halt!"
 
 
