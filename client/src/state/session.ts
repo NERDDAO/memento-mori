@@ -4,7 +4,7 @@ import type { InventoryItemUpdate } from '../types/schema.generated';
 
 const GATEWAY_PORT = window.location.port || '8081';
 export const GATEWAY_URL = `${window.location.protocol}//${window.location.hostname}:${GATEWAY_PORT}`;
-const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:${GATEWAY_PORT}/ws`;
+export const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:${GATEWAY_PORT}/ws`;
 
 export interface Session {
   playerId: string;

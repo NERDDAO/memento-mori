@@ -1812,6 +1812,46 @@ function initInput(inputEl, onSubmit, getContext) {
   });
 }
 
+// src/state/opening-ws.ts
+function routeOpeningMessage(msg, s) {
+  switch (msg?.type) {
+    case "tool_event":
+      if (msg.tool === "mm_npc_response" && msg.npc) {
+        s.prose.enqueue({ kind: "npc-dialogue", text: msg.summary ?? "", speaker: msg.npc });
+        s.redrawProse();
+      }
+      break;
+    case "npc_joined": {
+      if (!msg.npc_name)
+        break;
+      const things = s.viewport.currentThings();
+      if (things.some((t) => t.uuid === msg.npc_id || t.name === msg.npc_name))
+        break;
+      s.viewport.setContents(s.roomUuid(), [
+        ...things,
+        { uuid: msg.npc_id ?? "", name: msg.npc_name }
+      ]);
+      break;
+    }
+    case "npc_left": {
+      const things = s.viewport.currentThings();
+      s.viewport.setContents(s.roomUuid(), things.filter((t) => t.uuid !== msg.npc_id && t.name !== msg.npc_name));
+      break;
+    }
+    default:
+      break;
+  }
+}
+function connectOpeningWs(playerId, onMessage) {
+  const ws = new WebSocket(`${WS_URL}/${playerId}`);
+  ws.onmessage = (event) => {
+    try {
+      onMessage(JSON.parse(event.data));
+    } catch {}
+  };
+  return ws;
+}
+
 // src/boot/opening-shell.ts
 document.addEventListener("DOMContentLoaded", () => {
   const tuiMain = document.getElementById("tui-main");
@@ -1846,6 +1886,13 @@ document.addEventListener("DOMContentLoaded", () => {
     redrawProse();
     viewport.visitRoom({ uuid: s.location_id, name: s.location_name }, s.exits);
     await refreshContents();
+    const surfaces = {
+      prose,
+      redrawProse,
+      viewport,
+      roomUuid: () => currentRoom
+    };
+    connectOpeningWs(playerId, (msg) => routeOpeningMessage(msg, surfaces));
   }
   async function look() {
     prose.enqueue({ text: "You look around.", kind: "narration" });

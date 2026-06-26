@@ -21,6 +21,7 @@ import { RoomViewportAdapter } from "../layers/room-viewport";
 import { httpGateway, type ActResp } from "../state/opening-loop";
 import { httpKgReadPort } from "../state/kg-read-port";
 import { initInput } from "../panels/input";
+import { connectOpeningWs, routeOpeningMessage, type OpeningSurfaces } from "../state/opening-ws";
 
 document.addEventListener("DOMContentLoaded", () => {
   // 1. Mount the unified canvas with the opening two-pane layout.
@@ -66,6 +67,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     viewport.visitRoom({ uuid: s.location_id, name: s.location_name }, s.exits);
     await refreshContents();
+
+    const surfaces: OpeningSurfaces = {
+      prose,
+      redrawProse,
+      viewport,
+      roomUuid: () => currentRoom,
+    };
+    connectOpeningWs(playerId, (msg) => routeOpeningMessage(msg, surfaces));
   }
 
   // `look` rebuilds the room viewport client-side (comprehension is degraded).
