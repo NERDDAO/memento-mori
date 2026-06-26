@@ -1129,18 +1129,31 @@ class ProseLayer {
     return this.revealed < full.length;
   }
   render(cols, rows) {
-    const prefix = this.fullStream.slice(0, this.revealed);
-    const trimmed = prefix.trimEnd();
-    const wrapped = trimmed === "" ? [] : wordWrap(trimmed, cols);
-    const visible = wrapped.slice(-rows);
+    const lineColors = [];
+    let consumed = 0;
+    for (const seg of this.segments) {
+      const segText = seg.text + `
+
+`;
+      const visibleChars = Math.max(0, Math.min(segText.length, this.revealed - consumed));
+      consumed += segText.length;
+      if (visibleChars === 0)
+        continue;
+      const shown = segText.slice(0, visibleChars).trimEnd();
+      if (shown === "")
+        continue;
+      const color = seg.kind === "npc-name" || seg.kind === "npc-dialogue" ? theme.colors.npc : theme.colors.primary;
+      for (const line of wordWrap(shown, cols)) {
+        lineColors.push({ line, color });
+      }
+    }
+    const visible = lineColors.slice(-rows);
     const cells = [];
     const padCount = rows - visible.length;
-    for (let i = 0;i < padCount; i++) {
+    for (let i = 0;i < padCount; i++)
       cells.push(emptyRow(cols));
-    }
-    for (const line of visible) {
-      cells.push(textRow(line, theme.colors.primary, cols));
-    }
+    for (const { line, color } of visible)
+      cells.push(textRow(line, color, cols));
     return { cells };
   }
 }
