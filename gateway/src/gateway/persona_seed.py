@@ -1,7 +1,14 @@
-"""Minimal, flag-gated persona-NPC seed for LOCAL play (in-memory cxn_repo only).
-Lets a developer test the persona dialogue loop without standing up the KG stack.
-KG-backed deployments seed NPCs through the world bootstrap / KG (P3 provisioning),
-so this is a no-op there. Never writes to the production KG.
+"""Flag-gated persona-NPC seeds, one per repo backend.
+
+Two parallel, opt-in paths let a developer test the persona dialogue loop:
+  - ``seed_local_personas`` — in-memory cxn_repo only (no KG stack needed);
+    a no-op on KG-backed repos.
+  - ``provision_kg_personas`` — the KG-backed (EventSourced) counterpart;
+    seeds the intended game NPC into graph-memory via the projection, and a
+    no-op on the in-memory repo.
+
+Each helper writes only when its own backend matches, so neither path ever
+seeds the wrong store.
 """
 
 from __future__ import annotations
