@@ -172,7 +172,7 @@ def _build_agent_runtime_stub(
     npc_id: str,
     room_b_id: str,
 ) -> tuple[Any, list[dict]]:
-    """Build a minimal Starlette stub for /v1/rooms/{room_id}/{open,turn,close}.
+    """Build a minimal Starlette stub for /v1/scenes/{room_id}/{open,turn,close}.
 
     On `open`:  returns a stub source_episode_id.
     On `turn`:  mints a per-self JWT (sub=npc_id) and POSTs /v1/tools/mm_move
@@ -226,9 +226,9 @@ def _build_agent_runtime_stub(
 
     stub_app = Starlette(
         routes=[
-            Route("/v1/rooms/{room_id}/open", _handle_open, methods=["POST"]),
-            Route("/v1/rooms/{room_id}/turn", _handle_turn, methods=["POST"]),
-            Route("/v1/rooms/{room_id}/close", _handle_close, methods=["POST"]),
+            Route("/v1/scenes/{room_id}/open", _handle_open, methods=["POST"]),
+            Route("/v1/scenes/{room_id}/turn", _handle_turn, methods=["POST"]),
+            Route("/v1/scenes/{room_id}/close", _handle_close, methods=["POST"]),
         ]
     )
     return stub_app, turn_responses

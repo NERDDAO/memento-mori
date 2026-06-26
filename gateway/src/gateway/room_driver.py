@@ -4,7 +4,7 @@ Maps a Matrix room → location UUID, builds the NPC roster from the world
 (get_entities_at_location → character NPCs → self specs with
 embodiment_agent_id = entity UUID), runs trivial who-acts (addressed NPC
 name → UUID via npc_registry, else the single NPC at the location), and
-calls the agent-runtime inbound room route (open / turn / close).
+calls the agent-runtime inbound scene route (open / turn / close).
 
 Config
 ------
@@ -21,6 +21,8 @@ import os
 from typing import TYPE_CHECKING, Any
 
 import httpx
+
+from memento.tools.tool_labels import get_allowed_tools
 
 if TYPE_CHECKING:
     from memento.state.kg_projection import KgProjectionProtocol
@@ -131,6 +133,7 @@ class RoomDriver:
             "embodiment_agent_id": self._embodiment_id(entity_uuid),
             "names": [entity.get("name", "")],
             "seat": "LLM",
+            "capabilities": sorted(get_allowed_tools(entity.get("labels", []))),
         }
 
     def _gm_self_spec(self, location_uuid: str) -> dict[str, Any]:
@@ -208,16 +211,16 @@ class RoomDriver:
         self._last_roster_uuids[location_uuid] = roster_uuids
 
         gm_self = self._gm_self_spec(location_uuid)
-        room_actor_id = gm_self["id"]
+        scene_actor_id = gm_self["id"]
 
         body: dict[str, Any] = {
             "bonfire_id": self._bonfire_id,
-            "room_actor_id": room_actor_id,
+            "scene_actor_id": scene_actor_id,
             "gm_self": gm_self,
             "roster": npc_roster,
         }
 
-        url = f"/v1/rooms/{location_uuid}/open"
+        url = f"/v1/scenes/{location_uuid}/open"
         try:
             resp = await self._client.post(
                 url, json=body, headers=self._request_headers()
@@ -262,7 +265,7 @@ class RoomDriver:
             "message": player_message,
         }
 
-        url = f"/v1/rooms/{location_uuid}/turn"
+        url = f"/v1/scenes/{location_uuid}/turn"
         try:
             resp = await self._client.post(
                 url, json=body, headers=self._request_headers()
@@ -285,7 +288,7 @@ class RoomDriver:
 
         Returns the agent-runtime response dict.
         """
-        url = f"/v1/rooms/{location_uuid}/close"
+        url = f"/v1/scenes/{location_uuid}/close"
         try:
             resp = await self._client.post(url, headers=self._request_headers())
             resp.raise_for_status()
