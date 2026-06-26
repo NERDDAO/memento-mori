@@ -61,6 +61,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 opening_registry: dict[str, object] = {}  # player_uuid → TurnRouter
+opening_repos: dict[str, object] = {}  # player_uuid → EventSourcedStateRepository
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -246,6 +247,7 @@ async def start_opening(req: StartOpeningRequest) -> StartOpeningResponse:
 
     # -- 7. Register -----------------------------------------------------------
     opening_registry[player_uuid] = turn_router
+    opening_repos[player_uuid] = repo
 
     # -- 8. Return room manifest -----------------------------------------------
     from memento.opening.deep_roads import OPENING_EPIGRAPH
@@ -285,5 +287,35 @@ async def act_opening(req: ActRequest) -> dict:
     # Drop registry entry on win
     if outcome.get("won"):
         opening_registry.pop(req.player_id, None)
+        opening_repos.pop(req.player_id, None)
 
     return dict(outcome)
+
+
+@router.get("/opening/room/{room_uuid}/contents")
+async def room_contents(room_uuid: str, player_id: str) -> dict:
+    """Return the entities (NPCs + items) present in a room for a given player session.
+
+    Args:
+        room_uuid: The engine-side UUID of the room to inspect.
+        player_id: The player's session UUID (from /opening/start).
+
+    Returns:
+        {"things": [{"uuid": str, "name": str}, ...]}
+
+    Raises:
+        HTTPException(404): player_id not in opening_repos.
+    """
+    from memento.state.event_sourced import EventSourcedStateRepository
+
+    repo_obj = opening_repos.get(player_id)
+    if repo_obj is None:
+        raise HTTPException(status_code=404, detail="Opening session not found.")
+
+    repo: EventSourcedStateRepository = repo_obj  # type: ignore[assignment]
+    manifest = await repo.room_manifest(room_uuid)
+    things = [
+        {"uuid": e.get("uuid") or e.get("id"), "name": e.get("name", "")}
+        for e in (manifest.npcs + manifest.items)
+    ]
+    return {"things": things}

@@ -352,3 +352,101 @@ export function computeRegions(totalCols: number, totalRows: number): Map<string
 
   return regions;
 }
+
+/**
+ * Opening layout: prose (left, ~60%) │ _vDivOpening │ kgmap (right, remainder)
+ * with input + status rows at the bottom.
+ *
+ * Row allocation (inside frame):
+ *   rows 1..bodyEnd   : prose / kgmap body
+ *   row  bodyEnd+1    : input  (1 row)
+ *   row  bodyEnd+2    : status (1 row)
+ *   row  totalRows-1  : outer bottom border
+ *
+ * Column allocation (inside frame):
+ *   col 1..proseCols           : prose
+ *   col proseCols+1            : _vDivOpening (1-col divider)
+ *   col proseCols+2..innerEnd  : kgmap
+ */
+export function computeOpeningRegions(totalCols: number, totalRows: number): Map<string, Region> {
+  const regions = new Map<string, Region>();
+
+  function add(r: Region): void {
+    regions.set(r.name, r);
+  }
+
+  // ── Column layout ──────────────────────────────────────────────────
+  // Inner columns: 1 to totalCols-2 inclusive
+  const innerCols  = totalCols - 2;
+  const proseCols  = Math.max(Math.floor(innerCols * 0.60), 10);
+  const kgmapCols  = Math.max(innerCols - proseCols - 1, 5); // -1 for divider
+
+  const colProse   = 1;
+  const colVDiv    = colProse + proseCols;           // divider column
+  const colKgmap   = colVDiv + 1;                    // kgmap starts after divider
+
+  // ── Row layout ─────────────────────────────────────────────────────
+  // Inner rows: 1 to totalRows-2 inclusive
+  // Reserve last 2 inner rows for input + status
+  const rowInput   = totalRows - 3;   // e.g. row 21 for totalRows=24
+  const rowStatus  = totalRows - 2;   // e.g. row 22 for totalRows=24
+  const rowBodyStart = 1;
+  const bodyRows   = rowInput - rowBodyStart; // rows available for prose/kgmap
+
+  // ── Prose region ───────────────────────────────────────────────────
+  add({
+    name: 'prose',
+    col: colProse,
+    row: rowBodyStart,
+    cols: proseCols,
+    rows: bodyRows,
+    type: 'grid',
+    scrollOffset: 0,
+  });
+
+  // ── Vertical divider ───────────────────────────────────────────────
+  add({
+    name: '_vDivOpening',
+    col: colVDiv,
+    row: rowBodyStart,
+    cols: 1,
+    rows: bodyRows,
+    type: 'grid',
+    scrollOffset: 0,
+  });
+
+  // ── KG map region ──────────────────────────────────────────────────
+  add({
+    name: 'kgmap',
+    col: colKgmap,
+    row: rowBodyStart,
+    cols: kgmapCols,
+    rows: bodyRows,
+    type: 'grid',
+    scrollOffset: 0,
+  });
+
+  // ── Input row ──────────────────────────────────────────────────────
+  add({
+    name: 'input',
+    col: colProse,
+    row: rowInput,
+    cols: innerCols,
+    rows: 1,
+    type: 'grid',
+    scrollOffset: 0,
+  });
+
+  // ── Status row ─────────────────────────────────────────────────────
+  add({
+    name: 'status',
+    col: colProse,
+    row: rowStatus,
+    cols: innerCols,
+    rows: 1,
+    type: 'grid',
+    scrollOffset: 0,
+  });
+
+  return regions;
+}

@@ -54,8 +54,10 @@ export class UnifiedCanvas {
   private offscreenSlots: OffscreenEntry[] = [];
 
   private observer: ResizeObserver;
+  private computeRegionsFn: (cols: number, rows: number) => Map<string, Region>;
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, computeRegionsFn: (cols: number, rows: number) => Map<string, Region> = computeRegions) {
+    this.computeRegionsFn = computeRegionsFn;
     // Create canvas element
     this.canvas = document.createElement('canvas');
     this.canvas.style.display  = 'block';
@@ -118,7 +120,7 @@ export class UnifiedCanvas {
     this.borderGrid = this._allocGrid(this.totalRows, this.totalCols);
 
     // Recompute regions and borders
-    this.regions = computeRegions(this.totalCols, this.totalRows);
+    this.regions = this.computeRegionsFn(this.totalCols, this.totalRows);
     drawBorders(this.borderGrid, this.regions, this.totalCols, this.totalRows);
 
     // Full repaint
