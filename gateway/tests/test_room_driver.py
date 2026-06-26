@@ -441,11 +441,14 @@ def test_npc_self_spec_ships_kg_uuid_when_projection_resolves(monkeypatch):
             internal_token=_INTERNAL_TOKEN,
             projection=_FakeProjection({"eng-1": "kg-1"}),
         )
-        spec = driver._npc_self_spec({"uuid": "eng-1", "name": "Guard", "labels": ["Character", "NPC"]})
+        spec = driver._npc_self_spec(
+            {"uuid": "eng-1", "name": "Guard", "labels": ["Character", "NPC"]}
+        )
         assert spec["embodiment_agent_id"] == "kg-1"
         assert spec["id"] == "eng-1"  # local engine id unchanged
     finally:
         import asyncio
+
         asyncio.run(client.aclose())
 
 
@@ -470,10 +473,13 @@ def test_npc_self_spec_falls_back_to_engine_uuid_without_projection(monkeypatch)
             bonfire_id="b1",
             internal_token=_INTERNAL_TOKEN,
         )
-        spec = driver._npc_self_spec({"uuid": "eng-2", "name": "Troll", "labels": ["Character", "NPC"]})
+        spec = driver._npc_self_spec(
+            {"uuid": "eng-2", "name": "Troll", "labels": ["Character", "NPC"]}
+        )
         assert spec["embodiment_agent_id"] == "eng-2"
     finally:
         import asyncio
+
         asyncio.run(client.aclose())
 
 
@@ -499,11 +505,35 @@ def test_npc_self_spec_falls_back_when_projection_has_no_mapping(monkeypatch):
             internal_token=_INTERNAL_TOKEN,
             projection=_FakeProjection({}),
         )
-        spec = driver._npc_self_spec({"uuid": "eng-3", "name": "Goblin", "labels": ["Character", "NPC"]})
+        spec = driver._npc_self_spec(
+            {"uuid": "eng-3", "name": "Goblin", "labels": ["Character", "NPC"]}
+        )
         assert spec["embodiment_agent_id"] == "eng-3"
     finally:
         import asyncio
+
         asyncio.run(client.aclose())
+
+
+# ---------------------------------------------------------------------------
+# NEW — drive_turn returns the acting self_id in the response
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_drive_turn_returns_acting_self_id(driver_single_and_client):
+    """drive_turn must return the response dict with the acting self_id added."""
+    drv, client = driver_single_and_client
+    try:
+        await drv.open_room(_LOC_UUID)
+        recorder.calls.clear()
+
+        turn = await drv.drive_turn(_LOC_UUID, "hello")
+    finally:
+        await client.aclose()
+
+    assert turn["response_text"] == "The goblin grunts."
+    assert turn["self_id"] == _GOBLIN_UUID
 
 
 # ---------------------------------------------------------------------------
@@ -527,9 +557,7 @@ async def test_roster_self_spec_carries_resolved_capabilities(driver_and_client)
         await client.aclose()
 
     roster = recorder.calls[0]["body"]["roster"]
-    goblin_spec = next(
-        s for s in roster if s["embodiment_agent_id"] == _GOBLIN_UUID
-    )
+    goblin_spec = next(s for s in roster if s["embodiment_agent_id"] == _GOBLIN_UUID)
 
     caps = goblin_spec["capabilities"]
     assert isinstance(caps, list), "capabilities must be a list"
@@ -545,9 +573,7 @@ async def test_roster_self_spec_carries_resolved_capabilities(driver_and_client)
     assert "mm_search_world" in caps
 
     # Troll (also NPC-labelled) must likewise carry capabilities
-    troll_spec = next(
-        s for s in roster if s["embodiment_agent_id"] == _TROLL_UUID
-    )
+    troll_spec = next(s for s in roster if s["embodiment_agent_id"] == _TROLL_UUID)
     assert troll_spec["capabilities"] == caps, (
         "goblin and troll share the same labels so capabilities must match"
     )

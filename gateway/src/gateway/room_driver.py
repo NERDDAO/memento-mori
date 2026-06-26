@@ -278,7 +278,7 @@ class RoomDriver:
                 actor_uuid,
                 data.get("response_text", ""),
             )
-            return data
+            return {**data, "self_id": actor_uuid}
         except httpx.HTTPError as exc:
             logger.error("drive_turn failed for %s: %s", location_uuid, exc)
             raise
