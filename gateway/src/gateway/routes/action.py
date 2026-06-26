@@ -85,17 +85,20 @@ async def submit_action(req: ActionRequest, request: Request):
 
     from gateway.app import round_manager, ws_hub
 
-    # Track player location
+    previous_location = ""
     if ws_hub:
+        previous_location = ws_hub.player_locations.get(req.player_id, "")
         await ws_hub.set_location(req.player_id, req.location)
 
-    # Persona branch: if a persona scene is active at the player's location, the
-    # persona NPC handles the message and we skip the round path. Otherwise fall
-    # through. A persona failure never breaks the action (coordinator degrades).
     from gateway.scene_coordinator import SceneCoordinator
 
     coordinator = SceneCoordinator.from_app_state(request.app.state)
-    if await coordinator.handle_player_message(req.player_id, req.location, req.action):
+    handled = await coordinator.handle_player_message(
+        req.player_id, req.location, req.action
+    )
+    if previous_location and previous_location != req.location:
+        await coordinator.maybe_close(previous_location)
+    if handled:
         return ActionResponse(status="queued")
 
     if round_manager:

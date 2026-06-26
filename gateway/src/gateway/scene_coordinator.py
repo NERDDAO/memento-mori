@@ -20,6 +20,7 @@ from gateway.scene_activation import (
     SceneActivationError,
     SceneActivationService,
     SceneAlreadyOpen,
+    SceneNotOpen,
 )
 
 logger = get_logger(__name__)
@@ -80,6 +81,31 @@ class SceneCoordinator:
             logger.warning("scene_coordinator.activate_failed: %s", exc)
             return None
         return self._registry.get(location_uuid)
+
+    async def maybe_close(self, departed_location_name: str) -> None:
+        if (
+            not departed_location_name
+            or self._ws_hub is None
+            or self._activation is None
+        ):
+            return
+        location_uuid = self._resolver.uuid_for_name(departed_location_name)
+        if (
+            not location_uuid
+            or self._registry is None
+            or location_uuid not in self._registry
+        ):
+            return
+        if self._ws_hub.players_at_location(departed_location_name) > 0:
+            return  # someone is still here
+        try:
+            await self._activation.close(location_uuid)
+        except SceneNotOpen:
+            pass
+        except SceneActivationError as exc:  # incl. AgentRuntimeUnavailable
+            logger.warning("scene_coordinator.close_failed: %s", exc)
+            return
+        self._resolver.forget_name(departed_location_name)
 
     async def _has_persona_npcs(self, location_uuid: str) -> bool:
         if self._repo is None:

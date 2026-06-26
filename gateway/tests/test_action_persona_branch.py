@@ -23,6 +23,10 @@ class _Hub:
     def players_at_location(self, loc):
         return 1
 
+    @property
+    def player_locations(self):
+        return self.locs
+
 
 class _RM:
     def __init__(self):
