@@ -46,7 +46,7 @@ import asyncio
 import os
 import uuid as _uuid_mod
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from gateway.log import get_logger
@@ -266,7 +266,7 @@ async def start_opening(req: StartOpeningRequest) -> StartOpeningResponse:
 
 
 @router.post("/opening/act")
-async def act_opening(req: ActRequest) -> dict:
+async def act_opening(req: ActRequest, request: Request) -> dict:
     """Drive a single turn through the player's registered TurnRouter.
 
     Returns the TurnOutcome dict.  On win (outcome["won"] is True), the
@@ -283,6 +283,24 @@ async def act_opening(req: ActRequest) -> dict:
 
     turn_router: TurnRouter = router_obj  # type: ignore[assignment]
     outcome = await turn_router.handle(req.text, req.player_id)
+
+    # Best-effort persona turn: give this opening player a presence entry at the
+    # Deep Roads, then drive the persona scene. NPC content (npc_joined +
+    # mm_npc_response) arrives asynchronously over the WS; the opening's own
+    # TurnOutcome (below) is never affected by a persona/agent-runtime failure.
+    try:
+        from gateway.app import ws_hub
+
+        if ws_hub is not None:
+            await ws_hub.set_location(req.player_id, "the deep roads")
+            from gateway.scene_coordinator import SceneCoordinator
+
+            coordinator = SceneCoordinator.from_app_state(request.app.state)
+            await coordinator.handle_player_message(
+                req.player_id, "the deep roads", req.text
+            )
+    except Exception:
+        logger.warning("opening persona hook failed (non-fatal)", exc_info=True)
 
     # Drop registry entry on win
     if outcome.get("won"):
