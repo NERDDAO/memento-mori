@@ -792,3 +792,32 @@ async def test_real_items_at_location_returns_only_ownerless() -> None:
 
     assert len(results) == 1
     assert results[0]["uuid"] == ITEM_ENGINE_UUID
+
+
+# ===========================================================================
+# kg_uuid_for — engine→KG uuid accessor tests
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_real_kg_uuid_for_returns_server_uuid_after_create() -> None:
+    """kg_uuid_for returns the KG-assigned uuid after create."""
+    kg = _make_kg_stub()
+    proj = KgProjection(kg=kg)
+    await proj.create(_entity())
+    assert proj.kg_uuid_for(ENGINE_UUID) == SERVER_UUID
+
+
+def test_real_kg_uuid_for_unknown_returns_none() -> None:
+    """kg_uuid_for returns None for unmapped engine uuids."""
+    proj = KgProjection(kg=_make_kg_stub())
+    assert proj.kg_uuid_for("nope-uuid") is None
+
+
+@pytest.mark.asyncio
+async def test_fake_kg_uuid_for_is_identity() -> None:
+    """Fake kg_uuid_for returns the engine uuid itself (identity map)."""
+    fake = KgProjectionFake()
+    await fake.create(_entity())
+    assert fake.kg_uuid_for(ENGINE_UUID) == ENGINE_UUID
+    assert fake.kg_uuid_for("missing") is None

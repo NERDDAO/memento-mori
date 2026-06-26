@@ -208,6 +208,10 @@ class KgProjectionProtocol(Protocol):
         """
         ...
 
+    def kg_uuid_for(self, engine_uuid: str) -> str | None:
+        """Return the KG uuid mapped from an engine uuid, or None if unmapped."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # KgProjection (live Bonfires KG)   alias: KgProjectionReal
@@ -242,6 +246,10 @@ class KgProjection:
 
     def _resolve_kg(self, engine_uuid: str) -> str | None:
         """Return the KG uuid for an engine uuid, or None if unknown."""
+        return self._engine_to_kg.get(engine_uuid)
+
+    def kg_uuid_for(self, engine_uuid: str) -> str | None:
+        """Public read-only view of the engine→KG indirection map."""
         return self._engine_to_kg.get(engine_uuid)
 
     def _resolve_engine(self, kg_uuid: str, raw_attrs: dict[str, Any] | None = None) -> str:
@@ -509,3 +517,7 @@ class KgProjectionFake:
             if doc and doc.get("kind") == "item" and doc.get("owner_uuid") is None:
                 results.append(dict(doc))
         return results
+
+    def kg_uuid_for(self, engine_uuid: str) -> str | None:
+        """Return the engine uuid itself if it exists in the store, else None (identity map)."""
+        return engine_uuid if engine_uuid in self._store else None
