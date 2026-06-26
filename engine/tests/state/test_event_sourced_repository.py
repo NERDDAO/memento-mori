@@ -674,6 +674,23 @@ async def test_rebuild_projection_location_index() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Projection property
+# ---------------------------------------------------------------------------
+
+
+def test_projection_property_returns_injected_projection() -> None:
+    """The projection property returns the injected KgProjection."""
+    proj = KgProjectionFake()
+    repo = EventSourcedStateRepository(
+        tx_log=InMemoryTxLog(),
+        activation_log=InMemoryActivationLog(),
+        projection=proj,
+        chain=NoopChainMirror(),
+    )
+    assert repo.projection is proj
+
+
+# ---------------------------------------------------------------------------
 # FIX 1 — Immutable log: genesis delta frozen at write time
 # ---------------------------------------------------------------------------
 

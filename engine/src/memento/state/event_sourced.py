@@ -89,6 +89,11 @@ class EventSourcedStateRepository:
         self._activation_id: str = "genesis"
         self._tool: str = ""
 
+    @property
+    def projection(self) -> KgProjectionProtocol:
+        """The KgProjection backing this repo (lets callers resolve KG uuids)."""
+        return self._projection
+
     # ------------------------------------------------------------------
     # Activation context
     # ------------------------------------------------------------------
