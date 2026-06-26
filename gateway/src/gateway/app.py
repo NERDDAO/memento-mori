@@ -11,6 +11,7 @@ from gateway.mcp_server import build_mcp_app
 from gateway.ws import WebSocketHub
 from memento.round_manager import RoundManager
 from gateway.round_callback import make_round_callback, make_action_callback
+from gateway.room_driver import build_agent_runtime_client
 
 logger = get_logger(__name__)
 
@@ -63,6 +64,8 @@ async def lifespan(app: FastAPI):
     # EffectExecutor instance as the MCP handlers — no divergent fork (G1).
     app.state.cxn_repo = mcp_asgi.cxn_repo  # type: ignore[attr-defined]
     app.state.cxn_executor = mcp_asgi.cxn_executor  # type: ignore[attr-defined]
+    app.state.agent_runtime_client = build_agent_runtime_client()
+    app.state.scene_registry = {}
 
     # Seed NPC registry from MongoDB + world.json
     from gateway.npc_registry import seed_from_db, register_npc, update_npc_location
@@ -84,6 +87,7 @@ async def lifespan(app: FastAPI):
     async with mcp_asgi.session_manager.run():
         yield
 
+    await app.state.agent_runtime_client.aclose()
     if bridge:
         await bridge.disconnect()
 
@@ -172,6 +176,7 @@ from gateway.routes import (
     player_signup,
     tools_http,
     opening,
+    scenes,
 )
 
 app.include_router(action.router, prefix="/api")
@@ -186,6 +191,7 @@ app.include_router(admin.router, prefix="/api")
 app.include_router(player_signup.router, prefix="/api")
 app.include_router(tools_http.router)
 app.include_router(opening.router, prefix="/api")
+app.include_router(scenes.router, prefix="/api")
 
 # WebSocket endpoint
 from fastapi import WebSocket, WebSocketDisconnect
