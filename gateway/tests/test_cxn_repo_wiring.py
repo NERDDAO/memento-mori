@@ -11,21 +11,6 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _import_factory():
-    """Import the factory fresh (avoids cached module-level state between
-    tests that flip env vars)."""
-    import importlib
-    import gateway.mcp_server as mod
-
-    importlib.reload(mod)
-    return mod._build_cxn_repo
-
-
-# ---------------------------------------------------------------------------
 # Test: env unset → InMemoryStateRepository
 # ---------------------------------------------------------------------------
 

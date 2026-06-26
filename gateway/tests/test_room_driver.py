@@ -433,17 +433,20 @@ def test_npc_self_spec_ships_kg_uuid_when_projection_resolves(monkeypatch):
 
     transport = httpx.ASGITransport(app=_stub_app)  # type: ignore[arg-type]
     client = httpx.AsyncClient(transport=transport, base_url="http://agent-runtime")
-
-    driver = RoomDriver(
-        repo=InMemoryStateRepository(),
-        agent_runtime_client=client,
-        bonfire_id="b1",
-        internal_token=_INTERNAL_TOKEN,
-        projection=_FakeProjection({"eng-1": "kg-1"}),
-    )
-    spec = driver._npc_self_spec({"uuid": "eng-1", "name": "Guard", "labels": ["Character", "NPC"]})
-    assert spec["embodiment_agent_id"] == "kg-1"
-    assert spec["id"] == "eng-1"  # local engine id unchanged
+    try:
+        driver = RoomDriver(
+            repo=InMemoryStateRepository(),
+            agent_runtime_client=client,
+            bonfire_id="b1",
+            internal_token=_INTERNAL_TOKEN,
+            projection=_FakeProjection({"eng-1": "kg-1"}),
+        )
+        spec = driver._npc_self_spec({"uuid": "eng-1", "name": "Guard", "labels": ["Character", "NPC"]})
+        assert spec["embodiment_agent_id"] == "kg-1"
+        assert spec["id"] == "eng-1"  # local engine id unchanged
+    finally:
+        import asyncio
+        asyncio.run(client.aclose())
 
 
 # ---------------------------------------------------------------------------
@@ -460,15 +463,18 @@ def test_npc_self_spec_falls_back_to_engine_uuid_without_projection(monkeypatch)
 
     transport = httpx.ASGITransport(app=_stub_app)  # type: ignore[arg-type]
     client = httpx.AsyncClient(transport=transport, base_url="http://agent-runtime")
-
-    driver = RoomDriver(
-        repo=InMemoryStateRepository(),
-        agent_runtime_client=client,
-        bonfire_id="b1",
-        internal_token=_INTERNAL_TOKEN,
-    )
-    spec = driver._npc_self_spec({"uuid": "eng-2", "name": "Troll", "labels": ["Character", "NPC"]})
-    assert spec["embodiment_agent_id"] == "eng-2"
+    try:
+        driver = RoomDriver(
+            repo=InMemoryStateRepository(),
+            agent_runtime_client=client,
+            bonfire_id="b1",
+            internal_token=_INTERNAL_TOKEN,
+        )
+        spec = driver._npc_self_spec({"uuid": "eng-2", "name": "Troll", "labels": ["Character", "NPC"]})
+        assert spec["embodiment_agent_id"] == "eng-2"
+    finally:
+        import asyncio
+        asyncio.run(client.aclose())
 
 
 # ---------------------------------------------------------------------------
@@ -485,13 +491,16 @@ def test_npc_self_spec_falls_back_when_projection_has_no_mapping(monkeypatch):
 
     transport = httpx.ASGITransport(app=_stub_app)  # type: ignore[arg-type]
     client = httpx.AsyncClient(transport=transport, base_url="http://agent-runtime")
-
-    driver = RoomDriver(
-        repo=InMemoryStateRepository(),
-        agent_runtime_client=client,
-        bonfire_id="b1",
-        internal_token=_INTERNAL_TOKEN,
-        projection=_FakeProjection({}),
-    )
-    spec = driver._npc_self_spec({"uuid": "eng-3", "name": "Goblin", "labels": ["Character", "NPC"]})
-    assert spec["embodiment_agent_id"] == "eng-3"
+    try:
+        driver = RoomDriver(
+            repo=InMemoryStateRepository(),
+            agent_runtime_client=client,
+            bonfire_id="b1",
+            internal_token=_INTERNAL_TOKEN,
+            projection=_FakeProjection({}),
+        )
+        spec = driver._npc_self_spec({"uuid": "eng-3", "name": "Goblin", "labels": ["Character", "NPC"]})
+        assert spec["embodiment_agent_id"] == "eng-3"
+    finally:
+        import asyncio
+        asyncio.run(client.aclose())
