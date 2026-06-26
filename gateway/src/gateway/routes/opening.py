@@ -105,7 +105,7 @@ def build_comprehension() -> object:
     from memento.cxn.null_comprehension_client import NullComprehensionClient
 
     if os.environ.get("KERNEL_BASE_URL") and os.environ.get("GM_INTERNAL_TOKEN"):
-        return HttpComprehensionClient()
+        return HttpComprehensionClient(bonfire_id=BONFIRE_ID)
     return NullComprehensionClient()
 
 
