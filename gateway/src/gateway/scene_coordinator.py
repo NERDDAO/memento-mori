@@ -4,46 +4,104 @@ the NPC reply over the existing WS tool_event path. Keeps submit_action thin.
 P1 scope: assumes a scene is ALREADY registered for the location (auto-activation
 is P2). handle_player_message returns False (no-op) whenever a persona scene is
 not available, so the caller falls through to the existing RoundManager path.
+
+P2 extension: ensure_scene auto-activates when NPCs are present and an
+activation_service is provided. P1-style direct construction (no activation_service)
+preserves the original behavior.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from gateway.location_resolver import LocationResolver
 from gateway.log import get_logger
+from gateway.scene_activation import (
+    SceneActivationError,
+    SceneActivationService,
+    SceneAlreadyOpen,
+)
 
 logger = get_logger(__name__)
 
 
 class SceneCoordinator:
-    def __init__(self, *, scene_registry: Any, cxn_repo: Any, ws_hub: Any) -> None:
+    def __init__(
+        self,
+        *,
+        scene_registry: Any,
+        cxn_repo: Any,
+        ws_hub: Any,
+        activation_service: Any = None,
+        location_resolver: Any = None,
+    ) -> None:
         self._registry = scene_registry
         self._repo = cxn_repo
         self._ws_hub = ws_hub
+        self._activation = activation_service
+        self._resolver = location_resolver or LocationResolver(cxn_repo, {})
 
     @classmethod
     def from_app_state(cls, state: Any) -> "SceneCoordinator":
-        # Tolerant: scene infra may be absent (e.g. lifespan not run) -> no-op path.
+        registry = getattr(state, "scene_registry", None)
+        repo = getattr(state, "cxn_repo", None)
+        ws_hub = getattr(state, "ws_hub", None)
+        cache = getattr(state, "scene_locations", None)
+        activation = None
+        if (
+            registry is not None
+            and repo is not None
+            and getattr(state, "agent_runtime_client", None) is not None
+        ):
+            activation = SceneActivationService.from_app_state(state)
         return cls(
-            scene_registry=getattr(state, "scene_registry", None),
-            cxn_repo=getattr(state, "cxn_repo", None),
-            ws_hub=getattr(state, "ws_hub", None),
+            scene_registry=registry,
+            cxn_repo=repo,
+            ws_hub=ws_hub,
+            activation_service=activation,
+            location_resolver=LocationResolver(repo, cache),
         )
+
+    async def ensure_scene(self, location_uuid: str) -> Any | None:
+        if self._registry is None:
+            return None
+        driver = self._registry.get(location_uuid)
+        if driver is not None:
+            return driver  # already active (idempotent)
+        if self._activation is None:
+            return None  # no auto-activation capability (P1-style direct construction)
+        if not await self._has_persona_npcs(location_uuid):
+            return None  # nothing to talk to here -> caller falls through
+        try:
+            await self._activation.activate(location_uuid)
+        except SceneAlreadyOpen:
+            pass  # concurrent activation won the race
+        except SceneActivationError as exc:  # incl. AgentRuntimeUnavailable
+            logger.warning("scene_coordinator.activate_failed: %s", exc)
+            return None
+        return self._registry.get(location_uuid)
+
+    async def _has_persona_npcs(self, location_uuid: str) -> bool:
+        if self._repo is None:
+            return False
+        try:
+            entities = await self._repo.get_entities_at_location(location_uuid)
+        except Exception:  # repo failure must not break the action path
+            return False
+        return any(e.get("kind") == "character" for e in entities)
 
     async def handle_player_message(
         self, player_id: str, location_name: str, message: str
     ) -> bool:
         if self._registry is None or self._ws_hub is None:
             return False
-        from gateway.routes.codex import _get_location_uuid
-
-        location_uuid = await _get_location_uuid(player_id)
+        location_uuid = await self._resolver.uuid_for(player_id, location_name)
         if not location_uuid:
             return False
-        driver = self._registry.get(location_uuid)
+        self._resolver.record(location_name, location_uuid)  # for maybe_close (Task 4)
+        driver = await self.ensure_scene(location_uuid)
         if driver is None:
             return False
-
         try:
             turn = await driver.drive_turn(location_uuid, message)
         except Exception as exc:  # persona failure must NOT break the action path
