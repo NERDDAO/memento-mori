@@ -424,7 +424,7 @@ async def test_per_self_identity_only_moves_acting_npc(
 
 
 @pytest.mark.asyncio
-async def test_capability_chain_enforced_over_one_store(world, capturing_memory):
+async def test_capability_chain_enforced_over_one_store(world, gateway_app):
     """Arc-integration proof: labels -> roster capabilities + KG-uuid embodiment ->
     per-self JWT -> the real check_tool_access reading the SAME label store -> enforcement.
 
@@ -436,11 +436,8 @@ async def test_capability_chain_enforced_over_one_store(world, capturing_memory)
 
     import httpx
     import memento.bonfires_client as bonfires_client
-    from gateway.app import app
     from gateway.engine_auth import sign_jwt
     from gateway.room_driver import RoomDriver
-    from memento.cxn.executor import EffectExecutor
-    from memento.state.chain_mirror import NoopChainMirror
 
     repo = world["repo"]
     npc_id = world["npc_id"]
@@ -482,14 +479,10 @@ async def test_capability_chain_enforced_over_one_store(world, capturing_memory)
         await ar_client.aclose()
 
     # --- GATE HALF: real check_tool_access over the SAME store; executor over InMemory world ---
-    app.state.cxn_repo = repo
-    app.state.cxn_executor = EffectExecutor(
-        repo=repo, memory=capturing_memory, chain=NoopChainMirror()
-    )
     token = sign_jwt(kg_uuid, type="npc", ttl_seconds=3600)
     auth = {"Authorization": f"Bearer {token}"}
 
-    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+    transport = httpx.ASGITransport(app=gateway_app)  # type: ignore[arg-type]
     gw = httpx.AsyncClient(transport=transport, base_url="http://testserver")
     try:
         with (
