@@ -416,3 +416,107 @@ async def test_per_self_identity_only_moves_acting_npc(
     # Episode actor_id == npc_id (not npc2_id)
     assert len(capturing_memory.ingested) == 1
     assert capturing_memory.ingested[0]["actor_id"] == npc_id
+
+
+# ---------------------------------------------------------------------------
+# E2 — Arc-integration proof: capability-chain enforced over one label store
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_capability_chain_enforced_over_one_store(world, capturing_memory):
+    """Arc-integration proof: labels -> roster capabilities + KG-uuid embodiment ->
+    per-self JWT -> the real check_tool_access reading the SAME label store -> enforcement.
+
+    Identity-uuid: KG uuid == engine uuid (one id behind gate AND executor), so a real
+    mm_move reaches 200 and a label revocation in the one store flips allow (200) -> deny (403).
+    """
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+    import memento.bonfires_client as bonfires_client
+    from gateway.app import app
+    from gateway.engine_auth import sign_jwt
+    from gateway.room_driver import RoomDriver
+    from memento.cxn.executor import EffectExecutor
+    from memento.state.chain_mirror import NoopChainMirror
+
+    repo = world["repo"]
+    npc_id = world["npc_id"]
+    room_a_id = world["room_a_id"]
+    room_b_id = world["room_b_id"]
+
+    kg_uuid = npc_id  # identity-uuid: KG uuid coincides with engine uuid
+
+    # --- THE ONE STORE: a single mutable label-bearing entity dict, read by BOTH
+    #     the roster spec-builder AND the gate.
+    label_store: dict[str, dict] = {
+        kg_uuid: {"uuid": kg_uuid, "name": "Guard", "labels": ["Character", "NPC"]}
+    }
+
+    class _IdentityProjection:
+        """KG uuid == engine uuid (identity map), matching #4-B-A's live shape in identity mode."""
+        def kg_uuid_for(self, engine_uuid: str) -> str | None:
+            return kg_uuid if engine_uuid == npc_id else None
+
+    class _GateKg:
+        """The slice of the KG client check_tool_access uses, pointed at the one store."""
+        def get_entity(self, uuid: str) -> dict | None:
+            return label_store.get(uuid)
+
+    # --- ROSTER HALF: capabilities + KG-uuid embodiment, sourced from the one store ---
+    ar_client = httpx.AsyncClient(base_url="http://unused")  # _npc_self_spec never calls it
+    try:
+        driver = RoomDriver(
+            repo=repo,
+            agent_runtime_client=ar_client,
+            bonfire_id="arc-test-bonfire",
+            projection=_IdentityProjection(),
+        )
+        spec = driver._npc_self_spec(label_store[kg_uuid])
+        assert spec["embodiment_agent_id"] == kg_uuid          # KG-uuid embodiment
+        assert "mm_move" in spec["capabilities"]               # granted by NPC kit
+        assert "mm_attack" in spec["capabilities"]
+    finally:
+        await ar_client.aclose()
+
+    # --- GATE HALF: real check_tool_access over the SAME store; executor over InMemory world ---
+    app.state.cxn_repo = repo
+    app.state.cxn_executor = EffectExecutor(
+        repo=repo, memory=capturing_memory, chain=NoopChainMirror()
+    )
+    token = sign_jwt(kg_uuid, type="npc", ttl_seconds=3600)
+    auth = {"Authorization": f"Bearer {token}"}
+
+    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+    gw = httpx.AsyncClient(transport=transport, base_url="http://testserver")
+    try:
+        with (
+            patch.object(bonfires_client, "get_client",
+                         lambda: SimpleNamespace(kg=_GateKg())),
+            patch("gateway.routes.tools_http.broadcast_tool_event", new_callable=AsyncMock),
+        ):
+            # ALLOWED: gate reads ["Character","NPC"] -> mm_move allowed -> real move -> 200
+            resp = await gw.post(
+                "/v1/tools/mm_move", json={"destination": room_b_id}, headers=auth
+            )
+            assert resp.status_code == 200, resp.text
+            moved = await repo.get_entity(npc_id)
+            assert moved["location_uuid"] == room_b_id          # real state change
+
+            # REVOKE the NPC kit in the ONE store -> roster source AND gate both lose mm_move
+            label_store[kg_uuid]["labels"] = ["Character"]
+            assert "mm_move" not in driver._npc_self_spec(label_store[kg_uuid])["capabilities"]
+
+            # DENIED: gate now reads ["Character"] -> mm_move not allowed -> 403 (before executor)
+            resp2 = await gw.post(
+                "/v1/tools/mm_move", json={"destination": room_a_id}, headers=auth
+            )
+            assert resp2.status_code == 403
+            assert resp2.json()["detail"]["error"] == "capability_missing"
+
+        # IDENTIFIER INVARIANT: the JWT sub == the KG uuid the gate resolved == embodiment id
+        assert kg_uuid == npc_id == spec["embodiment_agent_id"]
+    finally:
+        await gw.aclose()
