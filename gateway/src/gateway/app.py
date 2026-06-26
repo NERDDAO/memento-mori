@@ -75,6 +75,14 @@ async def lifespan(app: FastAPI):
 
         await seed_local_personas(app.state.cxn_repo, app.state.scene_locations)
 
+    if os.environ.get("PERSONA_KG_SEED"):
+        from gateway.persona_seed import provision_kg_personas
+
+        try:
+            await provision_kg_personas(app.state.cxn_repo, app.state.scene_locations)
+        except Exception:
+            logger.warning("KG persona provisioning failed (non-fatal)", exc_info=True)
+
     # Seed NPC registry from MongoDB + world.json
     from gateway.npc_registry import seed_from_db, register_npc, update_npc_location
 

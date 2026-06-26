@@ -53,3 +53,30 @@ async def seed_local_personas(repo: Any, cache: Any) -> bool:
         cache[_LOC_NAME] = _LOC_UUID  # so LocationResolver resolves it without KG
     logger.info("seeded local persona NPC %s at %s", _NPC_UUID, _LOC_NAME)
     return True
+
+
+async def provision_kg_personas(repo: Any, cache: Any) -> bool:
+    """Seed the persona location + NPC into a KG-backed (EventSourced) repo so a
+    real deployment has a reachable persona scene. Each seed flows through
+    KgProjection.create() -> a KG entity + a LOCATED_IN edge. No-op (returns
+    False) on the in-memory repo (that path uses seed_local_personas).
+
+    Order matters: the location is seeded first so its engine->kg uuid is mapped
+    before the NPC's LOCATED_IN edge resolves. The name->engine-uuid cache entry
+    lets LocationResolver resolve the location without a KG search, keeping the
+    cxn path on the engine-uuid identity the EventSourced repo expects.
+    """
+    from memento.state.event_sourced import EventSourcedStateRepository
+
+    if not isinstance(repo, EventSourcedStateRepository):
+        return False  # in-memory play uses seed_local_personas
+    await repo.seed_entity(
+        _location_doc()
+    )  # EventSourcedStateRepository.seed_entity is async
+    await repo.seed_entity(_npc_doc())
+    if cache is not None:
+        cache[_LOC_NAME] = (
+            _LOC_UUID  # resolve without a KG search -> engine-uuid identity
+        )
+    logger.info("provisioned KG persona NPC %s at %s", _NPC_UUID, _LOC_NAME)
+    return True
