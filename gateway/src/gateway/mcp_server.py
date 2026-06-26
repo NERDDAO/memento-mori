@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 
     from gateway.matrix_bridge import MatrixBridge
     from gateway.ws import WebSocketHub
+    from memento.state.repository import StateRepository
 
 logger = get_logger(__name__)
 
@@ -1192,6 +1193,41 @@ def _register_design_tools(mcp: FastMCP) -> None:
         return {"region_design": result}
 
 
+# ── Cxn repo factory ────────────────────────────────────────────────────────
+
+
+def _build_cxn_repo() -> "StateRepository":
+    """Return the appropriate StateRepository for the cxn/MCP executor.
+
+    When KERNEL_BASE_URL + GM_INTERNAL_TOKEN are configured, return an
+    EventSourcedStateRepository backed by a live KgProjection — the SAME
+    store the capability gate reads — so cxn reads/writes are visible to the
+    gate without a separate sync step.
+
+    Otherwise return InMemoryStateRepository (local/test default, byte-
+    equivalent to the previous hard-wired assignment).
+    """
+    import os
+
+    if os.environ.get("KERNEL_BASE_URL") and os.environ.get("GM_INTERNAL_TOKEN"):
+        from memento.bonfires_client import get_client
+        from memento.state.chain_mirror import NoopChainMirror
+        from memento.state.event_sourced import EventSourcedStateRepository
+        from memento.state.kg_projection import KgProjection
+        from memento.state.tx_log import InMemoryActivationLog, InMemoryTxLog
+
+        return EventSourcedStateRepository(
+            InMemoryTxLog(),
+            InMemoryActivationLog(),
+            KgProjection(kg=get_client().kg),
+            NoopChainMirror(),
+        )
+
+    from memento.state.in_memory import InMemoryStateRepository
+
+    return InMemoryStateRepository()
+
+
 # ── Factory ─────────────────────────────────────────────────────────────────
 
 
@@ -1234,7 +1270,6 @@ def build_mcp_app(
     from memento.memory.client import MemoryClient
     from memento.memory.null_client import NullMemoryClient
     from memento.state.chain_mirror import NoopChainMirror
-    from memento.state.in_memory import InMemoryStateRepository
 
     memory: MemoryClient
     if os.environ.get("KERNEL_BASE_URL") and os.environ.get("GM_INTERNAL_TOKEN"):
@@ -1244,7 +1279,7 @@ def build_mcp_app(
     else:
         memory = NullMemoryClient()
 
-    cxn_repo = InMemoryStateRepository()
+    cxn_repo = _build_cxn_repo()
     cxn_mirror = NoopChainMirror()
 
     cxn_executor = register_cxn_tools(
