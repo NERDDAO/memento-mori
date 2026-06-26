@@ -66,6 +66,11 @@ async def lifespan(app: FastAPI):
     app.state.cxn_executor = mcp_asgi.cxn_executor  # type: ignore[attr-defined]
     app.state.agent_runtime_client = build_agent_runtime_client()
     app.state.scene_registry = {}
+    app.state.scene_locations = {}  # location name -> uuid cache (LocationResolver)
+    if os.environ.get("PERSONA_LOCAL_SEED"):
+        from gateway.persona_seed import seed_local_personas
+
+        await seed_local_personas(app.state.cxn_repo, app.state.scene_locations)
 
     # Seed NPC registry from MongoDB + world.json
     from gateway.npc_registry import seed_from_db, register_npc, update_npc_location
