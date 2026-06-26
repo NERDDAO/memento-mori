@@ -52,6 +52,7 @@ class SceneActivationService:
             repo=state.cxn_repo,
             agent_runtime_client=state.agent_runtime_client,
             scene_registry=state.scene_registry,
+            bonfire_id=getattr(state, "bonfire_id", BONFIRE_ID),
         )
 
     def _build_driver(self) -> RoomDriver:
@@ -84,5 +85,7 @@ class SceneActivationService:
             result = await driver.close_room(location_uuid)
         except httpx.HTTPError as exc:
             raise AgentRuntimeUnavailable(str(exc)) from exc
-        self._registry.pop(location_uuid, None)  # deregister only after a successful close
+        self._registry.pop(
+            location_uuid, None
+        )  # deregister only after a successful close
         return {"scene_id": location_uuid, **result}

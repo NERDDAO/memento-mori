@@ -67,6 +67,9 @@ async def lifespan(app: FastAPI):
     app.state.agent_runtime_client = build_agent_runtime_client()
     app.state.scene_registry = {}
     app.state.scene_locations = {}  # location name -> uuid cache (LocationResolver)
+    from gateway.world_identity import resolve_bonfire_id
+
+    app.state.bonfire_id = resolve_bonfire_id()
     if os.environ.get("PERSONA_LOCAL_SEED"):
         from gateway.persona_seed import seed_local_personas
 

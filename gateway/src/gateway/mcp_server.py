@@ -1267,6 +1267,9 @@ def build_mcp_app(
     import os
 
     from gateway.cxn_tools import register_cxn_tools, register_mm_act
+    from gateway.world_identity import resolve_bonfire_id
+
+    bonfire_id = resolve_bonfire_id()
     from memento.memory.client import MemoryClient
     from memento.memory.null_client import NullMemoryClient
     from memento.state.chain_mirror import NoopChainMirror
@@ -1288,6 +1291,7 @@ def build_mcp_app(
         cxn_repo,
         cxn_mirror,
         memory,
+        bonfire_id=bonfire_id,
     )
 
     # mm_act — free-text MCP tool (M2 Task 3).
@@ -1300,7 +1304,7 @@ def build_mcp_app(
 
     comprehension: ComprehensionClient
     if os.environ.get("KERNEL_BASE_URL") and os.environ.get("GM_INTERNAL_TOKEN"):
-        comprehension = HttpComprehensionClient()
+        comprehension = HttpComprehensionClient(bonfire_id=bonfire_id)
     else:
         comprehension = NullComprehensionClient()
 
@@ -1311,6 +1315,7 @@ def build_mcp_app(
         cxn_mirror,
         memory,
         comprehension,
+        bonfire_id=bonfire_id,
     )
 
     logger.info(

@@ -43,7 +43,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from memento.cxn.definitions import CONSTRUCTION_REGISTRY
-from memento.cxn.executor import EffectExecutor
+from memento.cxn.executor import DEFAULT_BONFIRE_ID, EffectExecutor
 from memento.cxn.types import ConstructionError, CxnDef, MatchedCxn
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -62,6 +62,7 @@ def register_cxn_tools(
     repo: "StateRepository",
     mirror: "ChainMirror",
     memory: "MemoryClient",
+    bonfire_id: str = DEFAULT_BONFIRE_ID,
 ) -> "EffectExecutor":
     """Register the construction MCP tools on ``mcp``.
 
@@ -78,7 +79,9 @@ def register_cxn_tools(
     from gateway.engine_events import broadcast_tool_event
     from gateway.mcp_server import _check_tool_access
 
-    executor = EffectExecutor(repo=repo, memory=memory, chain=mirror)
+    executor = EffectExecutor(
+        repo=repo, memory=memory, chain=mirror, bonfire_id=bonfire_id
+    )
 
     move_cxn: CxnDef = CONSTRUCTION_REGISTRY["MOVE"]
     attack_cxn: CxnDef = CONSTRUCTION_REGISTRY["ATTACK"]

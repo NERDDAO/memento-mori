@@ -50,6 +50,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from gateway.log import get_logger
+from gateway.world_identity import resolve_bonfire_id
 
 logger = get_logger(__name__)
 
@@ -65,12 +66,14 @@ opening_registry: dict[str, object] = {}  # player_uuid → TurnRouter
 # Pydantic models
 # ---------------------------------------------------------------------------
 
-BONFIRE_ID = "mm-world-v1"
+BONFIRE_ID = resolve_bonfire_id()
 
 
 class StartOpeningRequest(BaseModel):
     player_name: str = Field(..., min_length=1, max_length=30)
-    wallet_address: str = Field(..., min_length=42, max_length=42, pattern=r'^0x[a-fA-F0-9]{40}$')
+    wallet_address: str = Field(
+        ..., min_length=42, max_length=42, pattern=r"^0x[a-fA-F0-9]{40}$"
+    )
     archetype: str = Field("", max_length=20)
 
 
@@ -109,12 +112,14 @@ def build_comprehension() -> object:
 def build_memory() -> object:
     """Return a MemoryClient for the opening session."""
     from memento.memory.null_client import NullMemoryClient
+
     return NullMemoryClient()
 
 
 def build_mirror() -> object:
     """Return a ChainMirror for the opening session."""
     from memento.state.chain_mirror import LiveChainMirror
+
     return LiveChainMirror()
 
 
@@ -122,6 +127,7 @@ def build_projection() -> object:
     """Return a KgProjectionProtocol for the opening session."""
     from memento.bonfires_client import get_client
     from memento.state.kg_projection import KgProjection
+
     return KgProjection(kg=get_client().kg)
 
 
@@ -132,6 +138,7 @@ async def create_player(
 ) -> str:
     """Create a player via SessionManager and return the player UUID."""
     from memento.session import SessionManager
+
     sm = SessionManager()
     result = await asyncio.to_thread(
         sm.create_player,
@@ -213,6 +220,7 @@ async def start_opening(req: StartOpeningRequest) -> StartOpeningResponse:
     # -- 5. Seed the opening room + canon facts; get director --------------------
     seed = deep_roads_seed()
     from memento.opening.loader import load_seed_room
+
     director = await load_seed_room(seed, repo, player_uuid)
 
     # -- 6. Build director-backed TurnRouter (canonical wiring) ------------------
@@ -250,8 +258,7 @@ async def start_opening(req: StartOpeningRequest) -> StartOpeningResponse:
         location_name=manifest.name,
         description=manifest.description,
         exits=[
-            {"direction": e.direction, "target_id": e.target_id}
-            for e in manifest.exits
+            {"direction": e.direction, "target_id": e.target_id} for e in manifest.exits
         ],
     )
 
