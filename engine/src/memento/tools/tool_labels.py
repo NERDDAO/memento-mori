@@ -13,21 +13,25 @@ Individual labels like "QuestGiver" can be added on top of a kit.
 
 # ── Innate — every agent, no label needed ──
 
-INNATE_TOOLS = frozenset({
-    # Read-only state
-    "mm_get_state",
-    "mm_get_world_time",
-    "mm_search_world",
-    "mm_get_entity",
-    # Basic mechanics
-    "mm_skill_check",
-    "mm_calculate_damage",
-    "mm_evaluate_disposition",
-    # Communication
-    "mm_npc_response",
-    "mm_send_gossip",
-    "mm_npc_memory",
-})
+INNATE_TOOLS = frozenset(
+    {
+        # Read-only state
+        "mm_get_state",
+        "mm_get_world_time",
+        "mm_search_world",
+        "mm_get_entity",
+        # Basic mechanics
+        "mm_skill_check",
+        "mm_calculate_damage",
+        "mm_evaluate_disposition",
+        # Communication
+        "mm_npc_response",
+        "mm_send_gossip",
+        "mm_npc_memory",
+        # Perception
+        "mm_look",
+    }
+)
 
 # ── Kits — role-based bundles (one label = full role) ──
 
