@@ -1,4 +1,5 @@
-from memento.opening.reveal import reveal_or_deepen
+from memento.opening.deep_roads import LOC_DEEP_ROADS, deep_roads_seed
+from memento.opening.reveal import reveal_or_deepen, seed_room_ecs
 from memento.state.in_memory import InMemoryStateRepository
 
 
@@ -85,3 +86,28 @@ async def test_reveal_level_is_monotonic_and_capped():
         await reveal_or_deepen(repo, "loc-1", max_depth=3)
         levels.append((await repo.get_entity("a"))["attrs"]["reveal_level"])
     assert levels == [1, 2, 3, 3, 3]
+
+
+async def test_seed_room_ecs_marks_facts_latent_with_salience():
+    repo = InMemoryStateRepository()
+    await seed_room_ecs(repo, deep_roads_seed())
+    ents = await repo.get_entities_at_location(LOC_DEEP_ROADS)
+    items = await repo.get_items_at_location(LOC_DEEP_ROADS)
+    by_name = {t["name"]: t for t in (list(ents) + list(items))}
+    assert by_name["a dying adventurer"]["attrs"]["reveal_level"] == 0
+    assert by_name["a dying adventurer"]["attrs"]["salience"] == 1_000_000
+    # the iron blade is an item, seeded as a floor item, still reveal-tracked
+    assert by_name["an iron blade"]["kind"] == "item"
+    assert by_name["an iron blade"]["attrs"]["reveal_level"] == 0
+    assert by_name["an iron blade"]["attrs"]["damage"] == 4  # original attrs preserved
+
+
+async def test_deep_roads_reveals_in_authored_order_then_deepens():
+    repo = InMemoryStateRepository()
+    await seed_room_ecs(repo, deep_roads_seed())
+    names = [
+        (await reveal_or_deepen(repo, LOC_DEEP_ROADS)).entity["name"] for _ in range(3)
+    ]
+    assert names == ["a dying adventurer", "something in the dark", "an iron blade"]
+    d = await reveal_or_deepen(repo, LOC_DEEP_ROADS)  # 4th look -> deepen most salient
+    assert d.kind == "deepened" and d.entity["name"] == "a dying adventurer"
