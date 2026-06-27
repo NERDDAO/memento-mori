@@ -10,7 +10,7 @@
  */
 
 export const OPENING_EPIGRAPH =
-  "Remember that you must die.\nEnter, wanderer, if you dare.";
+  "The old world is dying, yet the new world struggles to be born: this is the time of monsters.";
 
 /**
  * Mount the #opening-intro overlay (if present) and call `onName` exactly

@@ -1882,8 +1882,7 @@ function connectOpeningWs(playerId, onMessage) {
 }
 
 // src/state/opening-intro.ts
-var OPENING_EPIGRAPH = `Remember that you must die.
-Enter, wanderer, if you dare.`;
+var OPENING_EPIGRAPH = "The old world is dying, yet the new world struggles to be born: this is the time of monsters.";
 function mountOpeningIntro(onName) {
   const overlay = document.getElementById("opening-intro");
   const epigraphEl = overlay?.querySelector(".opening-epigraph");
