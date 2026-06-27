@@ -26,6 +26,7 @@ import {
   routeOpeningMessage,
   type OpeningSurfaces,
 } from "../state/opening-ws";
+import { mountOpeningIntro } from "../state/opening-intro";
 
 document.addEventListener("DOMContentLoaded", () => {
   // 1. Mount the unified canvas with the opening two-pane layout.
@@ -140,7 +141,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (prose.tick()) redrawProse();
   }, 25);
 
-  // 9. Show the empty room shell immediately, then kick off the opening.
+  // 9. Show the empty room shell immediately, then present the cinematic
+  //    opening intro (title card + epigraph fade + name box). The overlay
+  //    calls start(name) once the player submits their name (or "wanderer"
+  //    if the markup is absent / input is left blank).
   viewport.render();
-  void start("wanderer");
+  mountOpeningIntro((name) => {
+    void start(name);
+  });
 });

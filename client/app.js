@@ -1881,6 +1881,50 @@ function connectOpeningWs(playerId, onMessage) {
   return ws;
 }
 
+// src/state/opening-intro.ts
+var OPENING_EPIGRAPH = `Remember that you must die.
+Enter, wanderer, if you dare.`;
+function mountOpeningIntro(onName) {
+  const overlay = document.getElementById("opening-intro");
+  if (!overlay) {
+    onName("wanderer");
+    return;
+  }
+  const epigraphEl = overlay.querySelector(".opening-epigraph");
+  if (epigraphEl) {
+    epigraphEl.innerHTML = OPENING_EPIGRAPH.replace(/\n/g, "<br>");
+  }
+  overlay.classList.remove("hidden");
+  const nameSection = overlay.querySelector(".opening-name-section");
+  const nameInput = overlay.querySelector("#opening-name-input");
+  const nameBtn = overlay.querySelector("#opening-name-btn");
+  let called = false;
+  function submit() {
+    if (called)
+      return;
+    called = true;
+    const raw = nameInput?.value.trim() ?? "";
+    const name = raw.length > 0 ? raw : "wanderer";
+    overlay.classList.add("hidden");
+    onName(name);
+  }
+  setTimeout(() => {
+    if (nameSection) {
+      nameSection.classList.remove("hidden");
+      nameInput?.focus();
+    }
+  }, 2400);
+  if (nameInput) {
+    nameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter")
+        submit();
+    });
+  }
+  if (nameBtn) {
+    nameBtn.addEventListener("click", () => submit());
+  }
+}
+
 // src/boot/opening-shell.ts
 document.addEventListener("DOMContentLoaded", () => {
   const tuiMain = document.getElementById("tui-main");
@@ -1971,5 +2015,7 @@ document.addEventListener("DOMContentLoaded", () => {
       redrawProse();
   }, 25);
   viewport.render();
-  start("wanderer");
+  mountOpeningIntro((name) => {
+    start(name);
+  });
 });
