@@ -1817,7 +1817,11 @@ function routeOpeningMessage(msg, s) {
   switch (msg?.type) {
     case "tool_event":
       if (msg.tool === "mm_npc_response" && msg.npc) {
-        s.prose.enqueue({ kind: "npc-dialogue", text: msg.summary ?? "", speaker: msg.npc });
+        s.prose.enqueue({
+          kind: "npc-dialogue",
+          text: msg.summary ?? "",
+          speaker: msg.npc
+        });
         s.redrawProse();
       }
       break;
@@ -1838,8 +1842,26 @@ function routeOpeningMessage(msg, s) {
       s.viewport.setContents(s.roomUuid(), things.filter((t) => t.uuid !== msg.npc_id && t.name !== msg.npc_name));
       break;
     }
+    case "room_draw": {
+      if (msg.kind !== "revealed")
+        break;
+      const entity = msg.entity;
+      if (!entity || !entity.name)
+        break;
+      const things = s.viewport.currentThings();
+      if (things.some((t) => t.uuid === entity.uuid || t.name === entity.name))
+        break;
+      s.viewport.setContents(s.roomUuid(), [
+        ...things,
+        { uuid: entity.uuid ?? "", name: entity.name }
+      ]);
+      break;
+    }
     case "cxn_fired":
-      s.prose.enqueue({ kind: "catch", text: `◇ caught: ${msg.cxn ?? ""}` });
+      s.prose.enqueue({
+        kind: "catch",
+        text: `◇ caught: ${msg.cxn ?? ""}`
+      });
       s.redrawProse();
       break;
     default:

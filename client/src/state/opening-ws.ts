@@ -54,6 +54,19 @@ export function routeOpeningMessage(
       );
       break;
     }
+    case "room_draw": {
+      if (msg.kind !== "revealed") break; // deepened/exhausted: no new glyph
+      const entity = msg.entity as { uuid?: string; name?: string } | null;
+      if (!entity || !entity.name) break;
+      const things = s.viewport.currentThings();
+      if (things.some((t) => t.uuid === entity.uuid || t.name === entity.name))
+        break;
+      s.viewport.setContents(s.roomUuid(), [
+        ...things,
+        { uuid: (entity.uuid as string) ?? "", name: entity.name as string },
+      ]);
+      break;
+    }
     case "cxn_fired":
       s.prose.enqueue({
         kind: "catch",

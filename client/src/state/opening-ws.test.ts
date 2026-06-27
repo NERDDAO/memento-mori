@@ -118,3 +118,49 @@ test("presence and unknown messages are ignored", () => {
   expect(s.enqueued).toEqual([]);
   expect(s.things).toEqual([]);
 });
+
+test("room_draw revealed adds the entity glyph to the viewport", () => {
+  const s = makeSurfaces();
+  routeOpeningMessage(
+    {
+      type: "room_draw",
+      kind: "revealed",
+      entity: { uuid: "e1", name: "a dying adventurer" },
+      location: "loc-1",
+    },
+    s.surfaces,
+  );
+  expect(s.things).toEqual([{ uuid: "e1", name: "a dying adventurer" }]);
+});
+
+test("room_draw deepened does not add a glyph", () => {
+  const s = makeSurfaces();
+  routeOpeningMessage(
+    {
+      type: "room_draw",
+      kind: "deepened",
+      entity: { uuid: "e1", name: "a dying adventurer" },
+      depth: 2,
+      location: "loc-1",
+    },
+    s.surfaces,
+  );
+  expect(s.things).toEqual([]);
+});
+
+test("room_draw revealed dedups an already-present entity", () => {
+  const s = makeSurfaces();
+  s.surfaces.viewport.setContents("507f1f77bcf86cd799439011", [
+    { uuid: "e1", name: "a dying adventurer" },
+  ]);
+  routeOpeningMessage(
+    {
+      type: "room_draw",
+      kind: "revealed",
+      entity: { uuid: "e1", name: "a dying adventurer" },
+      location: "loc-1",
+    },
+    s.surfaces,
+  );
+  expect(s.things).toEqual([{ uuid: "e1", name: "a dying adventurer" }]);
+});
