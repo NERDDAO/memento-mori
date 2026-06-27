@@ -91,6 +91,14 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.warning("opening persona seed failed (non-fatal)", exc_info=True)
 
+    if os.environ.get("OPENING_ROOM_SEED"):
+        from gateway.look_tool import seed_opening_room
+
+        try:
+            await seed_opening_room(app.state.cxn_repo)
+        except Exception:
+            logger.warning("opening room ECS seed failed (non-fatal)", exc_info=True)
+
     # Seed NPC registry from MongoDB + world.json
     from gateway.npc_registry import seed_from_db, register_npc, update_npc_location
 

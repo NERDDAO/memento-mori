@@ -12,7 +12,7 @@ from memento.opening.deep_roads import LOC_DEEP_ROADS, deep_roads_seed
 from memento.opening.reveal import seed_room_ecs
 from memento.state.in_memory import InMemoryStateRepository
 
-from gateway.look_tool import register_look_tool
+from gateway.look_tool import register_look_tool, seed_opening_room
 
 _ACTOR = "player-uuid-1"
 
@@ -146,3 +146,40 @@ async def test_mm_look_degrades_when_actor_has_no_location():
     res = await _call_look(mcp)  # must not raise
     assert res["kind"] == "exhausted" and res["entity"] is None
     assert hub.broadcast_to_location.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_seed_opening_room_seeds_latent_reveal_tracked_facts():
+    repo = InMemoryStateRepository()
+    await seed_opening_room(repo)
+    ents = await repo.get_entities_at_location(LOC_DEEP_ROADS)
+    items = await repo.get_items_at_location(LOC_DEEP_ROADS)
+    by_name = {t["name"]: t for t in (list(ents) + list(items))}
+    assert by_name["a dying adventurer"]["attrs"]["reveal_level"] == 0
+    assert by_name["a dying adventurer"]["attrs"]["salience"] == 1_000_000
+    assert by_name["something in the dark"]["attrs"]["reveal_level"] == 0
+    assert by_name["an iron blade"]["kind"] == "item"  # item arm
+    assert by_name["an iron blade"]["attrs"]["reveal_level"] == 0
+
+
+@pytest.mark.asyncio
+async def test_seeded_room_drives_mm_look_in_authored_order():
+    repo = InMemoryStateRepository()
+    await seed_opening_room(repo)  # boot-seed path (no manual seed_room_ecs)
+    repo.seed_entity(
+        {
+            "uuid": _ACTOR,
+            "name": "you",
+            "kind": "character",
+            "labels": ["Character"],
+            "location_uuid": LOC_DEEP_ROADS,
+            "attrs": {},
+            "is_dead": False,
+        }
+    )
+    hub = _hub()
+    mcp = _fastmcp()
+    register_look_tool(mcp, hub, repo)
+
+    names = [(await _call_look(mcp))["entity"]["name"] for _ in range(3)]
+    assert names == ["a dying adventurer", "something in the dark", "an iron blade"]

@@ -18,7 +18,7 @@ to a narration dict — ``mm_look`` never raises into the ReAct turn.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from memento.opening.reveal import DEFAULT_MAX_DEPTH, RevealDelta, reveal_or_deepen
 
@@ -107,3 +107,17 @@ def register_look_tool(
             "depth": delta.depth,
             "summary": _summarize(delta),
         }
+
+
+async def seed_opening_room(repo: Any) -> None:
+    """Seed the pre-authored Deep Roads room into the cxn repo as reveal-tracked
+    ECS entities (``reveal_level=0`` + ``salience``), so the gateway-hosted
+    ``mm_look`` has a room to read and advance. Gated on ``OPENING_ROOM_SEED``
+    and wrapped non-fatal by the caller — a seed failure must not crash boot.
+    """
+    from memento.opening.deep_roads import deep_roads_seed
+
+    from memento.opening.reveal import seed_room_ecs
+
+    await seed_room_ecs(repo, deep_roads_seed())
+    logger.info("seeded opening room ECS (Deep Roads) into the cxn repo")
