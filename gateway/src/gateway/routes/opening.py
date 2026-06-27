@@ -322,13 +322,18 @@ async def start_opening(
             await _seed_player_into_cxn_repo(
                 cxn_repo, player_uuid, req.player_name
             )  # B1
-            await _open_player_scene(state, player_uuid, req.player_name)  # B2
+            # B-grammar BEFORE B2: author LOOK under the player's comprehend
+            # profile *before* the scene opens, so the agent-runtime's first
+            # comprehend for this profile (the scene-open beat) already sees the
+            # grammar — otherwise the first (pre-authoring) comprehend can seed
+            # stale per-actor comprehend state and the look turn misses LOOK.
             if os.environ.get("KERNEL_BASE_URL") and os.environ.get(
                 "GM_INTERNAL_TOKEN"
             ):
                 await _author_look_for_player(
                     getattr(state, "bonfire_id", BONFIRE_ID), player_uuid
-                )  # B-grammar: author LOOK under the player's comprehend profile
+                )  # B-grammar
+            await _open_player_scene(state, player_uuid, req.player_name)  # B2
         except Exception:
             logger.warning(
                 "opening player-as-persona setup failed (non-fatal)", exc_info=True
@@ -428,6 +433,34 @@ async def look_opening(req: LookRequest, request: Request) -> dict:
         return {"ok": False, "fired_cxns": [], "response_text": ""}
 
     fired = turn.get("fired_cxns") or []
+
+    # Reveal fallback (spec'd in the player-as-persona design): the ReAct agent
+    # may elect not to call mm_look, so when LOOK fires the gateway draws the
+    # room directly — reveal the next salient thing and broadcast the room_draw
+    # delta. Deterministic; never depends on the LLM's tool election. When the
+    # reveal actually surfaces/deepens something, its summary becomes the
+    # narration so the prose matches what the client drew (instead of the
+    # agent's context-free "I see nothing"); on an exhausted room we keep the
+    # agent's own narration rather than overwrite it with "nothing to see".
+    reveal_summary = ""
+    repo = getattr(state, "cxn_repo", None)
+    if "mm.look.v1" in fired and repo is not None:
+        try:
+            from gateway.look_tool import _broadcast_room_draw, _summarize
+            from memento.opening.deep_roads import LOC_DEEP_ROADS as _LOC
+            from memento.opening.reveal import reveal_or_deepen
+
+            from gateway.app import ws_hub as _wsh
+
+            delta = await reveal_or_deepen(repo, _LOC)
+            await _broadcast_room_draw(_wsh, _LOC, delta)
+            if delta.kind != "exhausted":
+                reveal_summary = _summarize(delta)
+        except Exception:
+            logger.warning(
+                "opening look reveal fallback failed (non-fatal)", exc_info=True
+            )
+
     try:
         from gateway.app import ws_hub
 
@@ -445,7 +478,9 @@ async def look_opening(req: LookRequest, request: Request) -> dict:
                         "location": location_name,
                     },
                 )
-            response_text = turn.get("response_text", "")
+            # Prefer the reveal summary (matches the drawn glyph) over the agent's
+            # context-free narration when LOOK drew the room.
+            response_text = reveal_summary or turn.get("response_text", "")
             if turn.get("should_respond", True) and response_text:
                 player_name = (await _player_name(state, req.player_id)) or "Traveler"
                 await ws_hub.broadcast_to_location(
@@ -466,7 +501,7 @@ async def look_opening(req: LookRequest, request: Request) -> dict:
     return {
         "ok": True,
         "fired_cxns": fired,
-        "response_text": turn.get("response_text", ""),
+        "response_text": reveal_summary or turn.get("response_text", ""),
     }
 
 

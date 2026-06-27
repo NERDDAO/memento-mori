@@ -99,6 +99,16 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.warning("opening room ECS seed failed (non-fatal)", exc_info=True)
 
+    # Dev/demo affordance: re-virginise the shared opening room (reveal_level=0)
+    # so the reveal sequence can be shown fresh. Off by default.
+    if os.environ.get("OPENING_ROOM_RESET"):
+        from gateway.look_tool import reset_opening_room
+
+        try:
+            await reset_opening_room(app.state.cxn_repo)
+        except Exception:
+            logger.warning("opening room reset failed (non-fatal)", exc_info=True)
+
     if (
         os.environ.get("KERNEL_BASE_URL")
         and os.environ.get("GM_INTERNAL_TOKEN")

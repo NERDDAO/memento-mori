@@ -123,6 +123,27 @@ async def seed_opening_room(repo: Any) -> None:
     logger.info("seeded opening room ECS (Deep Roads) into the cxn repo")
 
 
+async def reset_opening_room(repo: Any) -> int:
+    """Reset every reveal-tracked thing in the Deep Roads back to ``reveal_level=0``.
+
+    The opening room is shared, and ``reveal_level`` is monotonic + KG-durable —
+    so once visitors have surfaced/deepened everything, later looks are
+    "exhausted" (correct multiplayer semantics). This dev/demo affordance
+    re-virginises the room so the reveal sequence can be shown fresh. Gated on
+    ``OPENING_ROOM_RESET``; never raises into boot. Returns the count reset.
+    """
+    from memento.opening.deep_roads import LOC_DEEP_ROADS
+
+    things = await repo.get_entities_at_location(LOC_DEEP_ROADS)
+    count = 0
+    for thing in things:
+        if "reveal_level" in (thing.get("attrs") or {}):
+            await repo.set_attr(thing["uuid"], "reveal_level", 0)
+            count += 1
+    logger.info("reset %d Deep Roads thing(s) to reveal_level=0", count)
+    return count
+
+
 async def seed_look_grammar(bonfire_id: str) -> bool:
     """Author the verb-only LOOK construction on the kernel for ``bonfire_id`` so
     "look around" comprehends to LOOK. Gated on the kernel env by the caller and
