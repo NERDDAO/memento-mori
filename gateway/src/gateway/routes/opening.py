@@ -93,6 +93,10 @@ class ActRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=500)
 
 
+class LookRequest(BaseModel):
+    player_id: str = Field(..., min_length=1, max_length=64)
+
+
 # ---------------------------------------------------------------------------
 # DI builder hooks — replaced by tests via monkeypatch
 # ---------------------------------------------------------------------------
@@ -368,6 +372,92 @@ async def act_opening(req: ActRequest, request: Request) -> dict:
         opening_repos.pop(req.player_id, None)
 
     return dict(outcome)
+
+
+@router.post("/opening/look")
+async def look_opening(req: LookRequest, request: Request) -> dict:
+    """Drive the player-self's auto-issued "look around" turn (post-WS-connect).
+
+    The player (a self-agent registered at /opening/start) comprehends
+    "look around" → LOOK fires → it calls mm_look (drawing the room) → narrates.
+    Broadcasts the cxn_fired catch beat + the narration over WS. Best-effort:
+    never 500s; a turn failure returns {ok: false}.
+    """
+    from memento.opening.deep_roads import LOC_DEEP_ROADS
+
+    from gateway.room_driver import RoomDriver, build_agent_runtime_client
+    from gateway.scene_coordinator import CXN_DISPLAY_NAMES
+
+    state = request.app.state
+    location_name = "the deep roads"
+    ar_client = (
+        getattr(state, "agent_runtime_client", None) or build_agent_runtime_client()
+    )
+    driver = RoomDriver(
+        repo=getattr(state, "cxn_repo", None),
+        agent_runtime_client=ar_client,
+        bonfire_id=getattr(state, "bonfire_id", BONFIRE_ID),
+    )
+    try:
+        turn = await driver.drive_self_turn(
+            LOC_DEEP_ROADS, req.player_id, "look around"
+        )
+    except Exception:
+        logger.warning("opening look turn failed (non-fatal)", exc_info=True)
+        return {"ok": False, "fired_cxns": [], "response_text": ""}
+
+    fired = turn.get("fired_cxns") or []
+    try:
+        from gateway.app import ws_hub
+
+        if ws_hub is not None:
+            await ws_hub.set_location(req.player_id, location_name)
+            for construct_id in fired:
+                display = CXN_DISPLAY_NAMES.get(construct_id, construct_id)
+                await ws_hub.broadcast_to_location(
+                    location_name,
+                    {
+                        "type": "cxn_fired",
+                        "cxn": display,
+                        "construct_id": construct_id,
+                        "actor_id": req.player_id,
+                        "location": location_name,
+                    },
+                )
+            response_text = turn.get("response_text", "")
+            if turn.get("should_respond", True) and response_text:
+                player_name = await _player_name(state, req.player_id)
+                await ws_hub.broadcast_to_location(
+                    location_name,
+                    {
+                        "type": "tool_event",
+                        "tool": "mm_npc_response",
+                        "npc": player_name,  # non-empty → renders; attributed to the player
+                        "summary": response_text,
+                        "data": {},
+                        "location": location_name,
+                        "channel": "narrative",
+                    },
+                )
+    except Exception:
+        logger.warning("opening look broadcast failed (non-fatal)", exc_info=True)
+
+    return {
+        "ok": True,
+        "fired_cxns": fired,
+        "response_text": turn.get("response_text", ""),
+    }
+
+
+async def _player_name(state, player_id: str) -> str:
+    cxn_repo = getattr(state, "cxn_repo", None)
+    if cxn_repo is None:
+        return ""
+    try:
+        ent = await cxn_repo.get_entity(player_id)
+        return ent.get("name", "") if ent else ""
+    except Exception:
+        return ""
 
 
 @router.get("/opening/room/{room_uuid}/contents")

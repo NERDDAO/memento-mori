@@ -139,3 +139,104 @@ async def test_start_still_succeeds_without_cxn_repo(_patch_opening_hooks):
             },
         )
     assert resp.status_code == 200  # B1/B2 no-op gracefully when cxn_repo absent
+
+
+@pytest.mark.asyncio
+async def test_look_drives_player_turn_and_broadcasts(monkeypatch):
+    from gateway.app import app
+    import gateway.app as gw_app
+
+    # stub agent-runtime /turn
+    async def _turn(request):
+        return JSONResponse(
+            {
+                "response_text": "A dim shape stirs.",
+                "should_respond": True,
+                "fired_cxns": ["mm.look.v1"],
+            }
+        )
+
+    ar = httpx.AsyncClient(
+        transport=httpx.ASGITransport(
+            app=Starlette(
+                routes=[Route("/v1/scenes/{loc}/turn", _turn, methods=["POST"])]
+            )
+        ),
+        base_url="http://ar",
+    )
+    repo = InMemoryStateRepository()
+    repo.seed_entity(
+        {
+            "uuid": "p1",
+            "name": "Tester",
+            "kind": "character",
+            "labels": ["Character"],
+            "location_uuid": LOC_DEEP_ROADS,
+            "attrs": {},
+            "is_dead": False,
+        }
+    )
+    app.state.cxn_repo = repo
+    app.state.agent_runtime_client = ar
+    app.state.bonfire_id = "bf-1"
+
+    class _Hub:
+        def __init__(self):
+            self.b = []
+
+        async def set_location(self, pid, name):
+            pass
+
+        async def broadcast_to_location(self, loc, msg):
+            self.b.append((loc, msg))
+
+    hub = _Hub()
+    monkeypatch.setattr(gw_app, "ws_hub", hub)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/api/opening/look", json={"player_id": "p1"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True and data["fired_cxns"] == ["mm.look.v1"]
+
+    kinds = [m.get("type") for _, m in hub.b]
+    cxn = next(m for _, m in hub.b if m["type"] == "cxn_fired")
+    assert (
+        cxn["cxn"] == "LOOK"
+        and cxn["construct_id"] == "mm.look.v1"
+        and cxn["actor_id"] == "p1"
+    )
+    narr = next(m for _, m in hub.b if m.get("tool") == "mm_npc_response")
+    assert narr["npc"] == "Tester" and narr["summary"] == "A dim shape stirs."
+    assert kinds.index("cxn_fired") < kinds.index(
+        "tool_event"
+    )  # catch beat before narration
+
+
+@pytest.mark.asyncio
+async def test_look_turn_failure_returns_benign(monkeypatch):
+    from gateway.app import app
+    import gateway.app as gw_app
+
+    async def _boom(request):
+        return JSONResponse({"error": "down"}, status_code=503)
+
+    ar = httpx.AsyncClient(
+        transport=httpx.ASGITransport(
+            app=Starlette(
+                routes=[Route("/v1/scenes/{loc}/turn", _boom, methods=["POST"])]
+            )
+        ),
+        base_url="http://ar",
+    )
+    app.state.cxn_repo = InMemoryStateRepository()
+    app.state.agent_runtime_client = ar
+    app.state.bonfire_id = "bf-1"
+    monkeypatch.setattr(gw_app, "ws_hub", None)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/api/opening/look", json={"player_id": "p1"})
+    assert resp.status_code == 200  # never 500
+    assert resp.json() == {"ok": False, "fired_cxns": [], "response_text": ""}
