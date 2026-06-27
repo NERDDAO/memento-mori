@@ -87,14 +87,23 @@ So the player-persona is *allowed* to call `mm_look`:
 ### Component E — Kernel LOOK grammar (graph-memory)
 
 Author a LOOK construction for the opening bonfire so the kernel comprehends "look around":
-- At boot (or first opening), call `POST /v1/bonfires/{bonfire_id}/kernel/author-grammar` with a `ConstructionSpecDTO` for LOOK (`construct_id`, `name:"LOOK"`, `lemmas:["look"]`, `predicate:"look"`, `roles:[]`, minimal `lexicon`/`form`). Idempotent / gated.
-- This is **Phase 0** (the spike) — prove `comprehend("look around") → applied_cxn_ids ∋ "LOOK"` live before building the rest.
+- At boot (or first opening), call `POST /v1/bonfires/{bonfire_id}/kernel/author-grammar` (header `X-Internal-Token` + `X-Permission: write`) with a `ConstructionSpecDTO` for LOOK. Idempotent / gated.
+- **PROVEN grammar (Phase 0, 2026-06-26):** the minimal verb-only spec comprehends "look around" at confidence 1.0:
+  ```json
+  {"construct_id": "mm.look.v1", "name": "LOOK", "predicate": "look",
+   "lemmas": ["look"], "roles": [], "lexicon": [], "form": [{"role": "verb"}]}
+  ```
+  Authored against bonfire `6a3e8c71f3326302eee047e4`, `comprehend("look around")` → `{matched: true, applied_cxn_ids: ["mm.look.v1"], confidence: 1.0}`. Verb-only (no connective) → dodges the FCG closure-balloon. "look", "look around", "look about", "i look around", "look around the room" all match. **Spike script:** `scratchpad/spike_look_comprehend.py`.
+
+### Component E note — comprehension result keying (Phase-0 finding)
+
+The kernel returns `predicate: ""` (empty) for the minimal LOOK construction — it does not surface a verb predicate. Therefore **`cxn_fired` keys on `applied_cxn_ids` containing the construct id** (`"mm.look.v1"`), NOT on `predicate == "look"`. The construct id → display name ("LOOK") mapping for the catch beat is owned by the gateway/agent-runtime (a small static map), since the kernel returns only the construct id. (If a real `predicate` is later wanted, the authored construction would need a `v` role; not required for slice 1.)
 
 ### Component F — cxn-fired observability (the game mechanic)
 
 When comprehension yields `applied_cxn_ids ∋ "LOOK"` (the agent-runtime turn's comprehend step), emit a **visible** signal. Comprehension runs *inside* the agent-runtime, but the **player's WebSocket lives on the gateway** — and today the `/turn` response (`{response_text, should_respond}`) does **not** surface what fired. So the signal must be plumbed back:
-- **Agent-runtime (bonfires-ai-core):** extend `SceneTurnResponse` to carry the fired constructions, e.g. `fired_cxns: list[str]` (or the full `applied_cxn_ids`), populated from the comprehend step of the ReAct turn. (Also: a structured agent-runtime log line at the comprehend point — `cxn fired: LOOK (predicate=look, actor=<player>)`.)
-- **Gateway:** when `RoomDriver.drive_turn` receives a turn response with `fired_cxns`, emit the **server log line** and broadcast a new WS event `{type:"cxn_fired", cxn:"LOOK", predicate:"look", actor_id, location}` to the player (the gateway owns the WS hub).
+- **Agent-runtime (bonfires-ai-core):** extend `SceneTurnResponse` to carry the fired construct ids — `fired_cxns: list[str]` (the comprehend step's `applied_cxn_ids`, e.g. `["mm.look.v1"]`). (Also: a structured agent-runtime log line at the comprehend point — `cxn fired: mm.look.v1 (actor=<player>)`.) Note the kernel returns `predicate=""` for the minimal LOOK (Phase-0 finding), so the construct **id** is the carried key, not a predicate.
+- **Gateway:** when `RoomDriver.drive_turn` receives a turn response with `fired_cxns`, map each construct id → a display name via a small static map (`"mm.look.v1" → "LOOK"`), emit the **server log line**, and broadcast a new WS event `{type:"cxn_fired", cxn:"LOOK", construct_id:"mm.look.v1", actor_id, location}` to the player (the gateway owns the WS hub).
 - **Client:** on `cxn_fired`, render a "◇ caught: LOOK" beat — a distinct prose/sigil line (its own accent, e.g. the NPC gold or a dedicated catch color) announcing the catch, ahead of the narration line.
 
 This keeps the *origin* of the signal at the agent-runtime comprehend step (Decision 4) while the *emission* (log + WS) happens gateway-side where the socket is. The engine `turn_router.py` step 2 is the equivalent firing point on the engine path and already stamps `ActivationRecord(cxn_id="LOOK")` — that remains the canonical in-process record; the live slice-1 signal flows agent-runtime → turn response → gateway → WS.
@@ -130,7 +139,7 @@ The look narration (`response_text` from the player-self's turn) renders in the 
 
 ## Phasing (build order — each independently testable)
 
-- **Phase 0 — comprehension spike (go/no-go):** author a LOOK grammar; prove live `comprehend("look around") → ["LOOK"]`. *Gate the rest on this.*
+- **Phase 0 — comprehension spike (go/no-go): ✅ DONE 2026-06-26 — GO.** Authored the verb-only `mm.look.v1` against bonfire `6a3e8c71f3326302eee047e4`; `comprehend("look around")` → `matched=true, applied_cxn_ids=["mm.look.v1"], confidence=1.0` (and 4 other variants). Verb-only dodges the closure-balloon. Finding folded into Component E. (`scratchpad/spike_look_comprehend.py`.)
 - **Phase 1 — cxn-fired observability:** the log + WS `cxn_fired` event + the "◇ caught: LOOK" client beat. (Testable against a stubbed comprehend result; the game mechanic lands first.)
 - **Phase 2 — player-as-persona + `mm_look`:** player `SelfDto` creation; `mm_look` in the manifest + a kit; the gateway-hosted `mm_look` (draw + summary); narration over the persona turn.
 - **Phase 3 — cinematic intro:** epigraph fade + name box; wire it to start the sequence; retire the legacy overlay.
