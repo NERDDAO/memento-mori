@@ -14,7 +14,8 @@ The game is **"catch the constructions" — Pokémon for grammar.** The core loo
 ## Decisions locked in brainstorming
 
 1. **The player IS the persona** (self-agent), not a separate NPC. The named character reasons and calls tools.
-2. **Pre-authored Deep Roads room** — reuse `deep_roads_seed`; no procedural lazy-canon generation yet.
+2. **Pre-authored Deep Roads room** — reuse `deep_roads_seed`'s facts/entities, seeded into `app.state.cxn_repo` as ECS entities with reveal-state components; no procedural lazy-canon generation yet.
+2a. **`mm_look` is state-controlling and accretive (ECS).** Looking again *adds* detail — it never starts from scratch. Reveal-state is a component on entities; first looks **reveal** the next salient thing, then once the room is fully surfaced further looks **deepen** already-seen things (the LLM deepens at a stored depth). See Components C + H.
 3. **"look around" via FCG comprehension** ("as a statement") — the cxn genuinely fires from comprehension, not a scripted dispatch.
 4. **Comprehend + fire inside the agent-runtime persona's own ReAct turn** — one unified agent loop (comprehend → tool-use → narrate), the truest "player IS the agent".
 5. **Wire the kernel, drop the in-memory NPC seed** — the player-persona is created from the player entity; the `PERSONA_OPENING_SEED` in-memory `opening-wanderer` is not used on this path.
@@ -51,10 +52,10 @@ The unified agent-ReAct loop. The player is a self-agent at the agent-runtime; i
              │   ── inside the agent-runtime ReAct turn ──
              ├─ comprehend "look around" → kernel FCG → applied_cxn_ids ∋ "LOOK"
              │     └─▶ ✦ CXN FIRED → emit cxn_fired (server log + WS event) → client "◇ caught: LOOK" beat
-             ├─ ReAct calls mm_look (gateway-hosted MCP tool, read-only)
-             │     ├─▶ reads Deep Roads room + entities (deep_roads_seed)
-             │     ├─▶ WS draw event → client RoomViewportAdapter draws room + places entities
-             │     └─▶ returns a room+entity text summary into the ReAct trajectory
+             ├─ ReAct calls mm_look (gateway-hosted MCP tool, STATE-CONTROLLING)
+             │     ├─▶ reads/advances reveal-state in the room ECS (reveal next salient thing, else deepen)
+             │     ├─▶ WS incremental draw delta → client ADDS the new glyph (no redraw)
+             │     └─▶ returns the reveal/deepen delta into the ReAct trajectory
              └─ LLM narrates the look outcome → response_text
                    └─▶ WS (mm_npc_response-style, attributed to the player-self) → typewriter prose pane
 ```
@@ -70,13 +71,38 @@ Replace the legacy `#char-create-overlay` flow with: (1) a centered black title 
 - Build a `SelfDto` for the player (`seat="LLM"` — the agent voices/narrates on the player's behalf; the human "drives" only by the narrator auto-issuing statements in slice 1) and POST `/v1/scenes/{LOC_DEEP_ROADS}/open` with the player in the `roster`. This is the new "create a self for the player" path that does not exist today.
 - The opening's per-player `EventSourcedStateRepository` and the scene path must agree on the player + room identity at `LOC_DEEP_ROADS` (the two-disjoint-stores pattern from the persona-in-typewriter slice still applies; the room contents `mm_look` reads come from the authoritative opening room — see Component D).
 
-### Component C — `mm_look` tool (gateway-hosted MCP, read-only)
+### Component C — `mm_look` tool (gateway-hosted MCP, **state-controlling / accretive**)
 
-A new `mm_look` MCP tool registered gateway-side (alongside the MOVE/ATTACK/TAKE registration in `cxn_tools.py`), so the agent-runtime persona's ReAct loop can call it and it executes where the room data + WS hub live:
-- **Reads** the pre-authored Deep Roads room + entities (the opening room manifest).
-- **Broadcasts** a draw WS event (room + entities) → the client `RoomViewportAdapter.setContents` draws the room and places entities. (Reuses the existing room-contents → viewport render path; the new part is that `mm_look` *triggers* it server-side rather than the client polling `/room/{uuid}/contents`.)
-- **Returns** a concise text summary (room name, description, salient entities) into the ReAct trajectory so the *same turn's* LLM narrates it.
-- Read-only (no `EffectExecutor` state effects); must NOT route through the `mm_act` `"narrated"`-unhandled branch.
+A new `mm_look` MCP tool registered gateway-side (alongside the MOVE/ATTACK/TAKE registration in `cxn_tools.py`), so the agent-runtime persona's ReAct loop can call it and it executes where the room ECS + WS hub live. **`mm_look` is NOT read-only — it controls reveal-state**: looking again *adds* detail (never starts from scratch), accreting the `revealed` component on entities (see Component H for the storage model). Algorithm:
+
+```
+mm_look(player, room):
+  things = entities at room in app.state.cxn_repo
+  latent = [t for t in things if attrs.reveal_level == 0]
+  if latent:                              # ── REVEAL phase ──
+     t = max(latent, key=salience)        #   next most-salient unseen thing
+     set t.attrs.reveal_level = 1         #   ECS mutation: add the Revealed component
+     delta = {kind:"revealed", entity:t}  #   → draw a NEW glyph (client ADDS; no redraw)
+  elif any revealed thing has more depth available:   # ── DEEPEN phase ──
+     t = next revealed thing due for more detail
+     t.attrs.reveal_level += 1            #   ECS mutation: deepen the component
+     delta = {kind:"deepened", entity:t, depth:t.attrs.reveal_level}  # no new glyph
+  else:
+     delta = {kind:"exhausted"}           #   nothing new — narrate "you've seen all there is"
+```
+
+- **Mutates** the reveal-state components in `app.state.cxn_repo` (the room ECS) — this is the first real ECS effect (`mm_look` is the seed of the "expressive ECS").
+- **Broadcasts** an *incremental* draw WS event carrying only the `delta` — on REVEAL the client **adds** the new entity glyph to the map (it does not redraw / reset); on DEEPEN no glyph changes.
+- **Returns** the delta (the newly-revealed entity, or the deepened entity + its `depth`) into the ReAct trajectory so the *same turn's* LLM narrates it — at the given depth (**the LLM deepens**: storage tracks only `reveal_level`; the narration prompt says "describe at depth N"; no authored detail layers in slice 1, though they can augment later).
+- Must NOT route through the `mm_act` `"narrated"`-unhandled branch.
+
+### Component H — Room as ECS / reveal-state storage
+
+The pre-authored Deep Roads room is seeded into `app.state.cxn_repo` as ECS entities so `mm_look` (gateway-side) can read and mutate their reveal-state in place:
+- Each room entity (the dying adventurer, the threat, the iron blade — from `deep_roads_seed`'s `SeedFact`s) is an `EntityDoc` with reveal components in `attrs`: **`reveal_level: int`** (0 = latent/unseen, 1 = surfaced, 2+ = deepened) and **`salience: int`** (reveal ordering; mirrors the seed's `SeedFact` salience — dying adventurer highest). Initial `reveal_level = 0` (latent).
+- The room itself is an entity; the player is an entity (Component B). `labels` ≈ ECS tags, `attrs` ≈ ECS components — the existing `EntityDoc` shape *is* the proto-ECS; no new store, `mm_look` mutates these docs via the repo's seed/update path.
+- "Revealed" is the accreting component; re-looking reads `reveal_level` to know what's already been shown and advances it. This is durable for the session (the cxn_repo persists the components across looks); cross-session persistence is out of scope for slice 1.
+- Reuse note: the engine's `SceneDirector`/`SeedFact` salience-surfacing is the *conceptual* ancestor of this (next-to-surface = next-latent-by-salience), but slice 1 re-homes the reveal-state into `cxn_repo` components where `mm_look` runs, rather than bridging to the engine's per-player director.
 
 ### Component D — `mm_look` in the agent-runtime manifest + a kit
 
@@ -118,13 +144,13 @@ The look narration (`response_text` from the player-self's turn) renders in the 
 2. `/opening/start` → player entity + register player-self at `/v1/scenes/{deep_roads}/open`.
 3. Narrator → `/v1/scenes/{deep_roads}/turn {self_id=player, message:"look around"}`.
 4. Agent-runtime comprehends → `applied_cxn_ids ∋ LOOK`; the turn response carries `fired_cxns:["LOOK"]` back to the gateway → gateway logs + broadcasts **cxn_fired** WS event → client "◇ caught: LOOK".
-5. ReAct calls `mm_look` (gateway) → draw WS event → client draws room + entities; tool returns summary.
+5. ReAct calls `mm_look` (gateway) → reads/advances reveal-state in the room ECS (reveal next salient thing, or deepen) → broadcasts the *incremental* draw delta (client **adds** the new glyph) → returns the delta for narration. Re-looking accretes; never redraws from scratch.
 6. LLM narrates → `response_text` → WS → typewriter prose.
 
 ## Error handling
 
 - **No comprehension match** (kernel down / grammar missing / closure-balloon): the turn degrades — no `cxn_fired`, no catch beat. The opening must still render the room (the draw can be triggered directly as a fallback) and a neutral narration; never a 500. Phase 0 de-risks this; the fallback keeps the opening playable if the kernel hiccups.
-- **`mm_look` failure** (room read / draw): best-effort; the turn still returns a narration; logged.
+- **`mm_look` failure** (room read / reveal-state mutation / draw): best-effort; the turn still returns a narration; logged. The reveal-state mutation is monotonic (`reveal_level` only advances) so a retried look is safe — at worst it reveals/deepens one step; it never resets the room.
 - **Persona/agent-runtime failure**: the opening start still returns; the look sequence degrades to the existing client-side room render. (Same failure-isolation contract as the persona-in-typewriter slice.)
 - **Kernel grammar author failure at boot**: non-fatal; logged; comprehension simply won't match until authored.
 
@@ -132,7 +158,8 @@ The look narration (`response_text` from the player-self's turn) renders in the 
 
 - **Phase 0 (spike):** an integration check that `author-grammar(LOOK)` then `comprehend("look around")` returns `applied_cxn_ids ∋ "LOOK"` against the live kernel. Go/no-go.
 - **Component F:** unit — given a comprehend result with `applied_cxn_ids=["LOOK"]`, the firing point emits the `cxn_fired` log + WS event exactly once; none when no match. Client — `cxn_fired` → the "◇ caught" beat renders.
-- **Component C/D:** the player-persona's turn with "look around" calls `mm_look`; `mm_look` broadcasts the draw event with the Deep Roads entities and returns a non-empty summary; read-only (no state mutation). A persona turn with `mm_look` does not hit the `mm_act` `"narrated"` AssertionError.
+- **Component C/H (reveal/deepen — headless, the load-bearing logic):** seed the Deep Roads ECS (3 entities, distinct `salience`, all `reveal_level=0`). N successive `mm_look` calls **reveal** the entities in descending salience order (look 1 → dying adventurer, look 2 → threat, look 3 → blade), each setting that entity's `reveal_level=1` and emitting a `revealed` delta with a new glyph; once all are surfaced, further looks **deepen** (increment `reveal_level` on revealed entities, `deepened` delta, NO new glyph); the room is never reset/redrawn (already-revealed entities keep their state). The draw delta is incremental (carries only the changed entity). When fully deepened, an `exhausted` delta. `mm_look` does NOT hit the `mm_act` `"narrated"` AssertionError.
+- **Component C/D (integration):** the player-persona's turn with "look around" calls `mm_look`; the delta reaches the client as an incremental draw + a non-empty narration delta for the LLM.
 - **Component B:** `/opening/start` registers a player `SelfDto` (seat=LLM, capabilities ∋ mm_look) at `/v1/scenes/{deep_roads}/open`.
 - **Component A/G:** client — title-card fade sequence; name submit drives start; look narration renders in the prose pane attributed to the player-self.
 - **Live browser demo (the goal):** title card → name → "look around" auto-issued → "◇ caught: LOOK" beat + room drawn + LLM flavor narration in prose; the cxn firing visible in the gateway log.
@@ -141,7 +168,7 @@ The look narration (`response_text` from the player-self's turn) renders in the 
 
 - **Phase 0 — comprehension spike (go/no-go): ✅ DONE 2026-06-26 — GO.** Authored the verb-only `mm.look.v1` against bonfire `6a3e8c71f3326302eee047e4`; `comprehend("look around")` → `matched=true, applied_cxn_ids=["mm.look.v1"], confidence=1.0` (and 4 other variants). Verb-only dodges the closure-balloon. Finding folded into Component E. (`scratchpad/spike_look_comprehend.py`.)
 - **Phase 1 — cxn-fired observability:** the log + WS `cxn_fired` event + the "◇ caught: LOOK" client beat. (Testable against a stubbed comprehend result; the game mechanic lands first.)
-- **Phase 2 — player-as-persona + `mm_look`:** player `SelfDto` creation; `mm_look` in the manifest + a kit; the gateway-hosted `mm_look` (draw + summary); narration over the persona turn.
+- **Phase 2 — player-as-persona + room-ECS + accretive `mm_look`:** seed the Deep Roads as ECS entities with reveal-state (Component H); player `SelfDto` creation; `mm_look` in the manifest + a kit; the gateway-hosted `mm_look` with reveal-then-deepen state logic + incremental draw delta; narration at depth over the persona turn. *(The largest phase — the reveal/deepen state machine + ECS seeding is its own sub-task, testable headless: N looks reveal N salient things in salience order, then deepen; never redraw.)*
 - **Phase 3 — cinematic intro:** epigraph fade + name box; wire it to start the sequence; retire the legacy overlay.
 
 ## Out of scope (slice 2+ / future)
@@ -149,6 +176,6 @@ The look narration (`response_text` from the player-self's turn) renders in the 
 - **Constructicon-as-Pokédex** — persisting caught constructions per player, the "gotta catch 'em all" counter/collection UI.
 - **Key↔statement binding** — editable statement slots bound to keys; editing the bound statement as the grammar grows.
 - **More constructions** — MOVE/ATTACK/TAKE and beyond as catchable cxns (and the closure-balloon work they require).
-- **Expressive-ECS effects** — constructions whose effects are richer ECS component/system operations.
+- **Expressive-ECS effects beyond reveal** — other constructions whose effects are richer ECS component/system operations (slice 1 ships the *first* ECS effect: `mm_look`'s reveal/deepen reveal-state mutation, Components C+H). MOVE/ATTACK/TAKE-as-ECS-effects, systems, and component queries are later.
 - **Lazy-canon / look-to-build** — procedurally generating the room+entities on first look (slice uses the pre-authored Deep Roads).
 - **Multi-room / opening→main-loop handoff.**
