@@ -79,7 +79,7 @@ document.addEventListener("DOMContentLoaded", () => {
       roomUuid: () => currentRoom,
     };
     connectOpeningWs(playerId, (msg) => routeOpeningMessage(msg, surfaces));
-    void httpGateway.look(playerId); // B-client: auto-issue the "look around" turn (events arrive over WS)
+    httpGateway.look(playerId).catch(() => {}); // B-client: auto-issue the "look around" turn (events arrive over WS, fire-and-forget)
   }
 
   // `look` rebuilds the room viewport client-side (comprehension is degraded).

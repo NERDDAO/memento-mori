@@ -1922,7 +1922,7 @@ document.addEventListener("DOMContentLoaded", () => {
       roomUuid: () => currentRoom
     };
     connectOpeningWs(playerId, (msg) => routeOpeningMessage(msg, surfaces));
-    httpGateway.look(playerId);
+    httpGateway.look(playerId).catch(() => {});
   }
   async function look() {
     prose.enqueue({ text: "You look around.", kind: "narration" });
