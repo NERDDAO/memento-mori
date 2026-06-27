@@ -43,6 +43,7 @@ NoopChainMirror, NullMemoryClient) so the suite runs with zero network I/O.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import uuid as _uuid_mod
 
@@ -155,8 +156,52 @@ async def create_player(
 # ---------------------------------------------------------------------------
 
 
+async def _seed_player_into_cxn_repo(
+    cxn_repo, player_uuid: str, player_name: str
+) -> None:
+    """B1: seed the player into app.state.cxn_repo at the Deep Roads so the
+    gateway mm_look can resolve the player's location. seed_entity may be sync
+    (in-memory) or async (EventSourced) — handle both."""
+    from memento.opening.deep_roads import LOC_DEEP_ROADS
+
+    res = cxn_repo.seed_entity(
+        {
+            "uuid": player_uuid,
+            "name": player_name,
+            "kind": "character",
+            "labels": ["Character"],
+            "location_uuid": LOC_DEEP_ROADS,
+            "attrs": {},
+            "is_dead": False,
+        }
+    )
+    if inspect.isawaitable(res):
+        await res
+
+
+async def _open_player_scene(state, player_uuid: str, player_name: str) -> None:
+    """B2: open a scene with the player as gm_self so it can take its own turns."""
+    from memento.opening.deep_roads import LOC_DEEP_ROADS
+
+    from gateway.room_driver import RoomDriver, build_agent_runtime_client
+
+    ar_client = (
+        getattr(state, "agent_runtime_client", None) or build_agent_runtime_client()
+    )
+    driver = RoomDriver(
+        repo=state.cxn_repo,
+        agent_runtime_client=ar_client,
+        bonfire_id=getattr(state, "bonfire_id", BONFIRE_ID),
+    )
+    await driver.open_player_scene(
+        LOC_DEEP_ROADS, player_uuid, player_name, ["Character"]
+    )
+
+
 @router.post("/opening/start", response_model=StartOpeningResponse)
-async def start_opening(req: StartOpeningRequest) -> StartOpeningResponse:
+async def start_opening(
+    req: StartOpeningRequest, request: Request
+) -> StartOpeningResponse:
     """Create a fresh per-player opening-arc stack and return initial room state.
 
     Steps:
@@ -248,6 +293,21 @@ async def start_opening(req: StartOpeningRequest) -> StartOpeningResponse:
     # -- 7. Register -----------------------------------------------------------
     opening_registry[player_uuid] = turn_router
     opening_repos[player_uuid] = repo
+
+    # -- 7b. Player-as-persona (Component B): make the player a self-agent so it
+    # can take its own "look around" turn. Best-effort — never break /opening/start.
+    state = request.app.state
+    cxn_repo = getattr(state, "cxn_repo", None)
+    if cxn_repo is not None:
+        try:
+            await _seed_player_into_cxn_repo(
+                cxn_repo, player_uuid, req.player_name
+            )  # B1
+            await _open_player_scene(state, player_uuid, req.player_name)  # B2
+        except Exception:
+            logger.warning(
+                "opening player-as-persona setup failed (non-fatal)", exc_info=True
+            )
 
     # -- 8. Return room manifest -----------------------------------------------
     from memento.opening.deep_roads import OPENING_EPIGRAPH
