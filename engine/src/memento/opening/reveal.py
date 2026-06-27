@@ -100,7 +100,9 @@ async def reveal_or_deepen(
 
 def _stable_uuid(location_id: str, key: str) -> str:
     """Deterministic 24-hex (ObjectId-shaped) id for a uuid-less seed fact."""
-    return hashlib.sha1(f"{location_id}:{key}".encode()).hexdigest()[:24]
+    return hashlib.sha1(
+        f"{location_id}:{key}".encode(), usedforsecurity=False
+    ).hexdigest()[:24]
 
 
 async def seed_room_ecs(repo: Any, room: SeedRoom) -> None:
