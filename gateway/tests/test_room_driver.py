@@ -577,3 +577,71 @@ async def test_roster_self_spec_carries_resolved_capabilities(driver_and_client)
     assert troll_spec["capabilities"] == caps, (
         "goblin and troll share the same labels so capabilities must match"
     )
+
+
+# ---------------------------------------------------------------------------
+# T11 — open_player_scene makes the player the gm_self
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_open_player_scene_makes_player_the_gm_self():
+    captured = {}
+
+    async def _open(request):
+        captured["body"] = await request.json()
+        return JSONResponse({"source_episode_id": "ep-1"})
+
+    stub = Starlette(routes=[Route("/v1/scenes/{loc}/open", _open, methods=["POST"])])
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=stub), base_url="http://ar"
+    )
+    from gateway.room_driver import RoomDriver
+
+    driver = RoomDriver(repo=object(), agent_runtime_client=client, bonfire_id="bf-1")
+
+    data = await driver.open_player_scene("loc-1", "player-1", "Tester", ["Character"])
+    assert data["source_episode_id"] == "ep-1"
+    body = captured["body"]
+    assert body["gm_self"]["id"] == "player-1"
+    assert body["gm_self"]["seat"] == "LLM"
+    assert body["gm_self"]["names"] == ["Tester"]
+    assert "mm_look" in body["gm_self"]["capabilities"]  # innate → granted
+    assert body["roster"] == [] and body["scene_actor_id"] == "player-1"
+
+
+# ---------------------------------------------------------------------------
+# T12 — drive_self_turn uses the caller-supplied self_id
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_drive_self_turn_uses_forced_self_id():
+    captured = {}
+
+    async def _turn(request):
+        captured["body"] = await request.json()
+        return JSONResponse(
+            {
+                "response_text": "You see a dim shape.",
+                "should_respond": True,
+                "fired_cxns": ["mm.look.v1"],
+            }
+        )
+
+    stub = Starlette(routes=[Route("/v1/scenes/{loc}/turn", _turn, methods=["POST"])])
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=stub), base_url="http://ar"
+    )
+    from gateway.room_driver import RoomDriver
+
+    driver = RoomDriver(repo=object(), agent_runtime_client=client, bonfire_id="bf-1")
+
+    turn = await driver.drive_self_turn("loc-1", "player-1", "look around")
+    assert captured["body"] == {
+        "self_id": "player-1",
+        "message": "look around",
+    }  # forced, not NPC-resolved
+    assert turn["self_id"] == "player-1"
+    assert turn["fired_cxns"] == ["mm.look.v1"]
+    assert turn["response_text"] == "You see a dim shape."

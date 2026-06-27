@@ -283,6 +283,59 @@ class RoomDriver:
             logger.error("drive_turn failed for %s: %s", location_uuid, exc)
             raise
 
+    async def open_player_scene(
+        self,
+        location_uuid: str,
+        player_uuid: str,
+        player_name: str,
+        player_labels: list[str],
+    ) -> dict[str, Any]:
+        """Open a scene with the PLAYER as gm_self (single-self, empty roster).
+
+        Unlike ``open_room`` (synthetic GM + NPC roster), this makes the player
+        the scene's director so it can take its own turns and call its innate
+        tools (e.g. ``mm_look``). The scene manifest is built from gm_self's
+        capabilities; ``mm_look`` is a free spec, so it is retained regardless.
+        """
+        gm_self = {
+            "id": player_uuid,
+            "embodiment_agent_id": self._embodiment_id(player_uuid),
+            "names": [player_name],
+            "seat": "LLM",
+            "capabilities": sorted(get_allowed_tools(player_labels)),
+        }
+        body: dict[str, Any] = {
+            "bonfire_id": self._bonfire_id,
+            "scene_actor_id": player_uuid,
+            "gm_self": gm_self,
+            "roster": [],
+        }
+        url = f"/v1/scenes/{location_uuid}/open"
+        resp = await self._client.post(url, json=body, headers=self._request_headers())
+        resp.raise_for_status()
+        data: dict[str, Any] = resp.json()
+        logger.info("open_player_scene %s player=%s", location_uuid, player_uuid)
+        return data
+
+    async def drive_self_turn(
+        self, location_uuid: str, self_id: str, message: str
+    ) -> dict[str, Any]:
+        """POST /turn with a caller-supplied ``self_id`` (the acting self),
+        bypassing the NPC who-acts resolver. Used to make the PLAYER act on its
+        own turn. The NPC ``drive_turn`` path is unchanged."""
+        body: dict[str, Any] = {"self_id": self_id, "message": message}
+        url = f"/v1/scenes/{location_uuid}/turn"
+        resp = await self._client.post(url, json=body, headers=self._request_headers())
+        resp.raise_for_status()
+        data: dict[str, Any] = resp.json()
+        logger.info(
+            "drive_self_turn %s self_id=%s → %.60s",
+            location_uuid,
+            self_id,
+            data.get("response_text", ""),
+        )
+        return {**data, "self_id": self_id}
+
     async def close_room(self, location_uuid: str) -> dict[str, Any]:
         """POST /close to agent-runtime for this location.
 
