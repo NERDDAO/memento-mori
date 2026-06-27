@@ -21,7 +21,11 @@ import { RoomViewportAdapter } from "../layers/room-viewport";
 import { httpGateway, type ActResp } from "../state/opening-loop";
 import { httpKgReadPort } from "../state/kg-read-port";
 import { initInput } from "../panels/input";
-import { connectOpeningWs, routeOpeningMessage, type OpeningSurfaces } from "../state/opening-ws";
+import {
+  connectOpeningWs,
+  routeOpeningMessage,
+  type OpeningSurfaces,
+} from "../state/opening-ws";
 
 document.addEventListener("DOMContentLoaded", () => {
   // 1. Mount the unified canvas with the opening two-pane layout.
@@ -54,8 +58,8 @@ document.addEventListener("DOMContentLoaded", () => {
     viewport.setContents(currentRoom, things); // self-blits via onChange
   }
 
-  async function start(): Promise<void> {
-    const s = await httpGateway.start();
+  async function start(playerName: string): Promise<void> {
+    const s = await httpGateway.start(playerName);
     playerId = s.player_id;
     currentRoom = s.location_id;
     (window as unknown as { __mmPlayerId?: string }).__mmPlayerId = playerId;
@@ -75,6 +79,7 @@ document.addEventListener("DOMContentLoaded", () => {
       roomUuid: () => currentRoom,
     };
     connectOpeningWs(playerId, (msg) => routeOpeningMessage(msg, surfaces));
+    void httpGateway.look(playerId); // B-client: auto-issue the "look around" turn (events arrive over WS)
   }
 
   // `look` rebuilds the room viewport client-side (comprehension is degraded).
@@ -93,7 +98,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     // clarify carries `message`; narrated/executed carry `narration`.
     const line = r.narration ?? (r as { message?: string }).message ?? "";
-    if (line) prose.enqueue({ text: line, kind: r.status === "clarify" ? "prompt" : "narration" });
+    if (line)
+      prose.enqueue({
+        text: line,
+        kind: r.status === "clarify" ? "prompt" : "narration",
+      });
     if (r.won) ended = true;
     redrawProse();
     if (!ended) await refreshContents();
@@ -101,12 +110,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function submit(text: string): void {
     if (ended) return;
-    if (/^\s*look\b/i.test(text)) { void look(); return; }
+    if (/^\s*look\b/i.test(text)) {
+      void look();
+      return;
+    }
     void act(text);
   }
 
   // 5. Wire the action input.
-  const actionInput = document.getElementById("action-input") as HTMLInputElement;
+  const actionInput = document.getElementById(
+    "action-input",
+  ) as HTMLInputElement;
   initInput(actionInput, submit);
 
   // 6. WASD/hjkl/arrows move the player in the room (reuses the existing
@@ -128,5 +142,5 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 9. Show the empty room shell immediately, then kick off the opening.
   viewport.render();
-  void start();
+  void start("wanderer");
 });

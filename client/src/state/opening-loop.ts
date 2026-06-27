@@ -19,25 +19,35 @@ export type ActResp = {
   reason?: string | null;
 };
 
+export type LookResp = {
+  ok: boolean;
+  fired_cxns: string[];
+  response_text: string;
+};
+
 export interface Gateway {
-  start(): Promise<StartResp>;
+  start(playerName?: string): Promise<StartResp>;
   act(playerId: string, text: string): Promise<ActResp>;
+  look(playerId: string): Promise<LookResp>;
 }
 
 export const httpGateway: Gateway = {
-  start(): Promise<StartResp> {
+  start(playerName?: string): Promise<StartResp> {
     // The opening arc is identity-light: the gateway uses player_name only as
     // the seed entity's display name and mints its own player uuid. Phase 1 has
     // no onboarding layer yet, so we send a default identity; a name-entry layer
     // replaces this later. wallet_address must be a 42-char string to pass the
     // gateway's StartOpeningRequest validation.
     return apiPost<StartResp>("/api/opening/start", {
-      player_name: "wanderer",
+      player_name: playerName || "wanderer",
       wallet_address: "0x0000000000000000000000000000000000000000",
     });
   },
   act(playerId: string, text: string): Promise<ActResp> {
     return apiPost<ActResp>("/api/opening/act", { player_id: playerId, text });
+  },
+  look(playerId: string): Promise<LookResp> {
+    return apiPost<LookResp>("/api/opening/look", { player_id: playerId });
   },
 };
 
@@ -67,7 +77,9 @@ export class OpeningLoop {
     this.playerId = s.player_id;
     this.currentRoom = s.location_id;
 
-    const things = await this.kg.getRoomContents(s.player_id, s.location_id).catch(() => []);
+    const things = await this.kg
+      .getRoomContents(s.player_id, s.location_id)
+      .catch(() => []);
     this.map.setContents(s.location_id, things);
 
     this.redraw();
@@ -82,15 +94,17 @@ export class OpeningLoop {
       if (r.narration) {
         this.prose.enqueue({ text: r.narration, kind: "narration" });
       }
-      const things = await this.kg.getRoomContents(this.playerId, this.currentRoom).catch(() => []);
+      const things = await this.kg
+        .getRoomContents(this.playerId, this.currentRoom)
+        .catch(() => []);
       this.map.setContents(this.currentRoom, things);
       if (r.won) {
         this.ended = true;
       }
     } else if (r.status === "clarify") {
       this.prose.enqueue({ text: "What do you mean?", kind: "prompt" });
-      const exits = this.map.currentExits().map(e => `go ${e.direction}`);
-      const things = this.map.currentThings().map(t => `take ${t.name}`);
+      const exits = this.map.currentExits().map((e) => `go ${e.direction}`);
+      const things = this.map.currentThings().map((t) => `take ${t.name}`);
       this.onChips([...exits, ...things]);
     }
     // any other status: just redraw (no crash)

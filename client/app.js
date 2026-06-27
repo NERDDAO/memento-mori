@@ -1567,14 +1567,17 @@ async function apiGet(path) {
 
 // src/state/opening-loop.ts
 var httpGateway = {
-  start() {
+  start(playerName) {
     return apiPost("/api/opening/start", {
-      player_name: "wanderer",
+      player_name: playerName || "wanderer",
       wallet_address: "0x0000000000000000000000000000000000000000"
     });
   },
   act(playerId, text) {
     return apiPost("/api/opening/act", { player_id: playerId, text });
+  },
+  look(playerId) {
+    return apiPost("/api/opening/look", { player_id: playerId });
   }
 };
 
@@ -1901,8 +1904,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const things = await httpKgReadPort.getRoomContents(playerId, currentRoom);
     viewport.setContents(currentRoom, things);
   }
-  async function start() {
-    const s = await httpGateway.start();
+  async function start(playerName) {
+    const s = await httpGateway.start(playerName);
     playerId = s.player_id;
     currentRoom = s.location_id;
     window.__mmPlayerId = playerId;
@@ -1919,6 +1922,7 @@ document.addEventListener("DOMContentLoaded", () => {
       roomUuid: () => currentRoom
     };
     connectOpeningWs(playerId, (msg) => routeOpeningMessage(msg, surfaces));
+    httpGateway.look(playerId);
   }
   async function look() {
     prose.enqueue({ text: "You look around.", kind: "narration" });
@@ -1934,7 +1938,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const line = r.narration ?? r.message ?? "";
     if (line)
-      prose.enqueue({ text: line, kind: r.status === "clarify" ? "prompt" : "narration" });
+      prose.enqueue({
+        text: line,
+        kind: r.status === "clarify" ? "prompt" : "narration"
+      });
     if (r.won)
       ended = true;
     redrawProse();
@@ -1964,5 +1971,5 @@ document.addEventListener("DOMContentLoaded", () => {
       redrawProse();
   }, 25);
   viewport.render();
-  start();
+  start("wanderer");
 });
