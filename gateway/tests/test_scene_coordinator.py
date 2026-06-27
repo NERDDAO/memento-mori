@@ -86,6 +86,33 @@ async def test_should_respond_false_suppresses_broadcast(monkeypatch):
     assert hub.broadcasts == []
 
 
+class _FiredDriver:
+    async def drive_turn(self, loc, msg, *, addressed_name=None):
+        return {
+            "response_text": "You see a dim shape.",
+            "should_respond": True,
+            "self_id": "npc-1",
+            "fired_cxns": ["mm.look.v1"],
+        }
+
+
+@pytest.mark.asyncio
+async def test_cxn_fired_broadcast_precedes_narration(monkeypatch):
+    driver, hub = _FiredDriver(), _FakeHub()
+    coord = SceneCoordinator(
+        scene_registry={"loc-1": driver}, cxn_repo=_FakeRepo(), ws_hub=hub
+    )
+    _patch_loc(monkeypatch, "loc-1")
+    await coord.handle_player_message("p1", "Gate", "look around")
+    kinds = [m["type"] for _, m in hub.broadcasts]
+    assert "cxn_fired" in kinds
+    fired = next(m for _, m in hub.broadcasts if m["type"] == "cxn_fired")
+    assert fired["cxn"] == "LOOK" and fired["construct_id"] == "mm.look.v1"
+    assert fired["actor_id"] == "npc-1" and fired["location"] == "Gate"
+    # cxn_fired comes before the mm_npc_response narration
+    assert kinds.index("cxn_fired") < kinds.index("tool_event")
+
+
 @pytest.mark.asyncio
 async def test_drive_turn_failure_degrades_without_raising(monkeypatch):
     class _Boom(_FakeDriver):

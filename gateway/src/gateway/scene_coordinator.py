@@ -25,6 +25,10 @@ from gateway.scene_activation import (
 
 logger = get_logger(__name__)
 
+# Construct id -> player-facing display name for the cxn_fired catch beat.
+# The kernel returns predicate="" for the minimal LOOK, so we key on the id.
+CXN_DISPLAY_NAMES: dict[str, str] = {"mm.look.v1": "LOOK"}
+
 
 class SceneCoordinator:
     def __init__(
@@ -158,6 +162,8 @@ class SceneCoordinator:
             logger.warning("scene_coordinator.drive_turn_failed: %s", exc)
             return True  # claimed by the persona path; degrade to silence, not 500
 
+        await self._broadcast_cxn_fired(turn, location_name)
+
         if turn.get("should_respond", True):
             npc_name = await self._npc_name(turn.get("self_id"))
             msg = {
@@ -171,6 +177,35 @@ class SceneCoordinator:
             }
             await self._ws_hub.broadcast_to_location(location_name, msg)
         return True
+
+    async def _broadcast_cxn_fired(
+        self, turn: dict[str, Any], location_name: str
+    ) -> None:
+        """Emit one cxn_fired WS event per fired construction (the catch beat).
+        Best-effort: never breaks the turn; no-op when nothing fired."""
+        if self._ws_hub is None:
+            return
+        fired = turn.get("fired_cxns") or []
+        actor_id = turn.get("self_id")
+        for construct_id in fired:
+            display = CXN_DISPLAY_NAMES.get(construct_id, construct_id)
+            logger.info(
+                "cxn_fired: %s (%s) actor=%s loc=%s",
+                display,
+                construct_id,
+                actor_id,
+                location_name,
+            )
+            await self._ws_hub.broadcast_to_location(
+                location_name,
+                {
+                    "type": "cxn_fired",
+                    "cxn": display,
+                    "construct_id": construct_id,
+                    "actor_id": actor_id,
+                    "location": location_name,
+                },
+            )
 
     async def _npc_name(self, self_id: str | None) -> str:
         if not self_id or self._repo is None:
