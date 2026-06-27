@@ -110,7 +110,27 @@ async def seed_room_ecs(repo: Any, room: SeedRoom) -> None:
     (``reveal_level=0``, ``salience``).  Item-kind facts become floor items;
     others become entities.  ``seed_entity``/``seed_item`` may be sync
     (in-memory) or async (EventSourced) — both are handled.
+
+    The location entity is seeded FIRST so a KG-backed projection records its
+    engine->kg uuid mapping before the facts' ``LOCATED_IN`` edges are created.
+    Without it the location uuid is unmapped, the edges attach to a non-existent
+    node, and ``entities_at_location`` (the reverse query the reveal walk reads)
+    returns empty on the live KG — the in-memory repo tolerates the missing
+    node, the real one does not.
     """
+    loc_res = repo.seed_entity(
+        {
+            "uuid": room.location_id,
+            "name": room.name,
+            "kind": "location",
+            "labels": ["Location"],
+            "location_uuid": None,
+            "attrs": {"exits": [dict(e) for e in room.exits]},
+            "is_dead": False,
+        }
+    )
+    if inspect.isawaitable(loc_res):
+        await loc_res
     for fact in room.facts:
         uuid = fact.uuid or _stable_uuid(room.location_id, fact.key)
         attrs = {**dict(fact.attrs), "salience": fact.salience, "reveal_level": 0}
