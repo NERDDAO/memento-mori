@@ -202,6 +202,21 @@ async def _open_player_scene(state, player_uuid: str, player_name: str) -> None:
     )
 
 
+async def _author_look_for_player(bonfire_id: str, player_uuid: str) -> None:
+    """Author the verb-only LOOK construction under the PLAYER's profile.
+
+    The kernel keys grammar by (bonfire_id, profile), and the agent-runtime
+    comprehends a self's turn under ``profile = embodiment_agent_id`` (= the
+    player uuid for the opening player self). A boot-time author under the
+    default profile therefore would NOT match the player's comprehend; authoring
+    here under ``profile=player_uuid`` is what makes "look around" fire LOOK in
+    the live flow. Gated on the kernel env by the caller; best-effort."""
+    from memento.cxn.kernel_client import LOOK_CONSTRUCTION, HttpComprehensionClient
+
+    client = HttpComprehensionClient(bonfire_id=bonfire_id)
+    await client.author_grammar([LOOK_CONSTRUCTION], profile=player_uuid)
+
+
 @router.post("/opening/start", response_model=StartOpeningResponse)
 async def start_opening(
     req: StartOpeningRequest, request: Request
@@ -308,6 +323,12 @@ async def start_opening(
                 cxn_repo, player_uuid, req.player_name
             )  # B1
             await _open_player_scene(state, player_uuid, req.player_name)  # B2
+            if os.environ.get("KERNEL_BASE_URL") and os.environ.get(
+                "GM_INTERNAL_TOKEN"
+            ):
+                await _author_look_for_player(
+                    getattr(state, "bonfire_id", BONFIRE_ID), player_uuid
+                )  # B-grammar: author LOOK under the player's comprehend profile
         except Exception:
             logger.warning(
                 "opening player-as-persona setup failed (non-fatal)", exc_info=True

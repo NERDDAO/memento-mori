@@ -153,14 +153,24 @@ class HttpComprehensionClient:
         data = response.json()
         return _map_frame(data.get("frame"), utterance)
 
-    async def author_grammar(self, constructions: list[dict[str, Any]]) -> bool:
+    async def author_grammar(
+        self, constructions: list[dict[str, Any]], profile: str | None = None
+    ) -> bool:
         """POST constructions to kernel/author-grammar (X-Permission: write).
 
+        The kernel keys grammar by (bonfire_id, profile); a comprehend under a
+        different profile sees ``no_grammar``. The agent-runtime comprehends a
+        self's turn under ``profile = embodiment_agent_id``, so the opening
+        authors LOOK under the player's profile (see routes/opening.py). When
+        ``profile`` is None the kernel's default profile is used.
+
         Idempotent server-side. Returns True on 200; raises ComprehendError on
-        any non-200 or network error (the caller wraps it non-fatal at boot).
+        any non-200 or network error (the caller wraps it non-fatal).
         """
         url = f"{self._base_url}/v1/bonfires/{self._bonfire_id}/kernel/author-grammar"
         body: dict[str, Any] = {"constructions": constructions}
+        if profile is not None:
+            body["profile"] = profile
         headers = {
             "X-Internal-Token": self._token,
             "X-Permission": "write",

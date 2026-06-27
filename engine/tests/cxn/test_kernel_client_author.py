@@ -30,6 +30,29 @@ async def test_author_grammar_posts_look_construction():
 
 
 @pytest.mark.asyncio
+async def test_author_grammar_includes_profile_when_given():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"ok": True})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    c = HttpComprehensionClient(
+        base_url="http://k", token="tok", bonfire_id="bf-1", client=client
+    )
+    await c.author_grammar([LOOK_CONSTRUCTION], profile="player-uuid-7")
+    assert seen["body"]["profile"] == "player-uuid-7"
+
+    # default (no profile) omits the key entirely
+    seen.clear()
+    await c.author_grammar([LOOK_CONSTRUCTION])
+    assert "profile" not in seen["body"]
+
+
+@pytest.mark.asyncio
 async def test_author_grammar_raises_on_non_200():
     from memento.cxn.types import ComprehendError
 
