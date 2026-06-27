@@ -96,6 +96,7 @@ async def test_seed_room_ecs_marks_facts_latent_with_salience():
     by_name = {t["name"]: t for t in (list(ents) + list(items))}
     assert by_name["a dying adventurer"]["attrs"]["reveal_level"] == 0
     assert by_name["a dying adventurer"]["attrs"]["salience"] == 1_000_000
+    assert by_name["something in the dark"]["attrs"]["reveal_level"] == 0
     # the iron blade is an item, seeded as a floor item, still reveal-tracked
     assert by_name["an iron blade"]["kind"] == "item"
     assert by_name["an iron blade"]["attrs"]["reveal_level"] == 0
