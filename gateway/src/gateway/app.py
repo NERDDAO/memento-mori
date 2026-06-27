@@ -99,6 +99,19 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.warning("opening room ECS seed failed (non-fatal)", exc_info=True)
 
+    if (
+        os.environ.get("KERNEL_BASE_URL")
+        and os.environ.get("GM_INTERNAL_TOKEN")
+        and os.environ.get("OPENING_AUTHOR_LOOK_GRAMMAR")
+    ):
+        from gateway.look_tool import seed_look_grammar
+
+        try:
+            await seed_look_grammar(app.state.bonfire_id)
+            logger.info("authored LOOK grammar on bonfire %s", app.state.bonfire_id)
+        except Exception:
+            logger.warning("LOOK grammar authoring failed (non-fatal)", exc_info=True)
+
     # Seed NPC registry from MongoDB + world.json
     from gateway.npc_registry import seed_from_db, register_npc, update_npc_location
 

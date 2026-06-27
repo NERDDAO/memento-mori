@@ -121,3 +121,13 @@ async def seed_opening_room(repo: Any) -> None:
 
     await seed_room_ecs(repo, deep_roads_seed())
     logger.info("seeded opening room ECS (Deep Roads) into the cxn repo")
+
+
+async def seed_look_grammar(bonfire_id: str) -> bool:
+    """Author the verb-only LOOK construction on the kernel for ``bonfire_id`` so
+    "look around" comprehends to LOOK. Gated on the kernel env by the caller and
+    wrapped non-fatal — a kernel outage at boot must not crash startup."""
+    from memento.cxn.kernel_client import LOOK_CONSTRUCTION, HttpComprehensionClient
+
+    client = HttpComprehensionClient(bonfire_id=bonfire_id)
+    return await client.author_grammar([LOOK_CONSTRUCTION])

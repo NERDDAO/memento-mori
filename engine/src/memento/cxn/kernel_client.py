@@ -33,6 +33,17 @@ from memento.cxn.types import ComprehendError, ComprehendedFrame, FrameRole
 
 logger = logging.getLogger(__name__)
 
+# The Phase-0-proven verb-only LOOK construction (dodges the FCG closure-balloon).
+LOOK_CONSTRUCTION: dict[str, Any] = {
+    "construct_id": "mm.look.v1",
+    "name": "LOOK",
+    "predicate": "look",
+    "lemmas": ["look"],
+    "roles": [],
+    "lexicon": [],
+    "form": [{"role": "verb"}],
+}
+
 
 # ---------------------------------------------------------------------------
 # Protocol
@@ -141,6 +152,36 @@ class HttpComprehensionClient:
 
         data = response.json()
         return _map_frame(data.get("frame"), utterance)
+
+    async def author_grammar(self, constructions: list[dict[str, Any]]) -> bool:
+        """POST constructions to kernel/author-grammar (X-Permission: write).
+
+        Idempotent server-side. Returns True on 200; raises ComprehendError on
+        any non-200 or network error (the caller wraps it non-fatal at boot).
+        """
+        url = f"{self._base_url}/v1/bonfires/{self._bonfire_id}/kernel/author-grammar"
+        body: dict[str, Any] = {"constructions": constructions}
+        headers = {
+            "X-Internal-Token": self._token,
+            "X-Permission": "write",
+            "Content-Type": "application/json",
+        }
+        try:
+            if self._client is not None:
+                response = await self._client.post(url, json=body, headers=headers)
+            else:
+                async with httpx.AsyncClient() as http:
+                    response = await http.post(url, json=body, headers=headers)
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            raise ComprehendError(
+                f"kernel/author-grammar network error: {exc}"
+            ) from exc
+        if response.status_code != 200:
+            raise ComprehendError(
+                f"kernel/author-grammar returned {response.status_code} for bonfire={self._bonfire_id}",
+                status_code=response.status_code,
+            )
+        return True
 
 
 # ---------------------------------------------------------------------------
