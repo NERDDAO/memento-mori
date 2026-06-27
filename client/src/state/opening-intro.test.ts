@@ -30,3 +30,33 @@ test("degrade path: onName called exactly once", () => {
   mountOpeningIntro(() => count++);
   expect(count).toBe(1);
 });
+
+test("degrade path: overlay present but name input missing → onName('wanderer') fires", () => {
+  // Stub: getElementById returns a fake overlay whose querySelector returns
+  // null for the name input (simulating partial markup).
+  const fakeOverlay = {
+    querySelector: (sel: string) => {
+      if (sel === "#opening-name-input") return null;
+      // Return a minimal stub for the other selectors so they pass.
+      return {
+        innerHTML: "",
+        classList: { remove: () => {}, add: () => {} },
+        addEventListener: () => {},
+      };
+    },
+    classList: { remove: () => {}, add: () => {} },
+  };
+  (globalThis as unknown as Record<string, unknown>).document = {
+    getElementById: (_id: string) => fakeOverlay,
+  };
+
+  const calls: string[] = [];
+  mountOpeningIntro((name) => calls.push(name));
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toBe("wanderer");
+
+  // Restore the all-null stub for subsequent tests.
+  (globalThis as unknown as Record<string, unknown>).document = {
+    getElementById: (_id: string) => null,
+  };
+});

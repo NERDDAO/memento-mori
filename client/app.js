@@ -1886,43 +1886,35 @@ var OPENING_EPIGRAPH = `Remember that you must die.
 Enter, wanderer, if you dare.`;
 function mountOpeningIntro(onName) {
   const overlay = document.getElementById("opening-intro");
-  if (!overlay) {
+  const epigraphEl = overlay?.querySelector(".opening-epigraph");
+  const nameSection = overlay?.querySelector(".opening-name-section");
+  const nameInput = overlay?.querySelector("#opening-name-input");
+  const nameBtn = overlay?.querySelector("#opening-name-btn");
+  if (!overlay || !epigraphEl || !nameSection || !nameInput || !nameBtn) {
     onName("wanderer");
     return;
   }
-  const epigraphEl = overlay.querySelector(".opening-epigraph");
-  if (epigraphEl) {
-    epigraphEl.innerHTML = OPENING_EPIGRAPH.replace(/\n/g, "<br>");
-  }
+  epigraphEl.innerHTML = OPENING_EPIGRAPH.replace(/\n/g, "<br>");
   overlay.classList.remove("hidden");
-  const nameSection = overlay.querySelector(".opening-name-section");
-  const nameInput = overlay.querySelector("#opening-name-input");
-  const nameBtn = overlay.querySelector("#opening-name-btn");
   let called = false;
   function submit() {
     if (called)
       return;
     called = true;
-    const raw = nameInput?.value.trim() ?? "";
-    const name = raw.length > 0 ? raw : "wanderer";
+    const raw = nameInput.value.trim();
+    const name = (raw.length > 0 ? raw : "wanderer").slice(0, 30);
     overlay.classList.add("hidden");
     onName(name);
   }
   setTimeout(() => {
-    if (nameSection) {
-      nameSection.classList.remove("hidden");
-      nameInput?.focus();
-    }
+    nameSection.classList.remove("hidden");
+    nameInput.focus();
   }, 2400);
-  if (nameInput) {
-    nameInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter")
-        submit();
-    });
-  }
-  if (nameBtn) {
-    nameBtn.addEventListener("click", () => submit());
-  }
+  nameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter")
+      submit();
+  });
+  nameBtn.addEventListener("click", () => submit());
 }
 
 // src/boot/opening-shell.ts
