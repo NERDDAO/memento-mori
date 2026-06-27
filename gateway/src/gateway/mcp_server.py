@@ -1267,6 +1267,7 @@ def build_mcp_app(
     import os
 
     from gateway.cxn_tools import register_cxn_tools, register_mm_act
+    from gateway.look_tool import register_look_tool
     from gateway.world_identity import resolve_bonfire_id
 
     bonfire_id = resolve_bonfire_id()
@@ -1293,6 +1294,8 @@ def build_mcp_app(
         memory,
         bonfire_id=bonfire_id,
     )
+
+    register_look_tool(mcp, ws_hub, cxn_repo)
 
     # mm_act — free-text MCP tool (M2 Task 3).
     # Shares the same repo/mirror/memory as the Day-1 UUID tools; the
