@@ -1142,7 +1142,7 @@ class ProseLayer {
       const shown = segText.slice(0, visibleChars).trimEnd();
       if (shown === "")
         continue;
-      const color = seg.kind === "npc-name" || seg.kind === "npc-dialogue" ? theme.colors.npc : theme.colors.primary;
+      const color = seg.kind === "catch" ? theme.colors.accent : seg.kind === "npc-name" || seg.kind === "npc-dialogue" ? theme.colors.npc : theme.colors.primary;
       for (const line of wordWrap(shown, cols)) {
         lineColors.push({ line, color });
       }
@@ -1838,6 +1838,10 @@ function routeOpeningMessage(msg, s) {
       s.viewport.setContents(s.roomUuid(), things.filter((t) => t.uuid !== msg.npc_id && t.name !== msg.npc_name));
       break;
     }
+    case "cxn_fired":
+      s.prose.enqueue({ kind: "catch", text: `◇ caught: ${msg.cxn ?? ""}` });
+      s.redrawProse();
+      break;
     default:
       break;
   }

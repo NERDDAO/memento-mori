@@ -1,10 +1,10 @@
 // src/types/ws-messages.ts
 /** Discriminated union of all WebSocket message types from the server. */
 
-import type { StateUpdate } from './schema.generated';
+import type { StateUpdate } from "./schema.generated";
 
 export interface NarrativeMessage {
-  type: 'narrative';
+  type: "narrative";
   text?: string;
   npc?: string;
   npc_username?: string;
@@ -13,7 +13,7 @@ export interface NarrativeMessage {
 }
 
 export interface DeathFeedMessage {
-  type: 'death_feed';
+  type: "death_feed";
   player_name?: string;
   level?: number;
   location?: string;
@@ -21,25 +21,25 @@ export interface DeathFeedMessage {
 }
 
 export interface SceneArtMessage {
-  type: 'scene_art';
+  type: "scene_art";
   lines?: string[];
 }
 
 export interface EntityArtMessage {
-  type: 'entity_art';
+  type: "entity_art";
   entity_id?: string;
   lines?: string[];
 }
 
 export interface NpcStatusMessage {
-  type: 'npc_status';
+  type: "npc_status";
   npc?: string;
   npc_username?: string;
   text?: string;
 }
 
 export interface PhaseMessage {
-  type: 'phase';
+  type: "phase";
   phase: string;
   crew?: string;
   location?: string;
@@ -48,20 +48,20 @@ export interface PhaseMessage {
 }
 
 export interface StatusMessage {
-  type: 'status';
+  type: "status";
   tick?: number;
   chain?: boolean;
   activity?: string;
 }
 
 export interface PlayerJoinedMessage {
-  type: 'player_joined';
+  type: "player_joined";
   player_id: string;
   player_name: string;
 }
 
 export interface PlayerLeftMessage {
-  type: 'player_left';
+  type: "player_left";
   player_id: string;
   player_name: string;
 }
@@ -72,44 +72,44 @@ export interface PresencePlayer {
 }
 
 export interface PresenceMessage {
-  type: 'presence';
+  type: "presence";
   players?: PresencePlayer[];
 }
 
 export interface StateUpdateMessage {
-  type: 'state_update';
+  type: "state_update";
   state_update?: StateUpdate;
 }
 
 export interface RoomItemsChangedMessage {
-  type: 'room_items_changed';
+  type: "room_items_changed";
 }
 
 export interface CodexRefreshMessage {
-  type: 'codex_refresh';
+  type: "codex_refresh";
   entity_id?: string;
 }
 
 export interface NpcLeftMessage {
-  type: 'npc_left';
+  type: "npc_left";
   npc_name: string;
 }
 
 export interface NpcJoinedMessage {
-  type: 'npc_joined';
+  type: "npc_joined";
   npc_name: string;
   npc_id?: string;
 }
 
 export interface PositionUpdateMessage {
-  type: 'position_update';
+  type: "position_update";
   entity_id: string;
   x: number;
   y: number;
 }
 
 export interface EpisodeFeedMessage {
-  type: 'episode_feed';
+  type: "episode_feed";
   episode_uuid: string;
   agent_id: string;
   name: string;
@@ -119,12 +119,20 @@ export interface EpisodeFeedMessage {
 }
 
 export interface ToolEventMessage {
-  type: 'tool_event';
+  type: "tool_event";
   tool: string;
   npc?: string;
   summary: string;
   data?: Record<string, unknown>;
   location: string;
+}
+
+export interface CxnFiredMessage {
+  type: "cxn_fired";
+  cxn: string;
+  construct_id?: string;
+  actor_id?: string;
+  location?: string;
 }
 
 export type WsMessage =
@@ -145,4 +153,5 @@ export type WsMessage =
   | NpcJoinedMessage
   | PositionUpdateMessage
   | EpisodeFeedMessage
-  | ToolEventMessage;
+  | ToolEventMessage
+  | CxnFiredMessage;

@@ -6,27 +6,40 @@
 import { WS_URL } from "./session";
 
 export interface OpeningSurfaces {
-  prose: { enqueue: (seg: { kind: string; text: string; speaker?: string }) => void };
+  prose: {
+    enqueue: (seg: { kind: string; text: string; speaker?: string }) => void;
+  };
   redrawProse: () => void;
   viewport: {
-    setContents: (roomUuid: string, things: { uuid: string; name: string }[]) => void;
+    setContents: (
+      roomUuid: string,
+      things: { uuid: string; name: string }[],
+    ) => void;
     currentThings: () => { uuid: string; name: string }[];
   };
   roomUuid: () => string;
 }
 
-export function routeOpeningMessage(msg: Record<string, unknown>, s: OpeningSurfaces): void {
+export function routeOpeningMessage(
+  msg: Record<string, unknown>,
+  s: OpeningSurfaces,
+): void {
   switch (msg?.type) {
     case "tool_event":
       if (msg.tool === "mm_npc_response" && msg.npc) {
-        s.prose.enqueue({ kind: "npc-dialogue", text: (msg.summary as string) ?? "", speaker: msg.npc as string });
+        s.prose.enqueue({
+          kind: "npc-dialogue",
+          text: (msg.summary as string) ?? "",
+          speaker: msg.npc as string,
+        });
         s.redrawProse();
       }
       break;
     case "npc_joined": {
       if (!msg.npc_name) break;
       const things = s.viewport.currentThings();
-      if (things.some((t) => t.uuid === msg.npc_id || t.name === msg.npc_name)) break;
+      if (things.some((t) => t.uuid === msg.npc_id || t.name === msg.npc_name))
+        break;
       s.viewport.setContents(s.roomUuid(), [
         ...things,
         { uuid: (msg.npc_id as string) ?? "", name: msg.npc_name as string },
@@ -41,12 +54,22 @@ export function routeOpeningMessage(msg: Record<string, unknown>, s: OpeningSurf
       );
       break;
     }
+    case "cxn_fired":
+      s.prose.enqueue({
+        kind: "catch",
+        text: `◇ caught: ${(msg.cxn as string) ?? ""}`,
+      });
+      s.redrawProse();
+      break;
     default:
       break; // presence / player_* / unknown → ignored
   }
 }
 
-export function connectOpeningWs(playerId: string, onMessage: (msg: Record<string, unknown>) => void): WebSocket {
+export function connectOpeningWs(
+  playerId: string,
+  onMessage: (msg: Record<string, unknown>) => void,
+): WebSocket {
   const ws = new WebSocket(`${WS_URL}/${playerId}`);
   ws.onmessage = (event) => {
     try {

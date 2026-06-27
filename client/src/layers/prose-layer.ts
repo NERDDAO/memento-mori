@@ -5,7 +5,15 @@ import { theme } from "../renderer/theme";
 
 export type Segment = {
   text: string;
-  kind: "epigraph" | "location" | "description" | "narration" | "prompt" | "npc-name" | "npc-dialogue";
+  kind:
+    | "epigraph"
+    | "location"
+    | "description"
+    | "narration"
+    | "prompt"
+    | "npc-name"
+    | "npc-dialogue"
+    | "catch";
   speaker?: string;
 };
 
@@ -52,7 +60,7 @@ export class ProseLayer implements Layer {
   private revealed = 0;
 
   private get fullStream(): string {
-    return this.segments.map(s => s.text + "\n\n").join("");
+    return this.segments.map((s) => s.text + "\n\n").join("");
   }
 
   enqueue(seg: Segment): void {
@@ -77,15 +85,20 @@ export class ProseLayer implements Layer {
     let consumed = 0;
     for (const seg of this.segments) {
       const segText = seg.text + "\n\n";
-      const visibleChars = Math.max(0, Math.min(segText.length, this.revealed - consumed));
+      const visibleChars = Math.max(
+        0,
+        Math.min(segText.length, this.revealed - consumed),
+      );
       consumed += segText.length;
       if (visibleChars === 0) continue;
       const shown = segText.slice(0, visibleChars).trimEnd();
       if (shown === "") continue;
       const color =
-        seg.kind === "npc-name" || seg.kind === "npc-dialogue"
-          ? theme.colors.npc
-          : theme.colors.primary;
+        seg.kind === "catch"
+          ? theme.colors.accent
+          : seg.kind === "npc-name" || seg.kind === "npc-dialogue"
+            ? theme.colors.npc
+            : theme.colors.primary;
       for (const line of wordWrap(shown, cols)) {
         lineColors.push({ line, color });
       }
@@ -94,7 +107,8 @@ export class ProseLayer implements Layer {
     const cells: ReturnType<typeof textRow>[] = [];
     const padCount = rows - visible.length;
     for (let i = 0; i < padCount; i++) cells.push(emptyRow(cols));
-    for (const { line, color } of visible) cells.push(textRow(line, color, cols));
+    for (const { line, color } of visible)
+      cells.push(textRow(line, color, cols));
     return { cells };
   }
 }
