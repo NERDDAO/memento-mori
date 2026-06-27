@@ -215,6 +215,64 @@ async def test_look_drives_player_turn_and_broadcasts(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_look_narration_uses_fallback_name_when_unresolvable(monkeypatch):
+    """Test that mm_npc_response gets non-empty npc field when _player_name returns ""."""
+    from gateway.app import app
+    import gateway.app as gw_app
+
+    # stub agent-runtime /turn with a response that triggers narration
+    async def _turn(request):
+        return JSONResponse(
+            {
+                "response_text": "A shape stirs.",
+                "should_respond": True,
+                "fired_cxns": [],
+            }
+        )
+
+    ar = httpx.AsyncClient(
+        transport=httpx.ASGITransport(
+            app=Starlette(
+                routes=[Route("/v1/scenes/{loc}/turn", _turn, methods=["POST"])]
+            )
+        ),
+        base_url="http://ar",
+    )
+    # Create an empty cxn_repo (missing the player), so _player_name returns ""
+    repo = InMemoryStateRepository()
+    app.state.cxn_repo = repo
+    app.state.agent_runtime_client = ar
+    app.state.bonfire_id = "bf-1"
+
+    class _Hub:
+        def __init__(self):
+            self.b = []
+
+        async def set_location(self, pid, name):
+            pass
+
+        async def broadcast_to_location(self, loc, msg):
+            self.b.append((loc, msg))
+
+    hub = _Hub()
+    monkeypatch.setattr(gw_app, "ws_hub", hub)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        # Call look with a player_id that does NOT exist in cxn_repo
+        resp = await c.post("/api/opening/look", json={"player_id": "missing-player"})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    # Extract the mm_npc_response broadcast
+    narr = next((m for _, m in hub.b if m.get("tool") == "mm_npc_response"), None)
+    assert narr is not None, "Expected mm_npc_response broadcast"
+    # The npc field should be the fallback "Traveler", not empty
+    assert narr["npc"] == "Traveler", f"Expected npc='Traveler', got '{narr['npc']}'"
+    assert narr["summary"] == "A shape stirs."
+
+
+@pytest.mark.asyncio
 async def test_look_turn_failure_returns_benign(monkeypatch):
     from gateway.app import app
     import gateway.app as gw_app

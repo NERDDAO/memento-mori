@@ -426,7 +426,7 @@ async def look_opening(req: LookRequest, request: Request) -> dict:
                 )
             response_text = turn.get("response_text", "")
             if turn.get("should_respond", True) and response_text:
-                player_name = await _player_name(state, req.player_id)
+                player_name = (await _player_name(state, req.player_id)) or "Traveler"
                 await ws_hub.broadcast_to_location(
                     location_name,
                     {
